@@ -8,6 +8,7 @@ utilize a backend service (either an API client or a local service)
 made available through the MCP application context.
 """
 
+import asyncio # Needed for asyncio.iscoroutinefunction
 import logging
 from typing import Optional, List, Dict, Any
 
@@ -20,7 +21,9 @@ from lean_explore.shared.models.api import (
     APISearchResultItem,
     APICitationsResponse
 )
-# from lean_explore import defaults # defaults import seems unused
+from lean_explore.local.service import Service as LocalService # For type checking
+from lean_explore.api.client import Client as APIClient # For type checking
+
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +46,6 @@ async def _get_backend_from_context(ctx: MCPContext) -> BackendServiceType:
     backend = app_ctx.backend_service
     if not backend:
         logger.error("MCP Tool Error: Backend service is not available in lifespan_context.")
-        # FastMCP typically converts Python exceptions into JSON-RPC error responses.
         raise RuntimeError("Backend service not configured or available for MCP tool.")
     return backend
 
@@ -60,9 +62,10 @@ def _prepare_mcp_result_item(backend_item: APISearchResultItem) -> APISearchResu
     Returns:
         A new APISearchResultItem instance suitable for MCP responses.
     """
+    # Create a new instance or use .model_copy(update=...) for Pydantic v2
     return APISearchResultItem(
         id=backend_item.id,
-        primary_declaration=backend_item.primary_declaration,
+        primary_declaration=backend_item.primary_declaration.model_copy() if backend_item.primary_declaration else None,
         source_file=backend_item.source_file,
         range_start_line=backend_item.range_start_line,
         statement_text=backend_item.statement_text,
@@ -106,17 +109,30 @@ async def search(
         f"MCP Tool 'search' called with query: '{query}', "
         f"packages: {package_filters}, tool_limit: {limit}"
     )
-    
+
     if not hasattr(backend, 'search'):
         logger.error("Backend service does not have a 'search' method.")
+        # This should ideally return a structured error for MCP if possible.
+        # For now, FastMCP will convert this RuntimeError.
         raise RuntimeError("Search functionality not available on configured backend.")
 
-    tool_limit = max(1, limit)
+    tool_limit = max(1, limit) # Ensure limit is at least 1 for slicing
+    api_response_pydantic: Optional[APISearchResponse]
 
-    api_response_pydantic: Optional[APISearchResponse] = await backend.search(
-        query=query,
-        package_filters=package_filters
-    )
+    # Conditionally await based on the backend's search method type
+    if asyncio.iscoroutinefunction(backend.search):
+        api_response_pydantic = await backend.search(
+            query=query,
+            package_filters=package_filters
+            # The backend.search method uses its own internal default for limit
+            # if None is passed, or the passed limit.
+            # The MCP tool will truncate the results later using tool_limit.
+        )
+    else:
+        api_response_pydantic = backend.search(
+            query=query,
+            package_filters=package_filters
+        )
 
     if not api_response_pydantic:
         logger.warning("Backend search returned None, responding with empty results.")
@@ -127,21 +143,20 @@ async def search(
         return empty_response.model_dump(exclude_none=True)
 
     actual_backend_results = api_response_pydantic.results
-    
-    # Apply this MCP tool's specific limit and prepare items for MCP response
+
     mcp_results_list = []
-    for backend_item in actual_backend_results[:tool_limit]:
+    for backend_item in actual_backend_results[:tool_limit]: # Apply MCP tool's limit
         mcp_results_list.append(_prepare_mcp_result_item(backend_item))
-    
+
     final_mcp_response = APISearchResponse(
         query=api_response_pydantic.query,
         packages_applied=api_response_pydantic.packages_applied,
         results=mcp_results_list,
-        count=len(mcp_results_list),
+        count=len(mcp_results_list), # Count is after this tool's truncation
         total_candidates_considered=api_response_pydantic.total_candidates_considered,
         processing_time_ms=api_response_pydantic.processing_time_ms
     )
-    
+
     return final_mcp_response.model_dump(exclude_none=True)
 
 
@@ -167,9 +182,13 @@ async def get_by_id(
     """
     backend = await _get_backend_from_context(ctx)
     logger.info(f"MCP Tool 'get_by_id' called for group_id: {group_id}")
-    
-    backend_item: Optional[APISearchResultItem] = await backend.get_by_id(group_id=group_id)
-    
+
+    backend_item: Optional[APISearchResultItem]
+    if asyncio.iscoroutinefunction(backend.get_by_id):
+        backend_item = await backend.get_by_id(group_id=group_id)
+    else:
+        backend_item = backend.get_by_id(group_id=group_id)
+
     if backend_item:
         mcp_item = _prepare_mcp_result_item(backend_item)
         return mcp_item.model_dump(exclude_none=True)
@@ -200,18 +219,22 @@ async def get_dependencies(
     """
     backend = await _get_backend_from_context(ctx)
     logger.info(f"MCP Tool 'get_dependencies' called for group_id: {group_id}")
-    
-    backend_response: Optional[APICitationsResponse] = await backend.get_dependencies(group_id=group_id)
-    
+
+    backend_response: Optional[APICitationsResponse]
+    if asyncio.iscoroutinefunction(backend.get_dependencies):
+        backend_response = await backend.get_dependencies(group_id=group_id)
+    else:
+        backend_response = backend.get_dependencies(group_id=group_id)
+
     if backend_response:
         mcp_citations_list = []
         for backend_item in backend_response.citations:
             mcp_citations_list.append(_prepare_mcp_result_item(backend_item))
-        
+
         final_mcp_response = APICitationsResponse(
             source_group_id=backend_response.source_group_id,
             citations=mcp_citations_list,
-            count=len(mcp_citations_list) # Recalculate count based on the processed list
+            count=len(mcp_citations_list)
         )
         return final_mcp_response.model_dump(exclude_none=True)
     return None

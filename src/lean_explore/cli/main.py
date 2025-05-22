@@ -3,7 +3,7 @@
 """Command-Line Interface for Lean Explore.
 
 Provides commands to configure the CLI, search for Lean statement groups
-via the remote API, interact with AI agents, and other utilities.
+via the remote API, interact with AI agents, manage local data, and other utilities.
 """
 
 import asyncio
@@ -23,16 +23,10 @@ import httpx
 from lean_explore.api.client import Client as APIClient
 from lean_explore.shared.models.api import APISearchResponse, APISearchResultItem, APICitationsResponse
 from lean_explore.cli import config_utils
+from lean_explore.cli import data_commands # For data management subcommands
 from lean_explore import defaults
 # Import the specific command function and its async wrapper from agent.py
 from .agent import agent_chat_command, typer_async as agent_typer_async
-
-# --- Async Wrapper for Typer Commands ---
-# This local one might conflict if agent_typer_async is also imported with the same name.
-# It's better to use the one from agent.py or ensure they are identical.
-# For clarity, if agent_chat_command is already wrapped, we might not need this here for it.
-# However, agent_chat_command is decorated with @typer_async in agent.py itself.
-# So, we just need to import agent_chat_command.
 
 # Initialize Typer app and Rich console
 app = typer.Typer(
@@ -46,6 +40,13 @@ app.add_typer(configure_app)
 
 mcp_app = typer.Typer(name="mcp", help="Manage and run the Model Context Protocol (MCP) server.")
 app.add_typer(mcp_app)
+
+# Add the data_commands.app as a subcommand group named "data"
+app.add_typer(
+    data_commands.app,
+    name="data",
+    help="Manage local data toolchains (e.g., download, list, select)."
+)
 
 # Register the agent_chat_command directly on the main app as "chat"
 # The agent_chat_command is already decorated with @typer_async in agent.py
@@ -233,7 +234,7 @@ def _display_search_results(response: APISearchResponse, display_limit: int = 5)
          console.print(f"...and {response.count - len(response.results)} more results available on server.")
 
 @app.command("search")
-@agent_typer_async # Assuming agent_typer_async is the one from agent.py, or define/use a local one
+@agent_typer_async
 async def search_command(
     query_string: str = typer.Argument(..., help="The search query string."),
     package: Optional[List[str]] = typer.Option(None, "--package", "-p", help="Filter by package name(s). Can be used multiple times."),
@@ -270,7 +271,7 @@ async def search_command(
 
 
 @app.command("get")
-@agent_typer_async # Use appropriate async wrapper
+@agent_typer_async
 async def get_by_id_command(
     group_id: int = typer.Argument(..., help="The ID of the statement group to retrieve.")
 ):
@@ -327,7 +328,7 @@ async def get_by_id_command(
 
 
 @app.command("dependencies")
-@agent_typer_async # Use appropriate async wrapper
+@agent_typer_async
 async def get_dependencies_command(
     group_id: int = typer.Argument(..., help="The ID of the statement group to get dependencies for.")
 ):
@@ -383,19 +384,8 @@ async def get_dependencies_command(
         console.print(f"[bold red]An unexpected error occurred: {e}[/bold red]")
         raise typer.Exit(code=1)
 
-
-@app.command("download-db")
-def download_db_command():
-    """
-    Download or update local database and search index files.
-    (Placeholder - Not yet implemented)
-    """
-    data_dir = defaults.LEAN_EXPLORE_USER_DATA_DIR
-    console.print(
-        "[bold yellow]Local data download functionality is not yet implemented.[/bold yellow]\n"
-        f"When implemented, data files will be expected in: {data_dir}"
-    )
-
+# The placeholder download-db command is removed as its functionality
+# will be covered by the `leanexplore data fetch` command.
 
 @mcp_app.command("serve")
 def mcp_serve_command(
@@ -405,7 +395,7 @@ def mcp_serve_command(
         "-b",
         help="Backend to use for the MCP server: 'api' or 'local'. Default is 'api'.",
         case_sensitive=False,
-        show_choices=True
+        show_choices=True # Typer will show available choices if backend is misspelled etc.
     ),
     api_key_override: Optional[str] = typer.Option(
         None,
@@ -421,13 +411,6 @@ def mcp_serve_command(
     """
     command_parts = [sys.executable, "-m", "lean_explore.mcp.server", "--backend", backend.lower()]
 
-    # Determine log level for MCP server based on a global debug flag or a specific option
-    # For now, let's assume it defaults to INFO in mcp/server.py unless overridden
-    # Here we can add logic to pass --log-level to mcp/server.py if desired
-    # e.g. if leanexplore itself has a global --debug, mcp server could also be debug.
-    # This is already handled in agent.py when it launches the server for the chat.
-    # For standalone `leanexplore mcp serve`, server.py's default will be used.
-
     if backend.lower() == "api":
         effective_lean_explore_api_key = api_key_override or config_utils.load_api_key()
 
@@ -440,7 +423,21 @@ def mcp_serve_command(
             raise typer.Abort()
         command_parts.extend(["--api-key", effective_lean_explore_api_key])
     elif backend.lower() == "local":
-        console.print(f"[yellow]Using 'local' backend. Ensure data files are present in {defaults.LEAN_EXPLORE_USER_DATA_DIR}[/yellow]")
+        # When using local backend, check if data exists and guide user if not.
+        # This check ideally uses the paths from defaults.py that now point to the versioned dir.
+        # For now, this is a general message.
+        expected_db_path = defaults.DEFAULT_DB_PATH # This now points to the versioned dir
+        if not expected_db_path.exists():
+            console.print(
+                f"[bold yellow]Warning: Local data file {expected_db_path.name} not found at expected location: {expected_db_path.parent}[/bold yellow]\n"
+                f"Please run `leanexplore data fetch` to download the necessary data toolchain."
+            )
+            # Depending on strictness, you might raise typer.Abort() here
+            # or let the MCP server try and fail if data is truly missing.
+            # For now, let the server attempt to start.
+        else:
+            console.print(f"[yellow]Using 'local' backend. Data expected at {expected_db_path.parent}[/yellow]")
+
     else:
         console.print(f"[bold red]Invalid backend: '{backend}'. Must be 'api' or 'local'.[/bold red]")
         raise typer.Abort()
@@ -449,9 +446,10 @@ def mcp_serve_command(
     console.print("[dim]The server will now take over stdio. To stop it, the connected MCP client should disconnect, or you may need to manually terminate this process (e.g., Ctrl+C if no client is managing it).[/dim]")
 
     try:
-        exit_code = subprocess.call(command_parts)
-        if exit_code != 0:
-            console.print(f"[bold red]MCP server exited with code: {exit_code}[/bold red]")
+        # Using subprocess.run for better control and error handling if needed in future
+        process_result = subprocess.run(command_parts, check=False) # check=False to handle non-zero exit codes manually
+        if process_result.returncode != 0:
+            console.print(f"[bold red]MCP server exited with code: {process_result.returncode}[/bold red]")
     except FileNotFoundError:
         console.print(f"[bold red]Error: Could not find Python interpreter '{sys.executable}' or the MCP server module 'lean_explore.mcp.server'.[/bold red]")
         console.print("Please ensure the package is installed correctly and `python -m lean_explore.mcp.server` is runnable.")

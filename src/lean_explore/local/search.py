@@ -1,4 +1,4 @@
-# File: src/lean_explore/search.py
+# src/lean_explore/search.py
 
 """Performs semantic search and ranked retrieval of StatementGroups.
 
@@ -72,10 +72,14 @@ logger = logging.getLogger(__name__)
 NEWLINE = os.linesep
 EPSILON = 1e-9
 # PROJECT_ROOT might be less relevant for asset paths if defaults.py provides absolute paths
-PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent 
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-# Performance Logging Constants (assuming these are for a specific deployment environment)
-PERFORMANCE_LOG_DIR = "/var/log/lean_explore"
+# --- Performance Logging Path Setup ---
+# Logs will be stored in a user-writable directory, e.g., ~/.lean_explore/logs/
+# defaults.LEAN_EXPLORE_USER_DATA_DIR is ~/.lean_explore/data/
+# So, its parent is ~/.lean_explore/
+_USER_LOGS_BASE_DIR = defaults.LEAN_EXPLORE_USER_DATA_DIR.parent / "logs"
+PERFORMANCE_LOG_DIR = str(_USER_LOGS_BASE_DIR)
 PERFORMANCE_LOG_FILENAME = "search_stats.jsonl"
 PERFORMANCE_LOG_PATH = os.path.join(PERFORMANCE_LOG_DIR, PERFORMANCE_LOG_FILENAME)
 LOCK_PATH = os.path.join(PERFORMANCE_LOG_DIR, f"{PERFORMANCE_LOG_FILENAME}.lock")
@@ -141,9 +145,11 @@ def log_search_event_to_json(status: str, duration_ms: float, results_count: int
     try:
         os.makedirs(PERFORMANCE_LOG_DIR, exist_ok=True)
     except OSError as e:
+        # This error is critical for logging but should not stop the main search flow if possible.
+        # The fallback print helps retain info if file logging fails.
         logger.error(
             "Performance logging error: Could not create log directory %s: %s. Log entry: %s",
-            PERFORMANCE_LOG_DIR, e, log_entry, exc_info=True
+            PERFORMANCE_LOG_DIR, e, log_entry, exc_info=False # Keep exc_info False to avoid spamming user console
         )
         print(f"FALLBACK_PERF_LOG (DIR_ERROR): {json.dumps(log_entry)}", file=sys.stderr)
         return
@@ -154,15 +160,15 @@ def log_search_event_to_json(status: str, duration_ms: float, results_count: int
             with open(PERFORMANCE_LOG_PATH, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry) + "\n")
     except Timeout:
-        logger.error(
+        logger.warning( # Changed to warning as it's a logging issue, not a core failure
             "Performance logging error: Timeout acquiring lock for %s. Log entry lost: %s",
             LOCK_PATH, log_entry
         )
         print(f"FALLBACK_PERF_LOG (LOCK_TIMEOUT): {json.dumps(log_entry)}", file=sys.stderr)
     except Exception as e:
-        logger.error(
-            "Performance logging error: Failed to write to %s: %s. Log entry lost: %s",
-            PERFORMANCE_LOG_PATH, e, log_entry, exc_info=True
+        logger.error( # Keep as error for unexpected write issues
+            "Performance logging error: Failed to write to %s: %s. Log entry: %s",
+            PERFORMANCE_LOG_PATH, e, log_entry, exc_info=False
         )
         print(f"FALLBACK_PERF_LOG (WRITE_ERROR): {json.dumps(log_entry)}", file=sys.stderr)
 
@@ -202,8 +208,8 @@ def load_faiss_assets(
             faiss_index_obj.metric_type,
         )
     except Exception as e:
-        logger.error("Failed to load FAISS index: %s", e, exc_info=True)
-        return None, id_map_list
+        logger.error("Failed to load FAISS index from %s: %s", index_path, e, exc_info=True)
+        return None, id_map_list # Return None for index if loading failed
 
     try:
         logger.info("Loading ID map from %s...", map_path)
@@ -213,11 +219,11 @@ def load_faiss_assets(
             logger.error(
                 "ID map file (%s) does not contain a valid JSON list.", map_path
             )
-            return faiss_index_obj, None
+            return faiss_index_obj, None # Return None for map if parsing failed
         logger.info("Loaded ID map with %d entries.", len(id_map_list))
     except Exception as e:
-        logger.error("Failed to load or parse ID map file: %s", e, exc_info=True)
-        return faiss_index_obj, None
+        logger.error("Failed to load or parse ID map file %s: %s", map_path, e, exc_info=True)
+        return faiss_index_obj, None # Return None for map if loading/parsing failed
 
     if (
         faiss_index_obj is not None
@@ -250,8 +256,8 @@ def load_embedding_model(model_name: str) -> Optional[SentenceTransformer]:
             model.max_seq_length,
         )
         return model
-    except Exception as e:
-        logger.error("Failed to load model '%s': %s", model_name, e, exc_info=True)
+    except Exception as e: # Broad exception for any model loading issue
+        logger.error("Failed to load sentence transformer model '%s': %s", model_name, e, exc_info=True)
         return None
 
 # --- Main Search Function ---
@@ -267,7 +273,6 @@ def perform_search(
     text_relevance_weight: float,
     name_match_weight: float,
     selected_packages: Optional[List[str]] = None,
-    # New parameters to replace APP_CONFIG access:
     semantic_similarity_threshold: float = defaults.DEFAULT_SEMANTIC_SIMILARITY_THRESHOLD,
     faiss_nprobe: int = defaults.DEFAULT_FAISS_NPROBE
 ) -> List[Tuple[StatementGroup, Dict[str, float]]]:
@@ -322,14 +327,14 @@ def perform_search(
 
     try:
         logger.debug("Searching FAISS index for top %d text chunk neighbors...", faiss_k)
-        if hasattr(faiss_index, "nprobe") and isinstance(faiss_index.nprobe, int):
-            if faiss_nprobe > 0: 
+        if hasattr(faiss_index, "nprobe") and isinstance(faiss_index.nprobe, int): # Check if index is IVF
+            if faiss_nprobe > 0:
                 faiss_index.nprobe = faiss_nprobe
                 logger.debug(f"Set FAISS nprobe to: {faiss_index.nprobe}")
-            else:
+            else: # faiss_nprobe from config is invalid
                 logger.warning(
                     f"Configured faiss_nprobe is {faiss_nprobe}. Must be > 0. "
-                    "Using FAISS default or previously set nprobe."
+                    "Using FAISS default or previously set nprobe for this IVF index."
                 )
         distances, indices = faiss_index.search(query_embedding_reshaped, faiss_k)
     except Exception as e:
@@ -341,7 +346,7 @@ def perform_search(
     sg_candidates_raw_similarity: Dict[int, float] = {}
     if indices.size > 0 and distances.size > 0:
         for i, faiss_internal_idx in enumerate(indices[0]):
-            if faiss_internal_idx == -1:
+            if faiss_internal_idx == -1: # FAISS can return -1 for no neighbor
                 continue
             try:
                 text_chunk_id_str = text_chunk_id_map[faiss_internal_idx]
@@ -351,19 +356,22 @@ def perform_search(
                 if faiss_index.metric_type == faiss.METRIC_L2:
                     similarity_score = 1.0 / (1.0 + np.sqrt(max(0, raw_faiss_score)))
                 elif faiss_index.metric_type == faiss.METRIC_INNER_PRODUCT:
+                    # Assuming normalized vectors, inner product is cosine similarity
                     similarity_score = raw_faiss_score
-                else:
+                else: # Default or unknown metric, treat score as distance-like
                     similarity_score = 1.0 / (1.0 + max(0, raw_faiss_score))
                     logger.warning(
-                        "Unhandled FAISS metric type %d. Using 1/(1+score) for similarity.",
+                        "Unhandled FAISS metric type %d for text chunk. Using 1/(1+score) for similarity.",
                         faiss_index.metric_type
                     )
-                similarity_score = max(0.0, min(1.0, similarity_score))
+                similarity_score = max(0.0, min(1.0, similarity_score)) # Clamp to [0,1]
 
                 parts = text_chunk_id_str.split("_")
                 if len(parts) >= 2 and parts[0] == "sg":
                     try:
                         sg_id = int(parts[1])
+                        # If multiple chunks from the same StatementGroup are retrieved,
+                        # keep the one with the highest similarity to the query.
                         if sg_id not in sg_candidates_raw_similarity or \
                            similarity_score > sg_candidates_raw_similarity[sg_id]:
                             sg_candidates_raw_similarity[sg_id] = similarity_score
@@ -372,12 +380,19 @@ def perform_search(
                 else:
                     logger.warning("Malformed text_chunk_id format: %s", text_chunk_id_str)
             except IndexError:
-                logger.warning("FAISS index %d out of bounds for ID map (size %d).", faiss_internal_idx, len(text_chunk_id_map))
-            except Exception as e:
-                logger.warning("Error processing FAISS result for index %d: %s", faiss_internal_idx, e)
+                logger.warning(
+                    "FAISS internal index %d out of bounds for ID map (size %d). Possible data inconsistency.",
+                    faiss_internal_idx, len(text_chunk_id_map)
+                )
+            except Exception as e: # Catch any other unexpected errors during result processing
+                logger.warning(
+                    "Error processing FAISS result for internal index %d (chunk_id '%s'): %s",
+                    faiss_internal_idx, text_chunk_id_str if 'text_chunk_id_str' in locals() else "N/A", e
+                )
+
 
     if not sg_candidates_raw_similarity:
-        logger.info("No valid StatementGroup candidates found after FAISS search.")
+        logger.info("No valid StatementGroup candidates found after FAISS search and parsing.")
         duration_ms = (time.time() - overall_start_time) * 1000
         log_search_event_to_json(status="NO_FAISS_CANDIDATES", duration_ms=duration_ms, results_count=0)
         return []
@@ -394,9 +409,10 @@ def perform_search(
             if sim >= semantic_similarity_threshold
         }
         logger.info(
-            "Post-thresholding: %d of %d candidates remaining.",
+            "Post-thresholding: %d of %d candidates remaining (threshold: %.3f).",
             len(sg_candidates_raw_similarity),
-            initial_candidate_count
+            initial_candidate_count,
+            semantic_similarity_threshold
         )
 
         if not sg_candidates_raw_similarity:
@@ -411,74 +427,84 @@ def perform_search(
     candidate_sg_ids = list(sg_candidates_raw_similarity.keys())
     sg_objects_map: Dict[int, StatementGroup] = {}
     try:
-        logger.debug("Fetching StatementGroup details for %d IDs...", len(candidate_sg_ids))
+        logger.debug("Fetching StatementGroup details from DB for %d IDs...", len(candidate_sg_ids))
         stmt = select(StatementGroup).where(StatementGroup.id.in_(candidate_sg_ids))
 
         if selected_packages:
             logger.info("Filtering search by packages: %s", selected_packages)
             package_filters_sqla = []
+            # Assuming package names in selected_packages are like "Mathlib", "Std"
+            # And source_file in DB is like "Mathlib/CategoryTheory/Adjunction/Basic.lean"
             for pkg_name in selected_packages:
+                # Ensure exact package match at the start of the file path component
                 package_filters_sqla.append(StatementGroup.source_file.startswith(pkg_name + "/"))
-            
+
             if package_filters_sqla:
                 stmt = stmt.where(or_(*package_filters_sqla))
 
+        # Eagerly load primary_declaration to avoid N+1 queries later if accessing lean_name
         stmt = stmt.options(joinedload(StatementGroup.primary_declaration))
         db_results = session.execute(stmt).scalars().unique().all()
         for sg_obj in db_results:
             sg_objects_map[sg_obj.id] = sg_obj
 
-        logger.debug("Fetched details for %d StatementGroups from DB.", len(sg_objects_map))
-        if len(sg_objects_map) < len(candidate_sg_ids) and not selected_packages:
-             missing_ids = set(candidate_sg_ids) - set(sg_objects_map.keys())
-             logger.warning(
-                 "Could not find SG details in DB for %d IDs (e.g., %s).",
-                 len(missing_ids), list(missing_ids)[:5]
-             )
-        elif len(sg_objects_map) < len(candidate_sg_ids) and selected_packages:
+        logger.debug("Fetched details for %d StatementGroups from DB that matched filters.", len(sg_objects_map))
+        # Log if some IDs from FAISS (post-threshold and package filter if applied) were not found in DB
+        # This check is more informative if done *after* any package filtering logic in the query
+        final_candidate_ids_after_db_match = set(sg_objects_map.keys())
+        original_faiss_candidate_ids = set(candidate_sg_ids)
+
+        if len(final_candidate_ids_after_db_match) < len(original_faiss_candidate_ids):
+             missing_from_db_or_filtered_out = original_faiss_candidate_ids - final_candidate_ids_after_db_match
              logger.info(
-                 "%d potential candidates excluded by package filter or not found in DB.",
-                 len(candidate_sg_ids) - len(sg_objects_map)
+                 "%d candidates from FAISS (post-threshold) were not found in DB "
+                 "or excluded by package filters: (e.g., %s).",
+                 len(missing_from_db_or_filtered_out),
+                 list(missing_from_db_or_filtered_out)[:5]
              )
-             
+
     except SQLAlchemyError as e:
         logger.error("Database query for StatementGroup details failed: %s", e, exc_info=True)
         duration_ms = (time.time() - overall_start_time) * 1000
         log_search_event_to_json(status="DB_FETCH_ERROR", duration_ms=duration_ms, results_count=0, error_type=type(e).__name__)
-        raise
+        raise # Re-raise to be handled by the caller
 
     results_with_scores: List[Tuple[StatementGroup, Dict[str, float]]] = []
-    candidate_semantic_similarities: List[float] = []
-    processed_candidates_data: List[Dict[str, Any]] = []
+    candidate_semantic_similarities: List[float] = [] # For normalization range
+    processed_candidates_data: List[Dict[str, Any]] = [] # Temp store for data to be scored
 
-    for sg_id in candidate_sg_ids:
-        if sg_id in sg_objects_map:
-            sg_obj = sg_objects_map[sg_id]
-            raw_sem_sim = sg_candidates_raw_similarity[sg_id]
-            raw_name_match = 0.0
-            if sg_obj.primary_declaration and sg_obj.primary_declaration.lean_name:
-                try:
-                    raw_name_match = calculate_name_match_score(
-                        query_string, sg_obj.primary_declaration.lean_name
-                    )
-                except Exception as e_nm:
-                    logger.warning("Error calculating name match score for SG %d: %s", sg_id, e_nm)
-            else:
-                logger.debug("Missing primary declaration or Lean name for SG %d, name score is 0.", sg_id)
+    # Iterate over IDs that were confirmed to exist in the DB and match filters
+    for sg_id in final_candidate_ids_after_db_match: # Use keys from sg_objects_map
+        sg_obj = sg_objects_map[sg_id] # We know this exists
+        raw_sem_sim = sg_candidates_raw_similarity[sg_id] # This ID came from FAISS initially
+        raw_name_match = 0.0
+        if sg_obj.primary_declaration and sg_obj.primary_declaration.lean_name:
+            try:
+                raw_name_match = calculate_name_match_score(
+                    query_string, sg_obj.primary_declaration.lean_name
+                )
+            except Exception as e_nm: # Catch any error from name matching
+                logger.warning(
+                    "Error calculating name match score for SG %d ('%s'): %s",
+                    sg_id, sg_obj.primary_declaration.lean_name, e_nm
+                )
+        else:
+            logger.debug("Missing primary declaration or Lean name for SG ID %d, name score is 0.", sg_id)
 
-            processed_candidates_data.append({
-                "sg_obj": sg_obj,
-                "raw_sem_sim": raw_sem_sim,
-                "raw_name_match": raw_name_match,
-            })
-            candidate_semantic_similarities.append(raw_sem_sim)
+        processed_candidates_data.append({
+            "sg_obj": sg_obj,
+            "raw_sem_sim": raw_sem_sim,
+            "raw_name_match": raw_name_match,
+        })
+        candidate_semantic_similarities.append(raw_sem_sim)
 
     if not processed_candidates_data:
-        logger.info("No candidates remaining after matching with DB data or other processing.")
+        logger.info("No candidates remaining after matching with DB data or other processing steps.")
         duration_ms = (time.time() - overall_start_time) * 1000
         log_search_event_to_json(status="NO_CANDIDATES_POST_PROCESSING", duration_ms=duration_ms, results_count=0)
         return []
 
+    # Normalize semantic similarity scores for the retrieved candidates
     min_sem_sim = min(candidate_semantic_similarities) if candidate_semantic_similarities else 0.0
     max_sem_sim = max(candidate_semantic_similarities) if candidate_semantic_similarities else 0.0
     range_sem_sim = max_sem_sim - min_sem_sim
@@ -489,14 +515,19 @@ def perform_search(
         current_raw_sem_sim = candidate_data["raw_sem_sim"]
         current_raw_name_match = candidate_data["raw_name_match"]
 
-        norm_sem_sim = 0.5
+        # Normalize semantic similarity: scale to [0,1]
+        norm_sem_sim = 0.5 # Default if range is zero (e.g., only one candidate)
         if range_sem_sim > EPSILON:
             norm_sem_sim = (current_raw_sem_sim - min_sem_sim) / range_sem_sim
-        elif len(candidate_semantic_similarities) == 1:
-            norm_sem_sim = 1.0
+        elif len(candidate_semantic_similarities) == 1 and candidate_semantic_similarities[0] > 0: # Single candidate
+            norm_sem_sim = 1.0 # If only one candidate, its normalized score should be high if its raw score is non-zero.
+        elif len(candidate_semantic_similarities) == 0 : # Should not happen given previous check
+             norm_sem_sim = 0.0
+
 
         current_scaled_pagerank = sg_obj.scaled_pagerank_score if sg_obj.scaled_pagerank_score is not None else 0.0
 
+        # Combine scores using weights
         weighted_norm_similarity = text_relevance_weight * norm_sem_sim
         weighted_scaled_pagerank = pagerank_weight * current_scaled_pagerank
         weighted_name_match = name_match_weight * current_raw_name_match
@@ -510,20 +541,25 @@ def perform_search(
             "weighted_norm_similarity": weighted_norm_similarity,
             "weighted_scaled_pagerank": weighted_scaled_pagerank,
             "weighted_name_match_score": weighted_name_match,
-            "raw_similarity": current_raw_sem_sim,
+            "raw_similarity": current_raw_sem_sim, # Keep raw similarity for inspection
         }
         results_with_scores.append((sg_obj, score_dict))
-    
+
     results_with_scores.sort(key=lambda item: item[1]["final_score"], reverse=True)
 
     final_status = "SUCCESS"
     results_count = len(results_with_scores)
-    if not results_with_scores and processed_candidates_data:
-        final_status = "NO_RESULTS_FINAL_SCORED" 
+    if not results_with_scores and processed_candidates_data: # Had candidates, but scoring/sorting yielded none (unlikely)
+        final_status = "NO_RESULTS_FINAL_SCORED"
+    elif not results_with_scores and not processed_candidates_data: # No candidates from the start essentially
+        # This case should have been caught earlier, but as a safeguard for logging
+        if not candidate_sg_ids: final_status = "NO_FAISS_CANDIDATES"
+        elif not sg_candidates_raw_similarity : final_status = "NO_CANDIDATES_POST_THRESHOLD"
+
 
     duration_ms = (time.time() - overall_start_time) * 1000
     log_search_event_to_json(status=final_status, duration_ms=duration_ms, results_count=results_count)
-    
+
     return results_with_scores
 
 # --- Output Formatting ---
@@ -577,7 +613,7 @@ def print_results(results: List[Tuple[StatementGroup, Dict[str, float]]]) -> Non
         print(f"   Description: {desc_display_short.replace(NEWLINE, ' ')}")
 
         source_loc = sg_obj.source_file or "[No source file]"
-        if source_loc.startswith("Mathlib/"):
+        if source_loc.startswith("Mathlib/"): # Simplify Mathlib paths
             source_loc = source_loc[len("Mathlib/") :]
         print(f"   File: {source_loc}:{sg_obj.range_start_line}")
 
@@ -601,7 +637,7 @@ def parse_arguments() -> argparse.Namespace:
         "--limit",
         "-n",
         type=int,
-        default=None, 
+        default=None, # Will use DEFAULT_RESULTS_LIMIT from defaults if None
         help="Maximum number of final results to display. "
              "Overrides default if set.",
     )
@@ -609,8 +645,8 @@ def parse_arguments() -> argparse.Namespace:
         "--packages",
         metavar="PKG",
         type=str,
-        nargs="*",
-        default=None,
+        nargs="*", # Allows zero or more package names
+        default=None, # No filter if not provided
         help="Filter search results by specific package names (e.g., Mathlib Std). "
              "If not provided, searches all packages."
     )
@@ -622,28 +658,26 @@ def main():
     """Main execution function for the search script."""
     args = parse_arguments()
 
-    logger.info("Using default configurations for paths and parameters.")
-    
+    logger.info("Using default configurations for paths and parameters from lean_explore.defaults.")
+
+    # These now point to the versioned paths, e.g., .../toolchains/0.1.0/file.db
     db_url = defaults.DEFAULT_DB_URL
     embedding_model_name = defaults.DEFAULT_EMBEDDING_MODEL_NAME
-    resolved_idx_path = defaults.DEFAULT_FAISS_INDEX_PATH
-    resolved_map_path = defaults.DEFAULT_FAISS_MAP_PATH
-    
+    resolved_idx_path = str(defaults.DEFAULT_FAISS_INDEX_PATH.resolve())
+    resolved_map_path = str(defaults.DEFAULT_FAISS_MAP_PATH.resolve())
+
     faiss_k_cand = defaults.DEFAULT_FAISS_K
     pr_weight = defaults.DEFAULT_PAGERANK_WEIGHT
     sem_sim_weight = defaults.DEFAULT_TEXT_RELEVANCE_WEIGHT
     name_match_w = defaults.DEFAULT_NAME_MATCH_WEIGHT
     results_disp_limit = args.limit if args.limit is not None \
                          else defaults.DEFAULT_RESULTS_LIMIT
-    # semantic_similarity_threshold and faiss_nprobe are passed to perform_search 
-    # which now uses defaults from lean_explore.defaults internally or as default args.
-    # For logging consistency, we can log the default used by perform_search.
-    sem_sim_thresh_for_logging = defaults.DEFAULT_SEMANTIC_SIMILARITY_THRESHOLD
-    faiss_nprobe_for_logging = defaults.DEFAULT_FAISS_NPROBE
+    semantic_sim_thresh = defaults.DEFAULT_SEMANTIC_SIMILARITY_THRESHOLD
+    faiss_nprobe_val = defaults.DEFAULT_FAISS_NPROBE
 
 
-    db_url_display = f"...{db_url[-30:]}" if len(db_url) > 30 else db_url
-    logger.info("--- Starting Search ---")
+    db_url_display = f"...{str(defaults.DEFAULT_DB_PATH.resolve())[-30:]}" if len(str(defaults.DEFAULT_DB_PATH.resolve())) > 30 else str(defaults.DEFAULT_DB_PATH.resolve())
+    logger.info("--- Starting Search (Direct Script Execution) ---")
     logger.info("Query: '%s'", args.query)
     logger.info("Displaying Top: %d results", results_disp_limit)
     if args.packages:
@@ -651,36 +685,60 @@ def main():
     else:
         logger.info("No package filter specified, searching all packages.")
     logger.info("FAISS k (candidates): %d", faiss_k_cand)
-    logger.info("FAISS nprobe (from defaults): %d", faiss_nprobe_for_logging)
-    logger.info("Semantic Similarity Threshold (from defaults): %.3f", sem_sim_thresh_for_logging)
+    logger.info("FAISS nprobe (from defaults): %d", faiss_nprobe_val)
+    logger.info("Semantic Similarity Threshold (from defaults): %.3f", semantic_sim_thresh)
     logger.info(
         "Weights -> NormTextSim: %.2f, ScaledPR: %.2f, RawNameMatch: %.2f",
         sem_sim_weight, pr_weight, name_match_w
     )
     logger.info("Using FAISS index: %s", resolved_idx_path)
     logger.info("Using ID map: %s", resolved_map_path)
-    logger.info("Database URL: %s", db_url_display)
+    logger.info("Database path: %s", db_url_display) # Changed from URL for clarity with file paths
 
-    # Ensure data directory exists if a local file-based DB is used by default
-    if defaults.DEFAULT_DB_PATH.is_file() or not defaults.DEFAULT_DB_PATH.parent.exists():
-        try:
-            defaults.LEAN_EXPLORE_USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Ensured user data directory exists: {defaults.LEAN_EXPLORE_USER_DATA_DIR}")
-        except OSError as e:
-            logger.warning(f"Could not create user data directory {defaults.LEAN_EXPLORE_USER_DATA_DIR}: {e}")
+    # Ensure user data directory and toolchain directory exist for logs etc.
+    # The fetch command handles creation of the specific toolchain version dir.
+    # Here, we ensure the base log directory can be created by performance logger.
+    try:
+        _USER_LOGS_BASE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.warning(f"Could not create user log directory {_USER_LOGS_BASE_DIR}: {e}")
 
 
     engine = None
     try:
+        # Asset loading with improved error potential
         s_transformer_model = load_embedding_model(embedding_model_name)
         if s_transformer_model is None:
-            logger.error("Failed to load sentence transformer model. Exiting.")
+            # load_embedding_model already logs the error
+            logger.error("Sentence transformer model loading failed. Cannot proceed with search.")
             sys.exit(1)
 
-        faiss_idx, id_map = load_faiss_assets(str(resolved_idx_path), str(resolved_map_path))
+        faiss_idx, id_map = load_faiss_assets(resolved_idx_path, resolved_map_path)
         if faiss_idx is None or id_map is None:
-            logger.error("Failed to load FAISS assets. Exiting.")
+            # load_faiss_assets already logs details
+            logger.error(
+                "Failed to load critical FAISS assets (index or ID map).\n"
+                "Expected at:\n"
+                f"  Index path: {resolved_idx_path}\n"
+                f"  ID map path: {resolved_map_path}\n"
+                "Please ensure these files exist or run 'leanexplore data fetch' to download the data toolchain."
+            )
             sys.exit(1)
+
+        # Database connection
+        # Check for DB file existence before creating engine if it's a file-based SQLite DB
+        is_file_db = db_url.startswith("sqlite:///")
+        db_file_path = None
+        if is_file_db:
+            # Extract file path from sqlite:/// URL
+            db_file_path_str = db_url[len("sqlite///"):]
+            db_file_path = pathlib.Path(db_file_path_str)
+            if not db_file_path.exists():
+                logger.error(
+                    f"Database file not found at the expected location: {db_file_path}\n"
+                    "Please run 'leanexplore data fetch' to download the data toolchain."
+                )
+                sys.exit(1)
 
         engine = create_engine(db_url, echo=False)
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -697,27 +755,39 @@ def main():
                 text_relevance_weight=sem_sim_weight,
                 name_match_weight=name_match_w,
                 selected_packages=args.packages,
-                semantic_similarity_threshold=defaults.DEFAULT_SEMANTIC_SIMILARITY_THRESHOLD,
-                faiss_nprobe=defaults.DEFAULT_FAISS_NPROBE
+                semantic_similarity_threshold=semantic_sim_thresh, # from defaults
+                faiss_nprobe=faiss_nprobe_val # from defaults
             )
 
         print_results(ranked_results[:results_disp_limit])
 
-    except FileNotFoundError as e:
-        logger.error("Asset file not found: %s. Ensure paths in defaults.py are correct "
-                     "and files have been downloaded by the 'database manager'.", e)
+    except FileNotFoundError as e: # Should be less common now with explicit checks
+        logger.error(
+            f"A required file was not found: {e.filename}.\n"
+            "This could be an issue with configured paths or missing data.\n"
+            "If this relates to core data assets, please try running 'leanexplore data fetch'."
+        )
         sys.exit(1)
-    except ValueError as e:
-        logger.error("Configuration or data error: %s", e, exc_info=True)
+    except OperationalError as e_db:
+        is_file_db_op_err = defaults.DEFAULT_DB_URL.startswith("sqlite:///")
+        db_file_path_op_err = defaults.DEFAULT_DB_PATH
+        if is_file_db_op_err and (
+            "unable to open database file" in str(e_db).lower() or
+            (db_file_path_op_err and not db_file_path_op_err.exists()) # Redundant check if previous one passed
+        ):
+            logger.error(
+                f"Database connection failed: {e_db}\n"
+                f"The database file appears to be missing or inaccessible at: {str(db_file_path_op_err.resolve()) if db_file_path_op_err else 'Unknown Path'}\n"
+                "Please run 'leanexplore data fetch' to download or update the data toolchain."
+            )
+        else:
+            logger.error(f"Database connection/operational error: {e_db}", exc_info=True)
         sys.exit(1)
-    except OperationalError as e:
-        logger.error("Database connection failed for %s: %s", db_url, e)
+    except SQLAlchemyError as e_sqla: # Catch other SQLAlchemy errors
+        logger.error("A database error occurred during search: %s", e_sqla, exc_info=True)
         sys.exit(1)
-    except SQLAlchemyError as e:
-        logger.error("Database error during search: %s", e, exc_info=True)
-        sys.exit(1)
-    except Exception as e: 
-        logger.critical("An unexpected critical error occurred: %s", e, exc_info=True)
+    except Exception as e_general: # Catch-all for other unexpected critical errors
+        logger.critical("An unexpected critical error occurred during search: %s", e_general, exc_info=True)
         sys.exit(1)
     finally:
         if engine:
