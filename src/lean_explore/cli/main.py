@@ -56,7 +56,7 @@ app.command("chat", help="Interact with an AI agent using Lean Explore tools.")(
 console = Console()
 
 # Content width for panels.
-PANEL_CONTENT_WIDTH = 76
+PANEL_CONTENT_WIDTH = 80
 
 
 @configure_app.command("lean-key")

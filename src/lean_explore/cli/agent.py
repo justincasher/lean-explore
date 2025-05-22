@@ -17,6 +17,7 @@ from typing import Optional
 import logging
 import functools
 import pathlib
+import textwrap
 
 # Ensure 'openai-agents' is installed
 try:
@@ -27,6 +28,18 @@ except ImportError:
     print(
         "Fatal Error: The 'openai-agents' library or its expected exceptions are not installed/found. "
         "Please install 'openai-agents' correctly (e.g., 'pip install openai-agents')",
+        file=sys.stderr
+    )
+    raise typer.Exit(code=1)
+
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.text import Text
+except ImportError:
+    print(
+        "Fatal Error: The 'rich' library is not installed/found. "
+        "Please install 'rich' (e.g., 'pip install rich')",
         file=sys.stderr
     )
     raise typer.Exit(code=1)
@@ -93,6 +106,59 @@ agent_cli_app = typer.Typer(
 )
 
 logger = logging.getLogger(__name__)
+console = Console()
+CHAT_CONTENT_WIDTH = 76 # Consistent with main.py's PANEL_CONTENT_WIDTH
+
+
+def _format_chat_text_for_panel(text_content: str, width: int) -> str:
+    """Wraps text for chat display, padding lines to fill panel width.
+
+    This function processes text line by line, wraps content that exceeds
+    the specified width, and pads each resulting line with spaces to ensure
+    a uniform block appearance within a Rich Panel. Empty lines in the
+    input are preserved as padded blank lines.
+
+    Args:
+        text_content: The text content to wrap.
+        width: The target width for text wrapping and padding.
+
+    Returns:
+        A string with wrapped and padded text.
+    """
+    if not text_content.strip():
+        # For empty or whitespace-only input, provide a single padded blank line
+        return " " * width
+
+    input_lines = text_content.splitlines()
+    output_panel_lines = []
+
+    if not input_lines:
+        return " " * width # Should be caught by strip(), but safeguard
+
+    for line_text in input_lines:
+        if not line_text.strip(): # An intentionally blank line in the input
+            output_panel_lines.append(" " * width)
+        else:
+            wrapped_segments = textwrap.wrap(
+                line_text,
+                width=width,
+                replace_whitespace=True, # Collapse multiple spaces within line
+                drop_whitespace=True,    # Remove leading/trailing space from wrapped segments
+                break_long_words=True,   # Break words that exceed width
+                break_on_hyphens=True    # Allow breaking on hyphens
+            )
+            if not wrapped_segments:
+                # If wrapping a non-blank line results in nothing (e.g. only whitespace after processing)
+                output_panel_lines.append(" " * width)
+            else:
+                for segment in wrapped_segments:
+                    output_panel_lines.append(segment.ljust(width))
+    
+    if not output_panel_lines:
+        # Fallback if all processing led to no lines (e.g. input was "\n \n")
+        return " " * width
+        
+    return "\n".join(output_panel_lines)
 
 
 def _handle_server_connection_error(
@@ -108,45 +174,38 @@ def _handle_server_connection_error(
     is_timeout_error = "timed out" in error_str or "timeout" in error_str
 
     if is_timeout_error:
-        typer.echo(typer.style(
-            "Error: The Lean Explore server failed to start or respond promptly.",
-            fg=typer.colors.RED, bold=True
-        ), err=True)
+        console.print(Text.from_markup(
+            "[bold red]Error: The Lean Explore server failed to start or respond promptly.[/bold red]"
+        ), stderr=True)
         if lean_backend_type == "local":
-            typer.echo(typer.style(
-                "This often occurs with the 'local' backend due to missing or corrupted data files.",
-                fg=typer.colors.YELLOW
-            ), err=True)
-            typer.echo(typer.style(
-                "Please try the following steps:",
-                fg=typer.colors.YELLOW
-            ), err=True)
-            typer.echo(typer.style(
-                "  1. Run 'leanexplore data fetch' to download or update the required data.",
-                fg=typer.colors.YELLOW
-            ), err=True)
-            typer.echo(typer.style(
-                "  2. Try this chat command again.",
-                fg=typer.colors.YELLOW
-            ), err=True)
-            typer.echo(typer.style(
-                "  3. If the problem persists, run 'leanexplore mcp serve --backend local --log-level DEBUG' directly in another terminal to see detailed server startup logs.",
-                fg=typer.colors.YELLOW
-            ), err=True)
+            console.print(Text.from_markup(
+                "[yellow]This often occurs with the 'local' backend due to missing or corrupted data files.[/yellow]"
+            ), stderr=True)
+            console.print(Text.from_markup(
+                "[yellow]Please try the following steps:[/yellow]"
+            ), stderr=True)
+            console.print(Text.from_markup(
+                "[yellow]  1. Run 'leanexplore data fetch' to download or update the required data.[/yellow]"
+            ), stderr=True)
+            console.print(Text.from_markup(
+                "[yellow]  2. Try this chat command again.[/yellow]"
+            ), stderr=True)
+            console.print(Text.from_markup(
+                "[yellow]  3. If the problem persists, run 'leanexplore mcp serve --backend local --log-level DEBUG' directly in another terminal to see detailed server startup logs.[/yellow]"
+            ), stderr=True)
         else: # api backend or other cases
-            typer.echo(typer.style(
-                "Please check your network connection and ensure the API server is accessible.",
-                fg=typer.colors.YELLOW
-            ), err=True)
+            console.print(Text.from_markup(
+                "[yellow]Please check your network connection and ensure the API server is accessible.[/yellow]"
+            ), stderr=True)
     elif isinstance(error, UserError):
-        typer.echo(typer.style(f"Error: SDK usage problem during {context}: {error}", fg=typer.colors.RED, bold=True), err=True)
+        console.print(Text.from_markup(f"[bold red]Error: SDK usage problem during {context}: {error}[/bold red]"), stderr=True)
     elif isinstance(error, AgentsException):
-        typer.echo(typer.style(f"Error: An SDK error occurred during {context}: {error}", fg=typer.colors.RED, bold=True), err=True)
+        console.print(Text.from_markup(f"[bold red]Error: An SDK error occurred during {context}: {error}[/bold red]"), stderr=True)
     else:
-        typer.echo(typer.style(f"An unexpected error occurred during {context}: {error}", fg=typer.colors.RED, bold=True), err=True)
+        console.print(Text.from_markup(f"[bold red]An unexpected error occurred during {context}: {error}[/bold red]"), stderr=True)
 
     if debug_mode:
-        typer.echo(typer.style(f"Error Details ({type(error).__name__}): {error}", fg=typer.colors.MAGENTA), err=True)
+        console.print(Text.from_markup(f"[magenta]Error Details ({type(error).__name__}): {error}[/magenta]"), stderr=True)
     raise typer.Exit(code=1)
 
 
@@ -184,25 +243,22 @@ async def _run_agent_session(
             logger.error(f"Error loading OpenAI API key from CLI configuration: {e}", exc_info=debug_mode)
 
     if not openai_api_key:
-        typer.echo(typer.style(
-            "OpenAI API key not found in configuration.",
-            fg=typer.colors.YELLOW
-        ))
+        console.print(Text.from_markup("[yellow]OpenAI API key not found in configuration.[/yellow]"))
         openai_api_key = typer.prompt("Please enter your OpenAI API key", hide_input=True)
         if not openai_api_key:
-            typer.echo(typer.style("OpenAI API key cannot be empty. Exiting.", fg=typer.colors.RED, bold=True), err=True)
+            console.print(Text.from_markup("[bold red]OpenAI API key cannot be empty. Exiting.[/bold red]"), stderr=True)
             raise typer.Exit(code=1)
         logger.info("Using OpenAI API key provided via prompt.")
         if config_utils_imported:
             if typer.confirm("Would you like to save this OpenAI API key for future use?"):
                 if config_utils.save_openai_api_key(openai_api_key):
-                    typer.echo(typer.style("OpenAI API key saved successfully.", fg=typer.colors.GREEN))
+                    console.print(Text.from_markup("[green]OpenAI API key saved successfully.[/green]"))
                 else:
-                    typer.echo(typer.style("Failed to save OpenAI API key.", fg=typer.colors.RED), err=True)
+                    console.print(Text.from_markup("[red]Failed to save OpenAI API key.[/red]"), stderr=True)
             else:
-                typer.echo("OpenAI API key will be used for this session only.")
+                console.print("OpenAI API key will be used for this session only.")
         else:
-            typer.echo(typer.style("Note: config_utils not available, OpenAI API key cannot be saved.", fg=typer.colors.YELLOW))
+            console.print(Text.from_markup("[yellow]Note: config_utils not available, OpenAI API key cannot be saved.[/yellow]"))
 
     os.environ["OPENAI_API_KEY"] = openai_api_key
 
@@ -211,7 +267,7 @@ async def _run_agent_session(
     if not internal_server_script_path.exists():
         error_msg = f"Lean Explore MCP server script not found at calculated path: {internal_server_script_path}"
         logger.error(error_msg)
-        typer.echo(typer.style(f"Error: {error_msg}", fg=typer.colors.RED, bold=True), err=True)
+        console.print(Text.from_markup(f"[bold red]Error: {error_msg}[/bold red]"), stderr=True)
         raise typer.Exit(code=1)
 
     python_executable = sys.executable
@@ -219,7 +275,7 @@ async def _run_agent_session(
         error_msg = (f"Python executable '{python_executable}' not found or not executable. "
                      "Ensure Python is correctly installed and in your PATH.")
         logger.error(error_msg)
-        typer.echo(typer.style(f"Error: {error_msg}", fg=typer.colors.RED, bold=True), err=True)
+        console.print(Text.from_markup(f"[bold red]Error: {error_msg}[/bold red]"), stderr=True)
         raise typer.Exit(code=1)
 
     # --- Lean Explore API Key Acquisition (if API backend) ---
@@ -238,25 +294,24 @@ async def _run_agent_session(
                 logger.error(f"Error loading Lean Explore API key from CLI configuration: {e}", exc_info=debug_mode)
 
         if not effective_lean_api_key:
-            typer.echo(typer.style(
-                "Lean Explore API key is required for the 'api' backend and was not found through CLI option, environment variable, or configuration.",
-                fg=typer.colors.YELLOW
+            console.print(Text.from_markup(
+                "[yellow]Lean Explore API key is required for the 'api' backend and was not found through CLI option, environment variable, or configuration.[/yellow]"
             ))
             effective_lean_api_key = typer.prompt("Please enter your Lean Explore API key", hide_input=True)
             if not effective_lean_api_key:
-                typer.echo(typer.style("Lean Explore API key cannot be empty for 'api' backend. Exiting.", fg=typer.colors.RED, bold=True), err=True)
+                console.print(Text.from_markup("[bold red]Lean Explore API key cannot be empty for 'api' backend. Exiting.[/bold red]"), stderr=True)
                 raise typer.Exit(code=1)
             logger.info("Using Lean Explore API key provided via prompt.")
             if config_utils_imported:
                 if typer.confirm("Would you like to save this Lean Explore API key for future use?"):
                     if config_utils.save_api_key(effective_lean_api_key):
-                        typer.echo(typer.style("Lean Explore API key saved successfully.", fg=typer.colors.GREEN))
+                        console.print(Text.from_markup("[green]Lean Explore API key saved successfully.[/green]"))
                     else:
-                        typer.echo(typer.style("Failed to save Lean Explore API key.", fg=typer.colors.RED), err=True)
+                        console.print(Text.from_markup("[red]Failed to save Lean Explore API key.[/red]"), stderr=True)
                 else:
-                    typer.echo("Lean Explore API key will be used for this session only.")
+                    console.print("Lean Explore API key will be used for this session only.")
             else:
-                typer.echo(typer.style("Note: config_utils not available, Lean Explore API key cannot be saved.", fg=typer.colors.YELLOW))
+                console.print(Text.from_markup("[yellow]Note: config_utils not available, Lean Explore API key cannot be saved.[/yellow]"))
 
 
     # --- MCP Server Setup ---
@@ -298,6 +353,7 @@ async def _run_agent_session(
             agent_object_name = "Assistant"
             agent_display_name = f"{Colors.BOLD}{Colors.GREEN}{agent_object_name}{Colors.ENDC}"
 
+
             agent = Agent(
                 name=agent_object_name, model=agent_model,
                 instructions=(
@@ -328,30 +384,41 @@ async def _run_agent_session(
                 ),
                 mcp_servers=[server_instance]
             )
-
-            typer.echo(typer.style(f"Lean Search Assistant", bold=True) + f" (powered by {Colors.GREEN}{agent_model}{Colors.ENDC} and {Colors.GREEN}{server_instance.name}{Colors.ENDC}) is ready.")
-            typer.echo("Ask me to search for Lean statements (e.g., 'find definitions of a scheme').")
+            console.print(Text.from_markup(f"[bold]Lean Search Assistant[/bold] (powered by [green]{agent_model}[/green] and [green]{server_instance.name}[/green]) is ready."))
+            console.print("Ask me to search for Lean statements (e.g., 'find definitions of a scheme').")
             if not debug_mode and lean_backend_type == 'local':
-                 typer.echo(typer.style(
-                     "Note: The local search server might print startup logs. For a quieter experience, "
-                     "use --debug to see detailed logs or ensure the server's default log level is WARNING.",
-                     fg=typer.colors.YELLOW
+                 console.print(Text.from_markup(
+                     "[yellow]Note: The local search server might print startup logs. For a quieter experience, "
+                     "use --debug to see detailed logs or ensure the server's default log level is WARNING.[/yellow]"
                  ))
-            typer.echo("Type 'exit' or 'quit' to end the session.\n")
+            console.print("Type 'exit' or 'quit' to end the session.")
+            console.print()
 
             while True:
                 try:
-                    user_input = typer.prompt(typer.style("You", fg=typer.colors.BLUE, bold=True), default="", prompt_suffix=": ").strip()
+                    user_styled_name = typer.style("You", fg=typer.colors.BLUE, bold=True)
+                    user_input = typer.prompt(user_styled_name, default="", prompt_suffix=": ").strip()
+
                     if user_input.lower() in ["exit", "quit"]:
                         logger.debug("Exiting chat loop.")
                         break
                     if not user_input:
                         continue
 
-                    typer.echo()
-                    typer.echo(f"{agent_display_name}: {Colors.YELLOW}Thinking...{Colors.ENDC}")
+                    formatted_user_input = _format_chat_text_for_panel(user_input, CHAT_CONTENT_WIDTH)
+                    console.print(Panel(formatted_user_input, title="You", border_style="blue", title_align="left", expand=False))
+                    console.print()
+
+                    thinking_line_str_ansi = f"{agent_display_name}: {Colors.YELLOW}Thinking...{Colors.ENDC}"
+                    sys.stdout.write(thinking_line_str_ansi)
+                    sys.stdout.flush()
 
                     result = await Runner.run(starting_agent=agent, input=user_input)
+
+                    thinking_len_to_clear = Text.from_ansi(thinking_line_str_ansi).cell_len
+                    sys.stdout.write("\r" + " " * thinking_len_to_clear + "\r")
+                    sys.stdout.flush()
+
 
                     assistant_output = "No specific textual output from the agent for this turn."
                     if result.final_output is not None:
@@ -360,25 +427,31 @@ async def _run_agent_session(
                         logger.warning("Agent run completed without error, but final_output is None.")
                         assistant_output = "(Agent action completed; no specific text message for this turn.)"
 
-                    thinking_line_approx_len = len(agent_object_name) + len(": Thinking...") + len(Colors.BOLD+Colors.GREEN+Colors.ENDC+Colors.YELLOW+Colors.ENDC) + 5
-                    sys.stdout.write("\r" + " " * thinking_line_approx_len + "\r")
-                    sys.stdout.flush()
-
-                    typer.echo(f"{agent_display_name}: {assistant_output}\n")
+                    formatted_assistant_output = _format_chat_text_for_panel(assistant_output, CHAT_CONTENT_WIDTH)
+                    console.print(
+                        Panel(
+                            formatted_assistant_output,
+                            title=agent_object_name,
+                            border_style="green",
+                            title_align="left",
+                            expand=False
+                        )
+                    )
+                    console.print()
 
                 except typer.Abort:
-                    typer.echo(f"\n{Colors.YELLOW}Chat interrupted by user. Exiting.{Colors.ENDC}")
+                    console.print(Text.from_markup(f"\n[yellow]Chat interrupted by user. Exiting.[/yellow]"))
                     logger.debug("Chat interrupted by user (typer.Abort). Exiting.")
                     break
                 except KeyboardInterrupt:
-                    typer.echo(f"\n{Colors.YELLOW}Chat interrupted by user. Exiting.{Colors.ENDC}")
+                    console.print(Text.from_markup(f"\n[yellow]Chat interrupted by user. Exiting.[/yellow]"))
                     logger.debug("Chat interrupted by user (KeyboardInterrupt). Exiting.")
                     break
                 except Exception as e: # pylint: disable=broad-except
                     logger.error(f"An error occurred in the chat loop: {e}", exc_info=debug_mode)
-                    typer.echo(typer.style(f"An unexpected error occurred: {e}", fg=typer.colors.RED, bold=True))
+                    console.print(Text.from_markup(f"[bold red]An unexpected error occurred: {e}[/bold red]"))
                     break
-    except (UserError, AgentsException, Exception) as e_startup: # Catches errors from MCPServerStdio.__aenter__
+    except (UserError, AgentsException, Exception) as e_startup:
         _handle_server_connection_error(
             e_startup,
             lean_backend_type,
@@ -386,7 +459,7 @@ async def _run_agent_session(
             context="server startup or connection"
         )
 
-    typer.echo(typer.style("Lean Search Assistant session has ended.", bold=True))
+    console.print(Text.from_markup("[bold]Lean Search Assistant session has ended.[/bold]"))
 
 
 @typer_async
@@ -431,23 +504,22 @@ async def agent_chat_command(
     logging.getLogger("httpx").setLevel(library_log_level_for_client)
     logging.getLogger("httpcore").setLevel(library_log_level_for_client)
     logging.getLogger("openai").setLevel(library_log_level_for_client)
-    logging.getLogger("agents").setLevel(library_log_level_for_client) # Covers agents.mcp, agents.exceptions etc.
+    logging.getLogger("agents").setLevel(library_log_level_for_client)
+
 
     mcp_server_log_level_str = "DEBUG" if debug else "WARNING"
 
     if not config_utils_imported and not debug:
         if not os.getenv("OPENAI_API_KEY"):
-            typer.echo(typer.style(
-                "Warning: Automatic loading of stored OpenAI API key is disabled (config module not found). "
-                "OPENAI_API_KEY env var is not set. You will be prompted if no key is found in config.",
-                fg=typer.colors.YELLOW
-            ), err=True)
+            console.print(Text.from_markup(
+                "[yellow]Warning: Automatic loading of stored OpenAI API key is disabled (config module not found). "
+                "OPENAI_API_KEY env var is not set. You will be prompted if no key is found in config.[/yellow]"
+            ), stderr=True)
         if lean_backend == "api" and not (lean_api_key or os.getenv("LEAN_EXPLORE_API_KEY")):
-             typer.echo(typer.style(
-                "Warning: Automatic loading of stored Lean Explore API key is disabled (config module not found). "
-                "If using --backend api, and key is not in env or via option, you will be prompted.",
-                fg=typer.colors.YELLOW
-            ), err=True)
+             console.print(Text.from_markup(
+                "[yellow]Warning: Automatic loading of stored Lean Explore API key is disabled (config module not found). "
+                "If using --backend api, and key is not in env or via option, you will be prompted.[/yellow]"
+            ), stderr=True)
 
 
     resolved_lean_api_key = lean_api_key
