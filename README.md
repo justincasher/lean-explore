@@ -1,6 +1,6 @@
 # LeanExplore
 
-A search engine for Lean 4 statements. This project provides both an API and a local search engine for [LeanExplore](http://www.leanexplore.com).
+A search engine for Lean 4 declarations. This project provides both an API and a local search engine for [LeanExplore](http://www.leanexplore.com).
 
 The current indexed projects are
 
@@ -34,3 +34,22 @@ Run the chat command:
 ```
 leanexplore chat
 ```
+
+### Cite
+
+If you use LeanExplore in your research or work, please cite it as follows:
+
+**General Citation:**
+
+Justin Asher. (2025). *LeanExplore: A search engine for Lean 4 declarations*. Retrieved from [http://www.leanexplore.com](http://www.leanexplore.com) (GitHub: [https://github.com/justincasher/lean-explore](https://github.com/justincasher/lean-explore)).
+
+**BibTeX Entry:**
+
+```bibtex
+@software{Asher_LeanExplore_2025,
+  author = {Asher, Justin},
+  title = {{LeanExplore: A search engine for Lean 4 declarations}},
+  year = {2025},
+  url = {http://www.leanexplore.com},
+  note = {GitHub repository: https://github.com/justincasher/lean-explore}
+}
