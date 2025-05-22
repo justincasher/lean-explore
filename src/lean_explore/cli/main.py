@@ -395,7 +395,7 @@ def mcp_serve_command(
         "-b",
         help="Backend to use for the MCP server: 'api' or 'local'. Default is 'api'.",
         case_sensitive=False,
-        show_choices=True # Typer will show available choices if backend is misspelled etc.
+        show_choices=True
     ),
     api_key_override: Optional[str] = typer.Option(
         None,
@@ -407,13 +407,15 @@ def mcp_serve_command(
     Launch the Lean Explore MCP (Model Context Protocol) server.
 
     The server communicates via stdio and provides Lean search functionalities
-    as MCP tools.
+    as MCP tools. The actual checks for local data presence or API key validity
+    are handled by the 'lean_explore.mcp.server' module when it starts.
     """
     command_parts = [sys.executable, "-m", "lean_explore.mcp.server", "--backend", backend.lower()]
 
     if backend.lower() == "api":
+        # API key will be loaded by mcp.server or passed if overridden
+        # We still check here to provide immediate feedback if --api-key is needed but not stored.
         effective_lean_explore_api_key = api_key_override or config_utils.load_api_key()
-
         if not effective_lean_explore_api_key:
             console.print(
                 "[bold red]Lean Explore API key is required for 'api' backend.[/bold red]\n"
@@ -421,35 +423,31 @@ def mcp_serve_command(
                 "or provide it with the `--api-key` option for this command."
             )
             raise typer.Abort()
-        command_parts.extend(["--api-key", effective_lean_explore_api_key])
+        # Pass the override if provided; otherwise, mcp.server will load it.
+        if api_key_override:
+            command_parts.extend(["--api-key", api_key_override])
     elif backend.lower() == "local":
-        # When using local backend, check if data exists and guide user if not.
-        # This check ideally uses the paths from defaults.py that now point to the versioned dir.
-        # For now, this is a general message.
-        expected_db_path = defaults.DEFAULT_DB_PATH # This now points to the versioned dir
-        if not expected_db_path.exists():
-            console.print(
-                f"[bold yellow]Warning: Local data file {expected_db_path.name} not found at expected location: {expected_db_path.parent}[/bold yellow]\n"
-                f"Please run `leanexplore data fetch` to download the necessary data toolchain."
-            )
-            # Depending on strictness, you might raise typer.Abort() here
-            # or let the MCP server try and fail if data is truly missing.
-            # For now, let the server attempt to start.
-        else:
-            console.print(f"[yellow]Using 'local' backend. Data expected at {expected_db_path.parent}[/yellow]")
-
+        # The mcp.server module will now handle checks for local data existence
+        # and provide user guidance. No explicit checks needed here in main.py.
+        logger_name = "lean_explore.cli.main" # Use a more specific logger if available, or general console
+        console.print(f"[dim]Attempting to start MCP server with 'local' backend. "
+                      f"The server will verify local data availability.[/dim]")
     else:
+        # This case should ideally not be reached due to Typer's choice validation,
+        # but as a safeguard.
         console.print(f"[bold red]Invalid backend: '{backend}'. Must be 'api' or 'local'.[/bold red]")
         raise typer.Abort()
 
-    console.print(f"[green]Starting MCP server with '{backend}' backend...[/green]")
+    console.print(f"[green]Launching MCP server subprocess with '{backend}' backend...[/green]")
     console.print("[dim]The server will now take over stdio. To stop it, the connected MCP client should disconnect, or you may need to manually terminate this process (e.g., Ctrl+C if no client is managing it).[/dim]")
 
     try:
-        # Using subprocess.run for better control and error handling if needed in future
-        process_result = subprocess.run(command_parts, check=False) # check=False to handle non-zero exit codes manually
+        process_result = subprocess.run(command_parts, check=False)
         if process_result.returncode != 0:
-            console.print(f"[bold red]MCP server exited with code: {process_result.returncode}[/bold red]")
+            # mcp.server should have printed its own detailed error message
+            # before exiting with a non-zero code.
+            console.print(f"[bold red]MCP server subprocess exited with code: {process_result.returncode}. "
+                          f"Check server logs above for details.[/bold red]")
     except FileNotFoundError:
         console.print(f"[bold red]Error: Could not find Python interpreter '{sys.executable}' or the MCP server module 'lean_explore.mcp.server'.[/bold red]")
         console.print("Please ensure the package is installed correctly and `python -m lean_explore.mcp.server` is runnable.")

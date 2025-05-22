@@ -22,10 +22,11 @@ import pathlib
 try:
     from agents import Agent, Runner
     from agents.mcp import MCPServerStdio
+    from agents.exceptions import AgentsException, UserError
 except ImportError:
     print(
-        "Fatal Error: The 'openai-agents' library is not installed. "
-        "Please install it with 'pip install openai-agents'",
+        "Fatal Error: The 'openai-agents' library or its expected exceptions are not installed/found. "
+        "Please install 'openai-agents' correctly (e.g., 'pip install openai-agents')",
         file=sys.stderr
     )
     raise typer.Exit(code=1)
@@ -94,6 +95,61 @@ agent_cli_app = typer.Typer(
 logger = logging.getLogger(__name__)
 
 
+def _handle_server_connection_error(
+    error: Exception,
+    lean_backend_type: str,
+    debug_mode: bool,
+    context: str = "server startup"
+):
+    """Handles MCP server connection errors by logging and printing user-friendly messages."""
+    logger.error(f"CRITICAL: Error during MCP {context}: {type(error).__name__}: {error}", exc_info=debug_mode)
+
+    error_str = str(error).lower()
+    is_timeout_error = "timed out" in error_str or "timeout" in error_str
+
+    if is_timeout_error:
+        typer.echo(typer.style(
+            "Error: The Lean Explore server failed to start or respond promptly.",
+            fg=typer.colors.RED, bold=True
+        ), err=True)
+        if lean_backend_type == "local":
+            typer.echo(typer.style(
+                "This often occurs with the 'local' backend due to missing or corrupted data files.",
+                fg=typer.colors.YELLOW
+            ), err=True)
+            typer.echo(typer.style(
+                "Please try the following steps:",
+                fg=typer.colors.YELLOW
+            ), err=True)
+            typer.echo(typer.style(
+                "  1. Run 'leanexplore data fetch' to download or update the required data.",
+                fg=typer.colors.YELLOW
+            ), err=True)
+            typer.echo(typer.style(
+                "  2. Try this chat command again.",
+                fg=typer.colors.YELLOW
+            ), err=True)
+            typer.echo(typer.style(
+                "  3. If the problem persists, run 'leanexplore mcp serve --backend local --log-level DEBUG' directly in another terminal to see detailed server startup logs.",
+                fg=typer.colors.YELLOW
+            ), err=True)
+        else: # api backend or other cases
+            typer.echo(typer.style(
+                "Please check your network connection and ensure the API server is accessible.",
+                fg=typer.colors.YELLOW
+            ), err=True)
+    elif isinstance(error, UserError):
+        typer.echo(typer.style(f"Error: SDK usage problem during {context}: {error}", fg=typer.colors.RED, bold=True), err=True)
+    elif isinstance(error, AgentsException):
+        typer.echo(typer.style(f"Error: An SDK error occurred during {context}: {error}", fg=typer.colors.RED, bold=True), err=True)
+    else:
+        typer.echo(typer.style(f"An unexpected error occurred during {context}: {error}", fg=typer.colors.RED, bold=True), err=True)
+
+    if debug_mode:
+        typer.echo(typer.style(f"Error Details ({type(error).__name__}): {error}", fg=typer.colors.MAGENTA), err=True)
+    raise typer.Exit(code=1)
+
+
 # --- Core Agent Logic ---
 async def _run_agent_session(
     lean_backend_type: str,
@@ -124,10 +180,9 @@ async def _run_agent_session(
                 logger.info("Loaded OpenAI API key from CLI configuration.")
             else:
                 logger.debug("No OpenAI API key found in CLI configuration.")
-        except Exception as e:
+        except Exception as e: # pylint: disable=broad-except
             logger.error(f"Error loading OpenAI API key from CLI configuration: {e}", exc_info=debug_mode)
 
-    # If not found in config, prompt the user (removed direct ENV variable check here)
     if not openai_api_key:
         typer.echo(typer.style(
             "OpenAI API key not found in configuration.",
@@ -149,7 +204,6 @@ async def _run_agent_session(
         else:
             typer.echo(typer.style("Note: config_utils not available, OpenAI API key cannot be saved.", fg=typer.colors.YELLOW))
 
-    # Set it as an environment variable for the openai-agents SDK to pick up for this session
     os.environ["OPENAI_API_KEY"] = openai_api_key
 
 
@@ -169,7 +223,7 @@ async def _run_agent_session(
         raise typer.Exit(code=1)
 
     # --- Lean Explore API Key Acquisition (if API backend) ---
-    effective_lean_api_key = lean_explore_api_key_arg # This comes from agent_chat_command (CLI option or ENV)
+    effective_lean_api_key = lean_explore_api_key_arg
     if lean_backend_type == "api":
         if not effective_lean_api_key and config_utils_imported:
             logger.debug("Lean Explore API key not provided via CLI option or ENV. Attempting to load from CLI configuration...")
@@ -180,7 +234,7 @@ async def _run_agent_session(
                     logger.debug("Successfully loaded Lean Explore API key from CLI configuration.")
                 else:
                     logger.debug("No Lean Explore API key found in CLI configuration.")
-            except Exception as e:
+            except Exception as e: # pylint: disable=broad-except
                 logger.error(f"Error loading Lean Explore API key from CLI configuration: {e}", exc_info=debug_mode)
 
         if not effective_lean_api_key:
@@ -218,107 +272,119 @@ async def _run_agent_session(
         name="LeanExploreSearchServer",
         params={"command": python_executable, "args": mcp_server_args, "cwd": str(internal_server_script_path.parent)},
         cache_tools_list=True,
-        client_session_timeout_seconds=60.0
+        client_session_timeout_seconds=10.0
     )
 
     # --- Agent Interaction Loop ---
-    async with lean_explore_mcp_server as server_instance:
-        logger.debug(f"MCP server '{server_instance.name}' launched. Listing tools...")
-        try:
-            tools = await server_instance.list_tools()
-            if not tools or not any(tools):
-                logger.warning("MCP Server connected but reported no tools. Agent may lack expected capabilities.")
-            else:
-                logger.debug(f"Available tools from {server_instance.name}: {[tool.name for tool in tools]}")
-        except Exception as e:
-            logger.error(f"Error listing tools from MCP server '{server_instance.name}': {e}", exc_info=debug_mode)
-            typer.echo(typer.style(f"Error connecting or listing tools from MCP server. Enable --debug for more logs.", fg=typer.colors.RED, bold=True), err=True)
-            raise typer.Exit(code=1)
-
-        agent_model = "gpt-4.1"
-        agent_object_name = "Assistant"
-        agent_display_name = f"{Colors.BOLD}{Colors.GREEN}{agent_object_name}{Colors.ENDC}"
-
-        agent = Agent(
-            name=agent_object_name, model=agent_model,
-            instructions=(
-                "You are a CLI assistant for searching a Lean 4 mathematical library.\n"
-                "**Goal:** Find relevant Lean statements, understand them (including dependencies), and explain them conversationally to the user.\n"
-                "**Output:** CLI-friendly (plain text, simple lists). NO complex Markdown/LaTeX.\n\n"
-
-                "**Packages:** Use exact top-level names for filters (Batteries, Init, Lean, Mathlib, PhysLean, Std). Map subpackage mentions to top-level (e.g., 'Mathlib.Analysis' -> 'Mathlib').\n\n"
-
-                "**Core Workflow:**\n"
-                "1.  **Search & Analyze:**\n"
-                "    * Execute multiple distinct `search` queries for each user request (e.g., using full statements, rephrasing). Set `limit` >= 10 for each search.\n"
-                "    * From all search results, select the statement(s) most helpful to the user.\n"
-                "    * For each selected statement, **MUST** use `get_dependencies` to understand its context before explaining.\n\n"
-
-                "2.  **Explain Results (Conversational & CLI-Friendly):**\n"
-                "    * Briefly state your search approach (e.g., 'I looked into X in Mathlib...').\n"
-                "    * For each selected statement:\n"
-                "        * Introduce it (e.g., Lean name: `primary_declaration.lean_name`).\n"
-                "        * Explain its meaning (use `docstring`, `informal_description`, `statement_text`).\n"
-                "        * Provide the full Lean code (`statement_text`).\n"
-                "        * Explain key dependencies (what they are, their role, using `statement_text` or `display_statement_text` from `get_dependencies` output).\n"
-
-                "3.  **Specific User Follow-ups (If Asked):**\n"
-                "    * **`get_by_id`:** For a specific ID, provide: ID, Lean name, statement text, source/line, docstring, informal description (structured CLI format).\n"
-                "    * **`get_dependencies` (Direct Request):** For all dependencies of an ID, list: ID, Lean name, statement text/summary. State total count.\n\n"
-                "Always be concise, helpful, and clear."
-            ),
-            mcp_servers=[server_instance]
-        )
-
-        typer.echo(typer.style(f"Lean Search Assistant", bold=True) + f" (powered by {Colors.GREEN}{agent_model}{Colors.ENDC} and {Colors.GREEN}{server_instance.name}{Colors.ENDC}) is ready.")
-        typer.echo("Ask me to search for Lean statements (e.g., 'find definitions of a scheme').")
-        if not debug_mode and lean_backend_type == 'local':
-             typer.echo(typer.style(
-                 "Note: The local search server might print startup logs. For a quieter experience, "
-                 "use --debug to see detailed logs or ensure the server's default log level is WARNING.",
-                 fg=typer.colors.YELLOW
-             ))
-        typer.echo("Type 'exit' or 'quit' to end the session.\n")
-
-        while True:
+    try:
+        async with lean_explore_mcp_server as server_instance:
+            logger.debug(f"MCP server '{server_instance.name}' connection initiated. Listing tools...")
+            tools = []
             try:
-                user_input = typer.prompt(typer.style("You", fg=typer.colors.BLUE, bold=True), default="", prompt_suffix=": ").strip()
-                if user_input.lower() in ["exit", "quit"]:
-                    logger.debug("Exiting chat loop.")
-                    break
-                if not user_input:
-                    continue
-
-                typer.echo()
-                typer.echo(f"{agent_display_name}: {Colors.YELLOW}Thinking...{Colors.ENDC}")
-
-                result = await Runner.run(starting_agent=agent, input=user_input)
-
-                assistant_output = "No specific textual output from the agent for this turn."
-                if result.final_output is not None:
-                    assistant_output = result.final_output
+                tools = await server_instance.list_tools()
+                if not tools or not any(tools):
+                    logger.warning("MCP Server connected but reported no tools. Agent may lack expected capabilities.")
                 else:
-                    logger.warning("Agent run completed without error, but final_output is None.")
-                    assistant_output = "(Agent action completed; no specific text message for this turn.)"
+                    logger.debug(f"Available tools from {server_instance.name}: {[tool.name for tool in tools]}")
+            except (UserError, AgentsException, Exception) as e_list_tools:
+                 _handle_server_connection_error(
+                    e_list_tools,
+                    lean_backend_type,
+                    debug_mode,
+                    context="tool listing"
+                )
 
-                thinking_line_approx_len = len(agent_object_name) + len(": Thinking...") + len(Colors.BOLD+Colors.GREEN+Colors.ENDC+Colors.YELLOW+Colors.ENDC) + 5
-                sys.stdout.write("\r" + " " * thinking_line_approx_len + "\r")
-                sys.stdout.flush()
+            agent_model = "gpt-4.1"
+            agent_object_name = "Assistant"
+            agent_display_name = f"{Colors.BOLD}{Colors.GREEN}{agent_object_name}{Colors.ENDC}"
 
-                typer.echo(f"{agent_display_name}: {assistant_output}\n")
+            agent = Agent(
+                name=agent_object_name, model=agent_model,
+                instructions=(
+                    "You are a CLI assistant for searching a Lean 4 mathematical library.\n"
+                    "**Goal:** Find relevant Lean statements, understand them (including dependencies), and explain them conversationally to the user.\n"
+                    "**Output:** CLI-friendly (plain text, simple lists). NO complex Markdown/LaTeX.\n\n"
 
-            except typer.Abort:
-                typer.echo(f"\n{Colors.YELLOW}Chat interrupted by user. Exiting.{Colors.ENDC}")
-                logger.debug("Chat interrupted by user (typer.Abort). Exiting.")
-                break
-            except KeyboardInterrupt:
-                typer.echo(f"\n{Colors.YELLOW}Chat interrupted by user. Exiting.{Colors.ENDC}")
-                logger.debug("Chat interrupted by user (KeyboardInterrupt). Exiting.")
-                break
-            except Exception as e:
-                logger.error(f"An error occurred in the chat loop: {e}", exc_info=debug_mode)
-                typer.echo(typer.style(f"An unexpected error occurred: {e}", fg=typer.colors.RED, bold=True))
-                break
+                    "**Packages:** Use exact top-level names for filters (Batteries, Init, Lean, Mathlib, PhysLean, Std). Map subpackage mentions to top-level (e.g., 'Mathlib.Analysis' -> 'Mathlib').\n\n"
+
+                    "**Core Workflow:**\n"
+                    "1.  **Search & Analyze:**\n"
+                    "    * Execute multiple distinct `search` queries for each user request (e.g., using full statements, rephrasing). Set `limit` >= 10 for each search.\n"
+                    "    * From all search results, select the statement(s) most helpful to the user.\n"
+                    "    * For each selected statement, **MUST** use `get_dependencies` to understand its context before explaining.\n\n"
+
+                    "2.  **Explain Results (Conversational & CLI-Friendly):**\n"
+                    "    * Briefly state your search approach (e.g., 'I looked into X in Mathlib...').\n"
+                    "    * For each selected statement:\n"
+                    "        * Introduce it (e.g., Lean name: `primary_declaration.lean_name`).\n"
+                    "        * Explain its meaning (use `docstring`, `informal_description`, `statement_text`).\n"
+                    "        * Provide the full Lean code (`statement_text`).\n"
+                    "        * Explain key dependencies (what they are, their role, using `statement_text` or `display_statement_text` from `get_dependencies` output).\n"
+
+                    "3.  **Specific User Follow-ups (If Asked):**\n"
+                    "    * **`get_by_id`:** For a specific ID, provide: ID, Lean name, statement text, source/line, docstring, informal description (structured CLI format).\n"
+                    "    * **`get_dependencies` (Direct Request):** For all dependencies of an ID, list: ID, Lean name, statement text/summary. State total count.\n\n"
+                    "Always be concise, helpful, and clear."
+                ),
+                mcp_servers=[server_instance]
+            )
+
+            typer.echo(typer.style(f"Lean Search Assistant", bold=True) + f" (powered by {Colors.GREEN}{agent_model}{Colors.ENDC} and {Colors.GREEN}{server_instance.name}{Colors.ENDC}) is ready.")
+            typer.echo("Ask me to search for Lean statements (e.g., 'find definitions of a scheme').")
+            if not debug_mode and lean_backend_type == 'local':
+                 typer.echo(typer.style(
+                     "Note: The local search server might print startup logs. For a quieter experience, "
+                     "use --debug to see detailed logs or ensure the server's default log level is WARNING.",
+                     fg=typer.colors.YELLOW
+                 ))
+            typer.echo("Type 'exit' or 'quit' to end the session.\n")
+
+            while True:
+                try:
+                    user_input = typer.prompt(typer.style("You", fg=typer.colors.BLUE, bold=True), default="", prompt_suffix=": ").strip()
+                    if user_input.lower() in ["exit", "quit"]:
+                        logger.debug("Exiting chat loop.")
+                        break
+                    if not user_input:
+                        continue
+
+                    typer.echo()
+                    typer.echo(f"{agent_display_name}: {Colors.YELLOW}Thinking...{Colors.ENDC}")
+
+                    result = await Runner.run(starting_agent=agent, input=user_input)
+
+                    assistant_output = "No specific textual output from the agent for this turn."
+                    if result.final_output is not None:
+                        assistant_output = result.final_output
+                    else:
+                        logger.warning("Agent run completed without error, but final_output is None.")
+                        assistant_output = "(Agent action completed; no specific text message for this turn.)"
+
+                    thinking_line_approx_len = len(agent_object_name) + len(": Thinking...") + len(Colors.BOLD+Colors.GREEN+Colors.ENDC+Colors.YELLOW+Colors.ENDC) + 5
+                    sys.stdout.write("\r" + " " * thinking_line_approx_len + "\r")
+                    sys.stdout.flush()
+
+                    typer.echo(f"{agent_display_name}: {assistant_output}\n")
+
+                except typer.Abort:
+                    typer.echo(f"\n{Colors.YELLOW}Chat interrupted by user. Exiting.{Colors.ENDC}")
+                    logger.debug("Chat interrupted by user (typer.Abort). Exiting.")
+                    break
+                except KeyboardInterrupt:
+                    typer.echo(f"\n{Colors.YELLOW}Chat interrupted by user. Exiting.{Colors.ENDC}")
+                    logger.debug("Chat interrupted by user (KeyboardInterrupt). Exiting.")
+                    break
+                except Exception as e: # pylint: disable=broad-except
+                    logger.error(f"An error occurred in the chat loop: {e}", exc_info=debug_mode)
+                    typer.echo(typer.style(f"An unexpected error occurred: {e}", fg=typer.colors.RED, bold=True))
+                    break
+    except (UserError, AgentsException, Exception) as e_startup: # Catches errors from MCPServerStdio.__aenter__
+        _handle_server_connection_error(
+            e_startup,
+            lean_backend_type,
+            debug_mode,
+            context="server startup or connection"
+        )
 
     typer.echo(typer.style("Lean Search Assistant session has ended.", bold=True))
 
@@ -328,7 +394,7 @@ async def agent_chat_command(
     ctx: typer.Context,
     lean_backend: str = typer.Option(
         "api",
-        "--lean-backend",
+        "--backend",
         "-lb",
         help="Backend for the Lean Explore MCP server ('api' or 'local'). Default: api.",
         case_sensitive=False,
@@ -350,7 +416,7 @@ async def agent_chat_command(
 
     The assistant uses the Lean Explore MCP server to search for Lean statements.
     An OpenAI API key must be available (prompts if not found).
-    If using --lean-backend api (default), a Lean Explore API key is also needed (prompts if not found).
+    If using --backend api (default), a Lean Explore API key is also needed (prompts if not found).
     """
     client_log_level = logging.DEBUG if debug else logging.INFO
     logging.basicConfig(
@@ -365,23 +431,21 @@ async def agent_chat_command(
     logging.getLogger("httpx").setLevel(library_log_level_for_client)
     logging.getLogger("httpcore").setLevel(library_log_level_for_client)
     logging.getLogger("openai").setLevel(library_log_level_for_client)
-    logging.getLogger("agents").setLevel(library_log_level_for_client)
+    logging.getLogger("agents").setLevel(library_log_level_for_client) # Covers agents.mcp, agents.exceptions etc.
 
     mcp_server_log_level_str = "DEBUG" if debug else "WARNING"
 
     if not config_utils_imported and not debug:
-        # Check for OpenAI key; prompt is handled in _run_agent_session
-        if not os.getenv("OPENAI_API_KEY"): # This check remains to provide a startup warning if relevant
+        if not os.getenv("OPENAI_API_KEY"):
             typer.echo(typer.style(
                 "Warning: Automatic loading of stored OpenAI API key is disabled (config module not found). "
                 "OPENAI_API_KEY env var is not set. You will be prompted if no key is found in config.",
                 fg=typer.colors.YELLOW
             ), err=True)
-        # Check for Lean Explore API key if API backend is chosen
         if lean_backend == "api" and not (lean_api_key or os.getenv("LEAN_EXPLORE_API_KEY")):
              typer.echo(typer.style(
                 "Warning: Automatic loading of stored Lean Explore API key is disabled (config module not found). "
-                "If using --lean-backend api, and key is not in env or via option, you will be prompted.",
+                "If using --backend api, and key is not in env or via option, you will be prompted.",
                 fg=typer.colors.YELLOW
             ), err=True)
 
