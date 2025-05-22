@@ -1,6 +1,6 @@
 # LeanExplore
 
-A search engine for Lean 4 statements. This project provides both an API and a local search engine for LeanExplore. Visit the main website at [www.leanexplore.com](http://www.leanexplore.com).
+A search engine for Lean 4 statements. This project provides both an API and a local search engine for [LeanExplore](http://www.leanexplore.com).
 
 The current indexed projects are
 
