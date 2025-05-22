@@ -14,9 +14,7 @@ This code is distributed under an Apache License (see [LICENSE](LICENSE)).
 
 ### Chatting with LeanExplore
 
-Repo: https://github.com/justincasher/lean-explore
-
-To run leanexplore chat:
+Here is a quick start guide on how to chat with LeanExplore utilizing the API via MCP and ChatGPT 4o.
 
 Clone & cd:
 ```
