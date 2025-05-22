@@ -8,3 +8,5 @@ The current indexed projects are
 - Mathlib
 - PhysLean
 - Std
+
+This code is distributed under an Apache License (see LICENSE).
