@@ -14,7 +14,7 @@ This code is distributed under an Apache License (see [LICENSE](LICENSE)).
 
 ### Chatting with LeanExplore
 
-Here is a quick start guide on how to chat with LeanExplore utilizing the API via MCP and ChatGPT 4o.
+Here is a quick start guide on how to chat with LeanExplore utilizing the API via MCP and ChatGPT 4o. You will need to input your OpenAI API key and your LeanExplore API key when prompted by the tool. It can save these keys for you for future sessions.
 
 Clone & cd:
 ```
