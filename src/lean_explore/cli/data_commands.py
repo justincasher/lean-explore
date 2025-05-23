@@ -136,7 +136,8 @@ def _download_file_with_progress(
     try:
         # By not setting 'Accept-Encoding', we let the server decide if it wants
         # to send a Content-Encoding. We will handle the raw stream.
-        with requests.get(url, stream=True, timeout=timeout) as r:
+        r = requests.get(url, stream=True, timeout=timeout)
+        try:
             r.raise_for_status()
 
             # Content-Length should refer to the size of the entity on the wire.
@@ -181,6 +182,8 @@ def _download_file_with_progress(
                         f.write(chunk)
                         downloaded_bytes_count += len(chunk)
                         progress.update(task_id, advance=len(chunk))
+        finally:
+            r.close()
 
         # Sanity check after download
         actual_downloaded_size = destination_path.stat().st_size
@@ -275,14 +278,26 @@ def _decompress_gzipped_file(
 
 # --- CLI Command Functions ---
 
+@app.callback()
+def main() -> None:
+    """
+    Lean-Explore data CLI.
+
+    This callback exists only to prevent Typer from treating the first
+    sub-command as a *default* command when there is otherwise just one.
+    """
+    pass
+
+
 @app.command()
 def fetch(
     version: str = typer.Argument(
-        "stable",
+        None,
         help=(
             "The toolchain version to fetch (e.g., 'stable', '0.1.0'). "
             "'stable' will attempt to use the 'default_toolchain' from the manifest."
         ),
+        show_default=False,
     )
 ) -> None:
     """
@@ -293,6 +308,9 @@ def fetch(
     appropriate local directory (e.g., ~/.lean_explore/data/toolchains/<version>/).
     """
     console.rule(f"[bold blue]Fetching Lean Explore Data Toolchain: {version}[/bold blue]")
+
+    if version is None:
+        version = "stable"
 
     # 1. Fetch and Parse Manifest
     console.print(f"Fetching data manifest from {defaults.R2_MANIFEST_DEFAULT_URL}...")

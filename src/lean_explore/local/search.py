@@ -1,4 +1,4 @@
-# src/lean_explore/search.py
+# src/lean_explore/local/search.py
 
 """Performs semantic search and ranked retrieval of StatementGroups.
 

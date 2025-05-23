@@ -84,14 +84,6 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         yield app_context
     finally:
         logger.info("MCP application lifespan shutting down...")
-        # Add any cleanup for the backend_service if needed,
-        # though APIClient and LocalService manage their own resources typically.
-        # For example, if LocalService held onto a DB connection pool engine directly:
-        # if isinstance(backend_service_instance, LocalService) and hasattr(backend_service_instance, 'engine') and backend_service_instance.engine:
-        #     # Assuming the engine has an async dispose method
-        #     if hasattr(backend_service_instance.engine, 'dispose') and asyncio.iscoroutinefunction(backend_service_instance.engine.dispose):
-        #         await backend_service_instance.engine.dispose() 
-        #         logger.info("Disposed of local service database engine.")
         pass
 
 
@@ -101,18 +93,7 @@ mcp_app = FastMCP(
     "LeanExploreMCPServer",
     version="0.1.0",
     description="MCP Server for Lean Explore, providing tools to search and query Lean mathematical data.",
-    lifespan=app_lifespan
+    lifespan=app_lifespan,
 )
 
-# Tools will be defined in tools.py and will import this mcp_app instance
-# to use the @mcp_app.tool() decorator.
-# Example (in tools.py):
-# from .app import mcp_app, AppContext, MCPContext
-#
-# @mcp_app.tool()
-# async def example_tool(ctx: MCPContext, param: str) -> str:
-#     app_ctx: AppContext = ctx.request_context.lifespan_context
-#     if app_ctx.backend_service:
-#         # Use app_ctx.backend_service here
-#         return f"Processed {param}"
-#     return "Error: Backend service not available"
+mcp_app.lifespan = app_lifespan

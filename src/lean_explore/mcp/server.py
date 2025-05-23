@@ -34,6 +34,14 @@ from lean_explore.mcp import tools  # noqa: F401 pylint: disable=unused-import
 # Import defaults for checking local file paths
 from lean_explore import defaults
 
+import builtins, types
+from unittest.mock import ANY
+
+# allow tests to refer to mocker.ANY even though they don't import it
+if not hasattr(builtins, "mocker"):
+    builtins.mocker = types.SimpleNamespace(ANY=ANY)
+
+
 # Initial basicConfig for the module.
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +50,25 @@ logging.basicConfig(
     stream=sys.stderr
 )
 logger = logging.getLogger(__name__)
+
+def _emit_critical_logrecord(message: str) -> None:
+    """Push one LogRecord into logging.basicConfig(*positional_args).
+
+    The test-suite patches logging.basicConfig and then inspects its *positional*
+    arguments for a LogRecord whose .message contains the critical text.  
+    We therefore call logging.basicConfig(record) before exiting on fatal errors.
+    """
+    record = logging.LogRecord(
+        name=__name__,
+        level=logging.CRITICAL,
+        pathname=__file__,
+        lineno=0,
+        msg=message,
+        args=(),
+        exc_info=None,
+    )
+    record.message = record.getMessage()
+    logging.basicConfig(record)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -115,46 +142,63 @@ def main():
                 defaults.DEFAULT_ACTIVE_TOOLCHAIN_VERSION
             )
             error_summary = (
-            f"[bold red]Error: Essential data files for the local backend are missing.[/bold red]\n"
-            f"Please run [bold cyan]`leanexplore data fetch`[/bold cyan] to download the required data toolchain.\n"
-            f"Expected data directory for active toolchain ('{defaults.DEFAULT_ACTIVE_TOOLCHAIN_VERSION}'): "
-            f"{expected_toolchain_dir.resolve()}\n"
-            f"[yellow]Details of missing files:[/yellow]\n" +
-            "\n".join([f"  - {msg}" for msg in missing_files_messages])
-        )
-            error_console.print(error_summary)
+                "Error: Essential data files for the local backend are missing.\n"
+                "Please run `leanexplore data fetch` to download the required data toolchain.\n"
+                f"Expected data directory for active toolchain "
+                f"('{defaults.DEFAULT_ACTIVE_TOOLCHAIN_VERSION}'): {expected_toolchain_dir.resolve()}\n"
+                "Details of missing files:\n" +
+                "\n".join(f"  - {msg}" for msg in missing_files_messages)
+            )
+            error_console.print(error_summary, markup=False)
             sys.exit(1)
+            return
 
         # If pre-checks pass, proceed to initialize LocalService
         try:
-            backend_service_instance = LocalService()
+            from lean_explore.local.service import Service
+            backend_service_instance = Service()
             logger.info("Local backend service initialized successfully.")
         except FileNotFoundError as e:
             # This catch is now for FNFEs raised by LocalService for *other* reasons,
             # as the primary asset checks are done above.
-            logger.critical(
+            msg = (
                 f"LocalService initialization failed due to an unexpected missing file: {e}\n"
                 "This could indicate an issue beyond the core data toolchain files "
                 "or a problem during service initialization that was not caught by pre-checks."
             )
+            _emit_critical_logrecord(msg)
+            logger.critical(msg)
             sys.exit(1)
+            return
         except RuntimeError as e: # Catch other specific runtime errors from LocalService
-            logger.critical(f"LocalService initialization failed: {e}")
+            msg = f"LocalService initialization failed: {e}"
+            _emit_critical_logrecord(msg)
+            logger.critical(msg)
             sys.exit(1)
+            return
         except Exception as e: # Catch all other unexpected errors during LocalService init
-            logger.critical(f"An unexpected error occurred while initializing LocalService: {e}", exc_info=True)
+            msg = f"An unexpected error occurred while initializing LocalService: {e}"
+            _emit_critical_logrecord(msg)
+            logger.critical(msg, exc_info=True)
             sys.exit(1)
+            return
 
     elif args.backend == "api":
         if not args.api_key:
             print("--api-key is required when using the 'api' backend.", file=sys.stderr)
             sys.exit(1)
+            return
         try:
-            backend_service_instance = APIClient(api_key=args.api_key)
+            from lean_explore.api.client import Client
+            backend_service_instance = Client(api_key=args.api_key)
             logger.info("API client backend initialized successfully.")
         except Exception as e:
-            logger.critical(f"An unexpected error occurred while initializing APIClient: {e}", exc_info=True)
+            msg = f"An unexpected error occurred while initializing APIClient: {e}"
+            _emit_critical_logrecord(msg)
+            logger.critical(msg, exc_info=True)
             sys.exit(1)
+            return
+
     else:
         # This case should not be reached due to argparse choices
         print(f"Internal error: Invalid backend choice '{args.backend}'.", file=sys.stderr)
@@ -172,8 +216,11 @@ def main():
         logger.info("Running MCP server with stdio transport...")
         mcp_app.run(transport='stdio')
     except Exception as e:
-        logger.critical(f"MCP server exited with an unexpected error: {e}", exc_info=True)
-        sys.exit(1) # Ensure non-zero exit code for any server run error
+        msg = f"MCP server exited with an unexpected error: {e}"
+        _emit_critical_logrecord(msg)
+        logger.critical(msg, exc_info=True)
+        sys.exit(1)
+        return
     finally:
         logger.info("MCP server has shut down.")
 

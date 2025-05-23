@@ -70,28 +70,19 @@ class Service:
     def __init__(self):
         """Initializes the Service by loading data assets and configurations.
 
-        Ensures the user data directory for the active toolchain exists.
-        Loads the embedding model, FAISS index, and sets up the database engine.
+        Checks for essential local data files first, then loads the
+        embedding model, FAISS index, and sets up the database engine.
         Paths for data assets are sourced from `lean_explore.defaults`.
 
         Raises:
-            FileNotFoundError: If essential data files (FAISS index, map, DB)
-                               are not found at their expected locations for the
-                               active toolchain. Users will be guided to use
-                               `leanexplore data fetch`.
+            FileNotFoundError: If essential data files (DB, FAISS index, map)
+                               are not found at their expected locations.
             RuntimeError: If the embedding model fails to load or if other
                           critical initialization steps (like database connection
                           after file checks) fail.
         """
         logger.info("Initializing local Service...")
-        # Ensure the base user data directory exists.
-        # The specific toolchain version directory is expected to be created by `leanexplore data fetch`.
         try:
-            # defaults.LEAN_EXPLORE_USER_DATA_DIR is ~/.lean_explore/data
-            # defaults.LEAN_EXPLORE_TOOLCHAINS_BASE_DIR is ~/.lean_explore/data/toolchains
-            # The actual asset paths like defaults.DEFAULT_DB_PATH point into a versioned subdir.
-            # We ensure the parent of the specific toolchain path exists,
-            # which is LEAN_EXPLORE_TOOLCHAINS_BASE_DIR.
             defaults.LEAN_EXPLORE_TOOLCHAINS_BASE_DIR.mkdir(parents=True, exist_ok=True)
             logger.info(
                 f"User toolchains base directory ensured: {defaults.LEAN_EXPLORE_TOOLCHAINS_BASE_DIR}"
@@ -101,23 +92,29 @@ class Service:
                 f"Could not create user toolchains base directory "
                 f"{defaults.LEAN_EXPLORE_TOOLCHAINS_BASE_DIR}: {e}"
             )
-            # This is not necessarily fatal if all files are somehow already in place,
-            # but it's a warning sign. The subsequent file checks will be more definitive.
 
-        # Load embedding model
+        db_path = defaults.DEFAULT_DB_PATH
+        db_url = defaults.DEFAULT_DB_URL
+        is_file_db = db_url.startswith("sqlite:///")
+
+        if is_file_db and not db_path.exists():
+            error_message = (
+                f"Database file not found at the expected location: {db_path}\n"
+                "Please run 'leanexplore data fetch' to download the data toolchain."
+            )
+            logger.error(error_message)
+            raise FileNotFoundError(error_message)
+
         logger.info(f"Loading embedding model: {defaults.DEFAULT_EMBEDDING_MODEL_NAME}")
         self.embedding_model: Optional[SentenceTransformer] = load_embedding_model(
             defaults.DEFAULT_EMBEDDING_MODEL_NAME
         )
         if self.embedding_model is None:
-            # This error is critical and not related to 'data fetch' for this model.
             raise RuntimeError(
                 f"Failed to load embedding model: {defaults.DEFAULT_EMBEDDING_MODEL_NAME}. "
                 "Check model name and network connection if it's downloaded on the fly."
             )
 
-        # Load FAISS assets
-        # Paths from defaults now point to the versioned toolchain directory.
         faiss_index_path = defaults.DEFAULT_FAISS_INDEX_PATH
         faiss_map_path = defaults.DEFAULT_FAISS_MAP_PATH
         logger.info(f"Attempting to load FAISS assets: Index='{faiss_index_path}', Map='{faiss_map_path}'")
@@ -126,7 +123,6 @@ class Service:
             str(faiss_index_path), str(faiss_map_path)
         )
         if faiss_assets[0] is None or faiss_assets[1] is None:
-            # load_faiss_assets (in search.py) already logs detailed file not found errors.
             error_message = (
                 "Failed to load critical FAISS assets (index or ID map).\n"
                 "Expected at:\n"
@@ -140,32 +136,19 @@ class Service:
         self.text_chunk_id_map: List[str] = faiss_assets[1]
         logger.info("FAISS assets loaded successfully.")
 
-        # Check for database file and initialize engine
-        db_path = defaults.DEFAULT_DB_PATH
-        db_url = defaults.DEFAULT_DB_URL
         logger.info(f"Initializing database engine. Expected DB path: {db_path}")
-
-        # Explicitly check if the DB file exists if it's a file-based SQLite DB
-        is_file_db = db_url.startswith("sqlite:///")
-        if is_file_db and not db_path.exists():
-            error_message = (
-                f"Database file not found at the expected location: {db_path}\n"
-                "Please run 'leanexplore data fetch' to download the data toolchain."
-            )
-            logger.error(error_message)
-            raise FileNotFoundError(error_message)
-
         try:
             self.engine = create_engine(db_url)
+            # Test connection
+            with self.engine.connect() as conn: # Ensure connect is within try for OperationalError
+                logger.info("Database connection successful.")
+            # Setup SessionLocal after successful connection test
             self.SessionLocal: sessionmaker[SQLAlchemySessionType] = sessionmaker(
                 autocommit=False, autoflush=False, bind=self.engine
             )
-            # Test connection
-            with self.engine.connect() as conn:
-                logger.info("Database connection successful.")
         except OperationalError as oe:
             guidance = "Please check your database configuration or connection parameters."
-            if is_file_db: # If it's a file DB, and it existed, but connection failed
+            if is_file_db: # This check is now valid as is_file_db is defined earlier
                 guidance = (
                     f"The database file at '{db_path}' might be corrupted, inaccessible, or not a valid SQLite file. "
                     "Consider running 'leanexplore data fetch' to get a fresh copy."
@@ -173,13 +156,11 @@ class Service:
             logger.error(
                 f"Failed to initialize database engine or connection to {db_url}: {oe}\n{guidance}"
             )
-            # It's a runtime issue if the file existed but is problematic, or if it's a non-file DB error.
             raise RuntimeError(f"Database initialization failed: {oe}. {guidance}") from oe
-        except Exception as e: # Catch other SQLAlchemy or unexpected errors during engine setup
+        except Exception as e:
             logger.error(f"Unexpected error during database engine initialization: {e}", exc_info=True)
             raise RuntimeError(f"Database initialization failed unexpectedly: {e}") from e
 
-        # Store default search parameters from defaults module
         self.default_faiss_k: int = defaults.DEFAULT_FAISS_K
         self.default_pagerank_weight: float = defaults.DEFAULT_PAGERANK_WEIGHT
         self.default_text_relevance_weight: float = defaults.DEFAULT_TEXT_RELEVANCE_WEIGHT
@@ -239,9 +220,7 @@ class Service:
         start_time = time.time()
         actual_limit = limit if limit is not None else self.default_results_limit
 
-        if not self.embedding_model or not self.faiss_index or not self.text_chunk_id_map:
-            # This check is a safeguard; __init__ should prevent service instantiation
-            # if these assets are missing.
+        if self.embedding_model is None or self.faiss_index is None or self.text_chunk_id_map is None:
             logger.error("Search service assets not loaded. Service may not have initialized correctly.")
             raise RuntimeError("Search service assets not loaded. Please ensure data has been fetched.")
 
