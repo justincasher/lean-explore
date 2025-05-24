@@ -9,28 +9,31 @@ test preconditions, isolating tests from the actual user environment,
 and providing mock objects.
 """
 
-import pytest
 import pathlib
+from typing import TYPE_CHECKING, Iterator, List
 from unittest.mock import MagicMock
-from typing import TYPE_CHECKING, Iterator # Added Iterator for type hinting yield
+
+import pytest
 
 if TYPE_CHECKING:
-    from pytest_mock import MockerFixture # For type hinting the 'mocker' fixture
+    from pytest_mock import MockerFixture
+
+import faiss
+import sqlalchemy
+from sentence_transformers import SentenceTransformer
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session as SQLAlchemySession
+from sqlalchemy.orm import sessionmaker
 
 import lean_explore.cli.config_utils
 import lean_explore.defaults
-from sentence_transformers import SentenceTransformer # For type hint/spec
-import faiss # For type hint/spec
-import sqlalchemy
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session as SQLAlchemySession
-
-# Import your SQLAlchemy Base from your models
 from lean_explore.shared.models.db import Base as DBBase
 
 
 @pytest.fixture
-def isolated_config_dir(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+def isolated_config_dir(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> pathlib.Path:
     """Redirects CLI configuration utilities to use a temporary directory.
 
     This fixture ensures that tests interacting with user configuration
@@ -63,15 +66,15 @@ def isolated_config_dir(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch)
         return fake_config_file
 
     monkeypatch.setattr(
-        lean_explore.cli.config_utils,
-        "get_config_file_path",
-        mock_get_config_file_path
+        lean_explore.cli.config_utils, "get_config_file_path", mock_get_config_file_path
     )
     yield fake_app_config_dir
 
 
 @pytest.fixture
-def isolated_data_paths(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+def isolated_data_paths(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> pathlib.Path:
     """Redirects default data and toolchain paths to temporary locations.
 
     This fixture modifies constants in `lean_explore.defaults` to ensure
@@ -98,16 +101,16 @@ def isolated_data_paths(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch)
     fake_user_data_root.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
-        lean_explore.defaults,
-        "LEAN_EXPLORE_USER_DATA_DIR",
-        fake_user_data_root
+        lean_explore.defaults, "LEAN_EXPLORE_USER_DATA_DIR", fake_user_data_root
     )
 
-    fake_active_toolchain_file = fake_user_data_root / lean_explore.defaults.ACTIVE_TOOLCHAIN_CONFIG_FILENAME
+    fake_active_toolchain_file = (
+        fake_user_data_root / lean_explore.defaults.ACTIVE_TOOLCHAIN_CONFIG_FILENAME
+    )
     monkeypatch.setattr(
         lean_explore.defaults,
         "ACTIVE_TOOLCHAIN_CONFIG_FILE_PATH",
-        fake_active_toolchain_file
+        fake_active_toolchain_file,
     )
 
     fake_toolchains_base_dir = fake_user_data_root / "toolchains"
@@ -115,27 +118,44 @@ def isolated_data_paths(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         lean_explore.defaults,
         "LEAN_EXPLORE_TOOLCHAINS_BASE_DIR",
-        fake_toolchains_base_dir
+        fake_toolchains_base_dir,
     )
 
     active_version_str = lean_explore.defaults.DEFAULT_ACTIVE_TOOLCHAIN_VERSION
-    fake_active_toolchain_version_data_path = fake_toolchains_base_dir / active_version_str
+    fake_active_toolchain_version_data_path = (
+        fake_toolchains_base_dir / active_version_str
+    )
     fake_active_toolchain_version_data_path.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         lean_explore.defaults,
         "_ACTIVE_TOOLCHAIN_VERSION_DATA_PATH",
-        fake_active_toolchain_version_data_path
+        fake_active_toolchain_version_data_path,
     )
 
-    fake_db_path = fake_active_toolchain_version_data_path / lean_explore.defaults.DEFAULT_DB_FILENAME
+    fake_db_path = (
+        fake_active_toolchain_version_data_path
+        / lean_explore.defaults.DEFAULT_DB_FILENAME
+    )
     monkeypatch.setattr(lean_explore.defaults, "DEFAULT_DB_PATH", fake_db_path)
-    monkeypatch.setattr(lean_explore.defaults, "DEFAULT_DB_URL", f"sqlite:///{fake_db_path.resolve()}")
+    monkeypatch.setattr(
+        lean_explore.defaults, "DEFAULT_DB_URL", f"sqlite:///{fake_db_path.resolve()}"
+    )
 
-    fake_faiss_index_path = fake_active_toolchain_version_data_path / lean_explore.defaults.DEFAULT_FAISS_INDEX_FILENAME
-    monkeypatch.setattr(lean_explore.defaults, "DEFAULT_FAISS_INDEX_PATH", fake_faiss_index_path)
+    fake_faiss_index_path = (
+        fake_active_toolchain_version_data_path
+        / lean_explore.defaults.DEFAULT_FAISS_INDEX_FILENAME
+    )
+    monkeypatch.setattr(
+        lean_explore.defaults, "DEFAULT_FAISS_INDEX_PATH", fake_faiss_index_path
+    )
 
-    fake_faiss_map_path = fake_active_toolchain_version_data_path / lean_explore.defaults.DEFAULT_FAISS_MAP_FILENAME
-    monkeypatch.setattr(lean_explore.defaults, "DEFAULT_FAISS_MAP_PATH", fake_faiss_map_path)
+    fake_faiss_map_path = (
+        fake_active_toolchain_version_data_path
+        / lean_explore.defaults.DEFAULT_FAISS_MAP_FILENAME
+    )
+    monkeypatch.setattr(
+        lean_explore.defaults, "DEFAULT_FAISS_MAP_PATH", fake_faiss_map_path
+    )
 
     yield fake_user_data_root
 
@@ -161,7 +181,7 @@ def mock_load_embedding_model(mocker: "MockerFixture") -> MagicMock:
     mock_model_instance = mocker.MagicMock(spec=SentenceTransformer)
     mock_loader = mocker.patch(
         "lean_explore.local.service.load_embedding_model",
-        return_value=mock_model_instance
+        return_value=mock_model_instance,
     )
     yield mock_loader
 
@@ -187,7 +207,7 @@ def mock_load_faiss_assets(mocker: "MockerFixture") -> MagicMock:
     mock_id_map_instance: List[str] = ["id_map_val_1", "id_map_val_2"]
     mock_loader = mocker.patch(
         "lean_explore.local.service.load_faiss_assets",
-        return_value=(mock_faiss_index_instance, mock_id_map_instance)
+        return_value=(mock_faiss_index_instance, mock_id_map_instance),
     )
     yield mock_loader
 
@@ -217,8 +237,7 @@ def mock_sqlalchemy_engine_setup(mocker: "MockerFixture") -> MagicMock:
     mock_engine.connect.return_value = mock_connection
 
     mock_create_engine = mocker.patch(
-        "lean_explore.local.service.create_engine",
-        return_value=mock_engine
+        "lean_explore.local.service.create_engine", return_value=mock_engine
     )
 
     yield mock_create_engine

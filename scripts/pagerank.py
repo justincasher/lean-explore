@@ -11,8 +11,7 @@ min-max scaled version of their PageRank scores.
 import argparse
 import logging
 import sys
-from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 # --- Dependency Imports ---
 try:
@@ -33,9 +32,13 @@ except ImportError as e:
 
 # --- Project Model & Config Imports ---
 try:
-    from lean_explore.models import (Declaration, Dependency, StatementGroup,
-                                     StatementGroupDependency) # Added StatementGroupDependency
-    from lean_explore.config import APP_CONFIG
+    from .config import APP_CONFIG
+    from lean_explore.shared.models.db import (
+        Declaration,
+        Dependency,
+        StatementGroup,
+        StatementGroupDependency,
+    )
 except ImportError as e:
     # pylint: disable=broad-exception-raised
     print(
@@ -45,7 +48,7 @@ except ImportError as e:
         file=sys.stderr,
     )
     sys.exit(1)
-except Exception as e: # pylint: disable=broad-except
+except Exception as e:  # pylint: disable=broad-except
     print(
         f"An unexpected error occurred during project module import: {e}",
         file=sys.stderr,
@@ -60,7 +63,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
-logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING) # Reduce SA verbosity
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)  # Reduce SA verbosity
 
 
 # --- Constants ---
@@ -101,14 +104,21 @@ def load_declaration_graph_from_db(
     dependencies_query = session.execute(
         select(Dependency.source_decl_id, Dependency.target_decl_id)
     )
-    total_deps = session.execute(select(func.count(Dependency.id))).scalar_one_or_none() or 0
+    total_deps = (
+        session.execute(select(func.count(Dependency.id))).scalar_one_or_none() or 0
+    )
 
     graph_decl = nx.DiGraph()
     graph_decl.add_nodes_from(all_decl_ids)
 
     edge_count = 0
     invalid_edge_count = 0
-    with tqdm(dependencies_query, desc="Processing Declaration Dependencies", unit="dep", total=total_deps) as pbar:
+    with tqdm(
+        dependencies_query,
+        desc="Processing Declaration Dependencies",
+        unit="dep",
+        total=total_deps,
+    ) as pbar:
         for source_id, target_id in pbar:
             if source_id in all_decl_ids and target_id in all_decl_ids:
                 graph_decl.add_edge(source_id, target_id)
@@ -117,8 +127,11 @@ def load_declaration_graph_from_db(
                 invalid_edge_count += 1
                 if invalid_edge_count % 10000 == 1:
                     logger.debug(
-                        "Skipping invalid edge for DeclGraph (src/tgt ID not in all_decl_ids): %s -> %s. Invalid count: %d",
-                        source_id, target_id, invalid_edge_count
+                        "Skipping invalid edge for DeclGraph (src/tgt ID not in "
+                        "all_decl_ids): %s -> %s. Invalid count: %d",
+                        source_id,
+                        target_id,
+                        invalid_edge_count,
                     )
 
     logger.info(
@@ -163,28 +176,44 @@ def load_statement_group_graph_from_db(
     graph_sg = nx.DiGraph()
     graph_sg.add_nodes_from(all_sg_ids)
 
-    logger.info("Loading StatementGroup dependency links from 'statement_group_dependencies' table...")
+    logger.info(
+        "Loading StatementGroup dependency links from "
+        "'statement_group_dependencies' table..."
+    )
     sg_deps_query = session.execute(
         select(
             StatementGroupDependency.source_statement_group_id,
             StatementGroupDependency.target_statement_group_id,
         )
     )
-    total_sg_deps = session.execute(select(func.count(StatementGroupDependency.id))).scalar_one_or_none() or 0
+    total_sg_deps = (
+        session.execute(
+            select(func.count(StatementGroupDependency.id))
+        ).scalar_one_or_none()
+        or 0
+    )
 
     edge_count = 0
     invalid_edge_count = 0
-    with tqdm(sg_deps_query, desc="Processing StatementGroup Dependencies", unit="dep", total=total_sg_deps) as pbar:
+    with tqdm(
+        sg_deps_query,
+        desc="Processing StatementGroup Dependencies",
+        unit="dep",
+        total=total_sg_deps,
+    ) as pbar:
         for source_sg_id, target_sg_id in pbar:
             if source_sg_id in all_sg_ids and target_sg_id in all_sg_ids:
                 graph_sg.add_edge(source_sg_id, target_sg_id)
                 edge_count += 1
             else:
-                invalid_edge_count +=1
+                invalid_edge_count += 1
                 if invalid_edge_count % 1000 == 1:
                     logger.debug(
-                        "Skipping invalid edge for SG Graph (src/tgt SG ID not in all_sg_ids): %s -> %s. Invalid count: %d",
-                        source_sg_id, target_sg_id, invalid_edge_count
+                        "Skipping invalid edge for SG Graph (src/tgt SG ID not in "
+                        "all_sg_ids): %s -> %s. Invalid count: %d",
+                        source_sg_id,
+                        target_sg_id,
+                        invalid_edge_count,
                     )
 
     logger.info(
@@ -194,8 +223,10 @@ def load_statement_group_graph_from_db(
     )
     if invalid_edge_count > 0:
         logger.warning(
-            "Skipped %d invalid dependency edges for SG Graph (SG ID not found). This may indicate data inconsistency if 'statement_group_dependencies' table is out of sync.",
-            invalid_edge_count
+            "Skipped %d invalid dependency edges for SG Graph (SG ID not found). "
+            "This may indicate data inconsistency if 'statement_group_dependencies' "
+            "table is out of sync.",
+            invalid_edge_count,
         )
     return graph_sg
 
@@ -236,13 +267,14 @@ def calculate_pagerank(
         logger.error(
             "PageRank power iteration failed to converge for %s Graph "
             "(alpha=%.2f, max_iter=1000, tol=1.0e-8): %s. "
-            "Consider increasing max_iter, adjusting alpha, or checking graph structure.",
+            "Consider increasing max_iter, adjusting alpha, or checking graph "
+            "structure.",
             graph_type,
             alpha,
             e_conv,
         )
         return {}
-    except Exception as e: # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
         logger.error(
             "Error during PageRank calculation for %s Graph: %s",
             graph_type,
@@ -295,7 +327,12 @@ def update_pagerank_scores_in_db(
     updated_count = 0
     pending_updates_mappings: List[Dict[str, Any]] = []
 
-    with tqdm(scores_map.items(), desc=f"Updating {item_type_name} {column_name}", unit="item", total=len(scores_map)) as pbar:
+    with tqdm(
+        scores_map.items(),
+        desc=f"Updating {item_type_name} {column_name}",
+        unit="item",
+        total=len(scores_map),
+    ) as pbar:
         for item_id, score in pbar:
             pending_updates_mappings.append(
                 {"id": int(item_id), column_name: float(score)}
@@ -366,7 +403,10 @@ def calculate_and_store_scaled_statement_group_pagerank(
 
     ids = np.array([item.id for item in sg_data_result])
     raw_scores = np.array(
-        [item.pagerank_score if item.pagerank_score is not None else 0.0 for item in sg_data_result],
+        [
+            item.pagerank_score if item.pagerank_score is not None else 0.0
+            for item in sg_data_result
+        ],
         dtype=np.float64,
     )
     logger.info("Processing %d raw PageRank scores for scaling.", len(raw_scores))
@@ -386,7 +426,8 @@ def calculate_and_store_scaled_statement_group_pagerank(
         logger.warning(
             "All log-transformed PageRank scores are identical (%.4f). "
             "Scaled scores will be uniformly set to %.1f.",
-            min_log_score, default_scaled_val
+            min_log_score,
+            default_scaled_val,
         )
         for item_id in ids:
             scaled_scores_map[int(item_id)] = default_scaled_val
@@ -471,7 +512,7 @@ def main():
         engine = create_engine(args.db_url, echo=False)
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-        with engine.connect(): 
+        with engine.connect():
             logger.info("Database connection successful.")
 
         if not args.skip_declarations:
@@ -480,20 +521,30 @@ def main():
                 try:
                     decl_graph, _ = load_declaration_graph_from_db(session)
                     if decl_graph and decl_graph.number_of_nodes() > 0:
-                        decl_pr_scores = calculate_pagerank(decl_graph, args.alpha, "Declaration")
+                        decl_pr_scores = calculate_pagerank(
+                            decl_graph, args.alpha, "Declaration"
+                        )
                         if decl_pr_scores:
                             update_pagerank_scores_in_db(
-                                session, decl_pr_scores, Declaration,
-                                "pagerank_score", args.batch_size, "Declaration"
+                                session,
+                                decl_pr_scores,
+                                Declaration,
+                                "pagerank_score",
+                                args.batch_size,
+                                "Declaration",
                             )
                         else:
-                            logger.info("No PageRank scores calculated for declarations.")
+                            logger.info(
+                                "No PageRank scores calculated for declarations."
+                            )
                     else:
-                        logger.info("Skipping Declaration PageRank: graph empty/not built.")
-                    session.commit() 
-                except Exception: 
+                        logger.info(
+                            "Skipping Declaration PageRank: graph empty/not built."
+                        )
+                    session.commit()
+                except Exception:
                     session.rollback()
-                    raise 
+                    raise
             logger.info("--- Declaration PageRank Phase Completed ---")
         else:
             logger.info("--- Skipping Declaration PageRank Phase ---")
@@ -502,26 +553,37 @@ def main():
             logger.info("--- Starting StatementGroup PageRank Phase ---")
             with SessionLocal() as session:
                 try:
-                    sg_graph = load_statement_group_graph_from_db(session) # Adjusted call
+                    sg_graph = load_statement_group_graph_from_db(session)
                     if sg_graph and sg_graph.number_of_nodes() > 0:
-                        sg_pr_scores = calculate_pagerank(sg_graph, args.alpha, "StatementGroup")
+                        sg_pr_scores = calculate_pagerank(
+                            sg_graph, args.alpha, "StatementGroup"
+                        )
                         if sg_pr_scores:
                             update_pagerank_scores_in_db(
-                                session, sg_pr_scores, StatementGroup,
-                                "pagerank_score", args.batch_size, "StatementGroup"
+                                session,
+                                sg_pr_scores,
+                                StatementGroup,
+                                "pagerank_score",
+                                args.batch_size,
+                                "StatementGroup",
                             )
-                            session.commit() 
+                            session.commit()
                             calculate_and_store_scaled_statement_group_pagerank(
                                 session, args.batch_size
                             )
-                            session.commit() 
+                            session.commit()
                         else:
-                            logger.info("No PageRank scores for statement groups to update/scale.")
+                            logger.info(
+                                "No PageRank scores for statement groups to "
+                                "update/scale."
+                            )
                     else:
-                        logger.info("Skipping StatementGroup PageRank: graph empty/not built.")
-                except Exception: 
+                        logger.info(
+                            "Skipping StatementGroup PageRank: graph empty/not built."
+                        )
+                except Exception:
                     session.rollback()
-                    raise 
+                    raise
             logger.info("--- StatementGroup PageRank Phase Completed ---")
         else:
             logger.info("--- Skipping StatementGroup PageRank Phase ---")
@@ -537,10 +599,10 @@ def main():
     except SQLAlchemyError as e:
         logger.error("A database error occurred: %s", e, exc_info=True)
         sys.exit(1)
-    except ImportError as e: 
+    except ImportError as e:
         logger.error("Import error: %s. Ensure requirements are installed.", e)
         sys.exit(1)
-    except Exception as e: # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
         logger.critical("An unexpected critical error occurred: %s", e, exc_info=True)
         sys.exit(1)
     finally:

@@ -8,12 +8,13 @@ performing searches and retrieving detailed information.
 """
 
 from typing import List, Optional
+
 import httpx
 
 from lean_explore.shared.models.api import (
+    APICitationsResponse,
     APISearchResponse,
     APISearchResultItem,
-    APICitationsResponse
 )
 
 _DEFAULT_API_BASE_URL = "https://www.leanexplore.com/api/v1"
@@ -41,14 +42,10 @@ class Client:
         self.base_url: str = _DEFAULT_API_BASE_URL
         self.api_key: str = api_key
         self.timeout: float = timeout
-        self._headers: dict = {
-            "Authorization": f"Bearer {self.api_key}"
-        }
+        self._headers: dict = {"Authorization": f"Bearer {self.api_key}"}
 
     async def search(
-        self,
-        query: str,
-        package_filters: Optional[List[str]] = None
+        self, query: str, package_filters: Optional[List[str]] = None
     ) -> APISearchResponse:
         """Performs a search for statement groups via the API.
 

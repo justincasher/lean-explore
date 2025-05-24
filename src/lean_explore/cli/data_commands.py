@@ -12,7 +12,6 @@ import hashlib
 import json
 import pathlib
 import shutil
-import sys # For exit
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -27,12 +26,13 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
-from lean_explore import defaults # For R2 URLs and local paths
+from lean_explore import defaults  # For R2 URLs and local paths
 
 # Typer application for data commands
 app = typer.Typer(
     name="data",
-    help="Manage local data toolchains for Lean Explore (e.g., download, list, select).",
+    help="Manage local data toolchains for Lean Explore (e.g., download, list, "
+    "select).",
     no_args_is_help=True,
 )
 
@@ -41,6 +41,7 @@ console = Console()
 
 
 # --- Internal Helper Functions ---
+
 
 def _fetch_remote_json(url: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
     """Fetches JSON data from a remote URL.
@@ -72,7 +73,8 @@ def _resolve_toolchain_version_info(
 
     Args:
         manifest_data: The parsed manifest dictionary.
-        requested_identifier: The version string requested by the user (e.g., "stable", "0.1.0").
+        requested_identifier: The version string requested by the user (e.g., "stable",
+            "0.1.0").
 
     Returns:
         The dictionary containing information for the resolved concrete toolchain
@@ -80,7 +82,9 @@ def _resolve_toolchain_version_info(
     """
     toolchains_dict = manifest_data.get("toolchains")
     if not isinstance(toolchains_dict, dict):
-        console.print("[bold red]Error: Manifest is missing 'toolchains' dictionary.[/bold red]")
+        console.print(
+            "[bold red]Error: Manifest is missing 'toolchains' dictionary.[/bold red]"
+        )
         return None
 
     target_version_key = requested_identifier
@@ -88,17 +92,20 @@ def _resolve_toolchain_version_info(
         stable_alias_target = manifest_data.get("default_toolchain")
         if not stable_alias_target:
             console.print(
-                f"[bold red]Error: Manifest does not define a 'default_toolchain' for 'stable'.[/bold red]"
+                "[bold red]Error: Manifest does not define a 'default_toolchain' "
+                "for 'stable'.[/bold red]"
             )
             return None
         target_version_key = stable_alias_target
-        console.print(f"Note: 'stable' currently points to version '{target_version_key}'.")
+        console.print(
+            f"Note: 'stable' currently points to version '{target_version_key}'."
+        )
 
     version_info = toolchains_dict.get(target_version_key)
     if not version_info:
         console.print(
-            f"[bold red]Error: Version '{target_version_key}' (resolved from '{requested_identifier}') "
-            f"not found in the manifest.[/bold red]"
+            f"[bold red]Error: Version '{target_version_key}' (resolved from "
+            f"'{requested_identifier}') not found in the manifest.[/bold red]"
         )
         return None
 
@@ -124,9 +131,9 @@ def _download_file_with_progress(
         url: The URL to download from.
         destination_path: The local path to save the downloaded file.
         description: A description of the file for the progress bar.
-        expected_size_bytes: The expected size of the file in bytes for progress tracking.
-                             This should typically be the size of the compressed file if
-                             downloading a gzipped file.
+        expected_size_bytes: The expected size of the file in bytes for progress
+            tracking. This should typically be the size of the compressed file if
+            downloading a gzipped file.
         timeout: Request timeout in seconds for establishing connection and for read.
 
     Returns:
@@ -141,27 +148,36 @@ def _download_file_with_progress(
             r.raise_for_status()
 
             # Content-Length should refer to the size of the entity on the wire.
-            # If the server sends Content-Encoding: gzip, this should be the gzipped size.
+            # If the server sends Content-Encoding: gzip, this should be the gzipped
+            # size.
             total_size_from_header = int(r.headers.get("content-length", 0))
 
             display_size = total_size_from_header
             if expected_size_bytes is not None:
-                if total_size_from_header > 0 and expected_size_bytes != total_size_from_header:
+                if (
+                    total_size_from_header > 0
+                    and expected_size_bytes != total_size_from_header
+                ):
                     console.print(
-                        f"[yellow]Warning: Expected size for [cyan]{description}[/cyan] is {expected_size_bytes} bytes, "
-                        f"but server reports Content-Length: {total_size_from_header} bytes. "
-                        f"Using server reported size for progress bar if available, otherwise expected size.[/yellow]"
+                        f"[yellow]Warning: Expected size for "
+                        f"[cyan]{description}[/cyan] "
+                        f"is {expected_size_bytes} bytes, but server "
+                        "reports "
+                        f"Content-Length: {total_size_from_header} bytes. Using server "
+                        "reported size for progress bar if available, otherwise "
+                        "expected size.[/yellow]"
                     )
-                # Prefer expected_size_bytes if it's provided and server doesn't send Content-Length
-                # or if we want to strictly adhere to manifest size for progress.
-                # However, for live progress, server's content-length is usually more accurate
-                # for what's being transferred.
-                if total_size_from_header == 0: # If server didn't provide content-length
-                     display_size = expected_size_bytes
+                # Prefer expected_size_bytes if it's provided and server doesn't send
+                # Content-Length or if we want to strictly adhere to manifest size for
+                # progress. However, for live progress, server's content-length is
+                # usually more accurate for what's being transferred.
+                if (
+                    total_size_from_header == 0
+                ):  # If server didn't provide content-length
+                    display_size = expected_size_bytes
             elif total_size_from_header == 0 and expected_size_bytes is None:
                 # Cannot determine size for progress bar
                 display_size = None
-
 
             with Progress(
                 TextColumn("[progress.description]{task.description}"),
@@ -176,8 +192,8 @@ def _download_file_with_progress(
                 destination_path.parent.mkdir(parents=True, exist_ok=True)
                 downloaded_bytes_count = 0
                 with open(destination_path, "wb") as f:
-                    # Iterate over the raw stream to prevent requests from auto-decompressing
-                    # based on Content-Encoding headers.
+                    # Iterate over the raw stream to prevent requests from
+                    # auto-decompressing based on Content-Encoding headers.
                     for chunk in r.raw.stream(decode_content=False, amt=8192):
                         f.write(chunk)
                         downloaded_bytes_count += len(chunk)
@@ -187,29 +203,41 @@ def _download_file_with_progress(
 
         # Sanity check after download
         actual_downloaded_size = destination_path.stat().st_size
-        if total_size_from_header > 0 and actual_downloaded_size != total_size_from_header:
+        if (
+            total_size_from_header > 0
+            and actual_downloaded_size != total_size_from_header
+        ):
             # This might indicate an incomplete download if not all bytes were written.
             console.print(
-                f"[orange3]Warning: For [cyan]{description}[/cyan], downloaded size ({actual_downloaded_size} bytes) "
-                f"differs from Content-Length header ({total_size_from_header} bytes). "
-                f"Checksum verification will be the final arbiter.[/orange3]"
+                f"[orange3]Warning: For [cyan]{description}[/cyan], downloaded size "
+                f"({actual_downloaded_size} bytes) differs from Content-Length header "
+                f"({total_size_from_header} bytes). Checksum verification will be the "
+                "final arbiter.[/orange3]"
             )
-        elif expected_size_bytes is not None and actual_downloaded_size != expected_size_bytes:
-             console.print(
-                f"[orange3]Warning: For [cyan]{description}[/cyan], downloaded size ({actual_downloaded_size} bytes) "
-                f"differs from manifest expected size ({expected_size_bytes} bytes). "
-                f"Checksum verification will be the final arbiter.[/orange3]"
+        elif (
+            expected_size_bytes is not None
+            and actual_downloaded_size != expected_size_bytes
+        ):
+            console.print(
+                f"[orange3]Warning: For [cyan]{description}[/cyan], downloaded size "
+                f"({actual_downloaded_size} bytes) differs from manifest expected "
+                f"size ({expected_size_bytes} bytes). Checksum verification will be "
+                "the final arbiter.[/orange3]"
             )
 
-
-        console.print(f"[green]Downloaded raw content for {description} successfully.[/green]")
+        console.print(
+            f"[green]Downloaded raw content for {description} successfully.[/green]"
+        )
         return True
     except requests.exceptions.RequestException as e:
         console.print(f"[bold red]Error downloading {description}: {e}[/bold red]")
-    except IOError as e:
+    except OSError as e:
         console.print(f"[bold red]Error writing {description} to disk: {e}[/bold red]")
-    except Exception as e: # Catch any other unexpected errors during download
-        console.print(f"[bold red]An unexpected error occurred during download of {description}: {e}[/bold red]")
+    except Exception as e:  # Catch any other unexpected errors during download
+        console.print(
+            f"[bold red]An unexpected error occurred during download of {description}:"
+            f" {e}[/bold red]"
+        )
 
     if destination_path.exists():
         destination_path.unlink(missing_ok=True)
@@ -244,8 +272,11 @@ def _verify_sha256_checksum(file_path: pathlib.Path, expected_checksum: str) -> 
                 f"  Got:      {calculated_checksum}"
             )
             return False
-    except IOError as e:
-        console.print(f"[bold red]Error reading file {file_path.name} for checksum: {e}[/bold red]")
+    except OSError as e:
+        console.print(
+            "[bold red]Error reading file "
+            f"{file_path.name} for checksum: {e}[/bold red]"
+        )
         return False
 
 
@@ -261,27 +292,34 @@ def _decompress_gzipped_file(
     Returns:
         True if decompression was successful, False otherwise.
     """
-    console.print(f"Decompressing [cyan]{gzipped_file_path.name}[/cyan] to {output_file_path.name}...")
+    console.print(
+        f"Decompressing [cyan]{gzipped_file_path.name}[/cyan] to "
+        f"{output_file_path.name}..."
+    )
     try:
         output_file_path.parent.mkdir(parents=True, exist_ok=True)
         with gzip.open(gzipped_file_path, "rb") as f_in:
             with open(output_file_path, "wb") as f_out:
                 shutil.copyfileobj(f_in, f_out)
-        console.print(f"[green]Decompressed {gzipped_file_path.name} successfully.[/green]")
+        console.print(
+            f"[green]Decompressed {gzipped_file_path.name} successfully.[/green]"
+        )
         return True
-    except (gzip.BadGzipFile, EOFError, IOError) as e:
-        console.print(f"[bold red]Error decompressing {gzipped_file_path.name}: {e}[/bold red]")
-    if output_file_path.exists(): # Clean up partial decompression
+    except (OSError, gzip.BadGzipFile, EOFError) as e:
+        console.print(
+            f"[bold red]Error decompressing {gzipped_file_path.name}: {e}[/bold red]"
+        )
+    if output_file_path.exists():  # Clean up partial decompression
         output_file_path.unlink(missing_ok=True)
     return False
 
 
 # --- CLI Command Functions ---
 
+
 @app.callback()
 def main() -> None:
-    """
-    Lean-Explore data CLI.
+    """Lean-Explore data CLI.
 
     This callback exists only to prevent Typer from treating the first
     sub-command as a *default* command when there is otherwise just one.
@@ -298,16 +336,17 @@ def fetch(
             "'stable' will attempt to use the 'default_toolchain' from the manifest."
         ),
         show_default=False,
-    )
+    ),
 ) -> None:
-    """
-    Fetches and installs a specified data toolchain version from the remote repository.
+    """Fetches and installs a specified data version from the remote repository.
 
     Downloads necessary assets like the database and FAISS index, verifies their
     integrity via SHA256 checksums, decompresses them, and places them into the
     appropriate local directory (e.g., ~/.lean_explore/data/toolchains/<version>/).
     """
-    console.rule(f"[bold blue]Fetching Lean Explore Data Toolchain: {version}[/bold blue]")
+    console.rule(
+        f"[bold blue]Fetching Lean Explore Data Toolchain: {version}[/bold blue]"
+    )
 
     if version is None:
         version = "stable"
@@ -316,7 +355,9 @@ def fetch(
     console.print(f"Fetching data manifest from {defaults.R2_MANIFEST_DEFAULT_URL}...")
     manifest_data = _fetch_remote_json(defaults.R2_MANIFEST_DEFAULT_URL)
     if not manifest_data:
-        console.print("[bold red]Failed to fetch or parse the manifest. Aborting.[/bold red]")
+        console.print(
+            "[bold red]Failed to fetch or parse the manifest. Aborting.[/bold red]"
+        )
         raise typer.Exit(code=1)
     console.print("[green]Manifest fetched successfully.[/green]")
 
@@ -326,9 +367,10 @@ def fetch(
         # _resolve_toolchain_version_info already prints detailed errors
         raise typer.Exit(code=1)
 
-    resolved_version_key = version_info["_resolved_key"] # Key like "0.1.0"
+    resolved_version_key = version_info["_resolved_key"]  # Key like "0.1.0"
     console.print(
-        f"Processing toolchain version: [bold yellow]{resolved_version_key}[/bold yellow] "
+        f"Processing toolchain version: [bold yellow]{resolved_version_key}"
+        "[/bold yellow] "
         f"('{version_info.get('description', 'N/A')}')"
     )
 
@@ -339,7 +381,8 @@ def fetch(
         console.print(f"Data will be stored in: [dim]{local_version_dir}[/dim]")
     except OSError as e:
         console.print(
-            f"[bold red]Error creating local directory {local_version_dir}: {e}[/bold red]"
+            f"[bold red]Error creating local directory {local_version_dir}: {e}"
+            "[/bold red]"
         )
         raise typer.Exit(code=1)
 
@@ -347,7 +390,8 @@ def fetch(
     files_to_process: List[Dict[str, Any]] = version_info.get("files", [])
     if not files_to_process:
         console.print(
-            f"[yellow]No files listed in the manifest for version '{resolved_version_key}'. Nothing to do.[/yellow]"
+            f"[yellow]No files listed in the manifest for version "
+            f"'{resolved_version_key}'. Nothing to do.[/yellow]"
         )
         raise typer.Exit(code=0)
 
@@ -356,13 +400,17 @@ def fetch(
         local_name = file_entry.get("local_name")
         remote_name = file_entry.get("remote_name")
         expected_checksum = file_entry.get("sha256")
-        expected_size_compressed = file_entry.get("size_bytes_compressed") # This is size of .gz
-        assets_r2_path_prefix = version_info.get("assets_base_path_r2", "") # e.g., "assets/0.1.0/"
+        expected_size_compressed = file_entry.get(
+            "size_bytes_compressed"
+        )  # This is size of .gz
+        assets_r2_path_prefix = version_info.get(
+            "assets_base_path_r2", ""
+        )  # e.g., "assets/0.1.0/"
 
         if not all([local_name, remote_name, expected_checksum]):
             console.print(
                 f"[bold red]Skipping invalid file entry in manifest: {file_entry}. "
-                f"Missing name, remote name, or checksum.[/bold red]"
+                "Missing name, remote name, or checksum.[/bold red]"
             )
             all_files_successful = False
             continue
@@ -370,19 +418,22 @@ def fetch(
         console.rule(f"[bold cyan]Processing: {local_name}[/bold cyan]")
 
         final_local_path = local_version_dir / local_name
-        temp_download_path = local_version_dir / remote_name # Path for the .gz file
+        temp_download_path = local_version_dir / remote_name  # Path for the .gz file
 
         remote_url = (
-            defaults.R2_ASSETS_BASE_URL.rstrip("/") + "/" +
-            assets_r2_path_prefix.strip("/") + "/" +
-            remote_name
+            defaults.R2_ASSETS_BASE_URL.rstrip("/")
+            + "/"
+            + assets_r2_path_prefix.strip("/")
+            + "/"
+            + remote_name
         )
 
         if final_local_path.exists():
             console.print(
-                f"[yellow]'{local_name}' already exists at {final_local_path}. Skipping download.[/yellow]\n"
-                f"[dim]  (Checksum verification for existing files is not yet implemented. "
-                f"Delete the file to re-download).[/dim]"
+                f"[yellow]'{local_name}' already exists at {final_local_path}. "
+                "Skipping download.[/yellow]\n"
+                f"[dim]  (Checksum verification for existing files is not yet "
+                "implemented. Delete the file to re-download).[/dim]"
             )
             continue
 
@@ -390,12 +441,17 @@ def fetch(
             temp_download_path.unlink(missing_ok=True)
 
         download_ok = _download_file_with_progress(
-            remote_url, temp_download_path, description=local_name,
-            expected_size_bytes=expected_size_compressed # Pass size of .gz for progress
+            remote_url,
+            temp_download_path,
+            description=local_name,
+            expected_size_bytes=expected_size_compressed,
         )
         if not download_ok:
             all_files_successful = False
-            console.print(f"[bold red]Failed to download {remote_name}. Halting for this file.[/bold red]")
+            console.print(
+                f"[bold red]Failed to download {remote_name}. Halting for this file."
+                "[/bold red]"
+            )
             continue
 
         checksum_ok = _verify_sha256_checksum(temp_download_path, expected_checksum)
@@ -403,7 +459,7 @@ def fetch(
             all_files_successful = False
             console.print(
                 f"[bold red]Checksum verification failed for {remote_name}. "
-                f"Deleting downloaded file.[/bold red]"
+                "Deleting downloaded file.[/bold red]"
             )
             temp_download_path.unlink(missing_ok=True)
             continue
@@ -413,27 +469,33 @@ def fetch(
             all_files_successful = False
             console.print(
                 f"[bold red]Failed to decompress {remote_name}. "
-                f"Cleaning up temporary files.[/bold red]"
+                "Cleaning up temporary files.[/bold red]"
             )
             if final_local_path.exists():
                 final_local_path.unlink(missing_ok=True)
-            if temp_download_path.exists(): # Ensure .gz is also removed on decompress failure
+            if (
+                temp_download_path.exists()
+            ):  # Ensure .gz is also removed on decompress failure
                 temp_download_path.unlink(missing_ok=True)
             continue
 
         if temp_download_path.exists():
             temp_download_path.unlink()
-        console.print(f"[green]Successfully installed and verified {local_name} to {final_local_path}[/green]\n")
+        console.print(
+            f"[green]Successfully installed and verified {local_name} to "
+            f"{final_local_path}[/green]\n"
+        )
 
     console.rule()
     if all_files_successful:
         console.print(
-            f"[bold green]Toolchain '{resolved_version_key}' fetch process completed successfully.[/bold green]"
+            f"[bold green]Toolchain '{resolved_version_key}' fetch process completed "
+            "successfully.[/bold green]"
         )
     else:
         console.print(
-            f"[bold orange3]Toolchain '{resolved_version_key}' fetch process completed with some errors. "
-            f"Please review the output above.[/bold orange3]"
+            f"[bold orange3]Toolchain '{resolved_version_key}' fetch process completed "
+            "with some errors. Please review the output above.[/bold orange3]"
         )
         raise typer.Exit(code=1)
 

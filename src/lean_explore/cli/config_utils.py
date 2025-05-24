@@ -12,8 +12,9 @@ information.
 import logging
 import os
 import pathlib
+from typing import Any, Dict, Optional
+
 import toml
-from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +23,12 @@ _APP_CONFIG_DIR_NAME: str = "leanexplore"
 _CONFIG_FILENAME: str = "config.toml"
 
 # Define keys for Lean Explore API section
-_LEAN_EXPLORE_API_SECTION_NAME: str = "lean_explore_api" # Renamed for clarity
+_LEAN_EXPLORE_API_SECTION_NAME: str = "lean_explore_api"  # Renamed for clarity
 _LEAN_EXPLORE_API_KEY_NAME: str = "key"
 
 # Define keys for OpenAI API section
 _OPENAI_API_SECTION_NAME: str = "openai"
-_OPENAI_API_KEY_NAME: str = "api_key" # Using a distinct key name for clarity
+_OPENAI_API_KEY_NAME: str = "api_key"  # Using a distinct key name for clarity
 
 
 def get_config_file_path() -> pathlib.Path:
@@ -38,7 +39,9 @@ def get_config_file_path() -> pathlib.Path:
     Returns:
         pathlib.Path: The absolute path to the configuration file.
     """
-    config_dir = pathlib.Path(os.path.expanduser("~")) / ".config" / _APP_CONFIG_DIR_NAME
+    config_dir = (
+        pathlib.Path(os.path.expanduser("~")) / ".config" / _APP_CONFIG_DIR_NAME
+    )
     return config_dir / _CONFIG_FILENAME
 
 
@@ -73,18 +76,28 @@ def _load_config_data(config_file_path: pathlib.Path) -> Dict[str, Any]:
     config_data: Dict[str, Any] = {}
     if config_file_path.exists() and config_file_path.is_file():
         try:
-            with open(config_file_path, "r", encoding="utf-8") as f:
+            with open(config_file_path, encoding="utf-8") as f:
                 config_data = toml.load(f)
         except toml.TomlDecodeError:
-            logger.warning(f"Configuration file {config_file_path} is corrupted. Treating as empty.")
+            logger.warning(
+                "Configuration file %s is corrupted. Treating as empty.",
+                config_file_path,
+            )
             # Potentially back up corrupted file before returning empty
         except Exception as e:
-            logger.error(f"Error reading existing config file {config_file_path}: {e}", exc_info=True)
+            logger.error(
+                "Error reading existing config file %s: %s",
+                config_file_path,
+                e,
+                exc_info=True,
+            )
             # Decide if to proceed with empty or raise further
     return config_data
 
 
-def _save_config_data(config_file_path: pathlib.Path, config_data: Dict[str, Any]) -> bool:
+def _save_config_data(
+    config_file_path: pathlib.Path, config_data: Dict[str, Any]
+) -> bool:
     """Saves configuration data to a TOML file with secure permissions.
 
     Args:
@@ -97,16 +110,27 @@ def _save_config_data(config_file_path: pathlib.Path, config_data: Dict[str, Any
     try:
         with open(config_file_path, "w", encoding="utf-8") as f:
             toml.dump(config_data, f)
-        os.chmod(config_file_path, 0o600) # Set user read/write only
+        os.chmod(config_file_path, 0o600)  # Set user read/write only
         return True
     except OSError as e:
-        logger.error(f"OS error saving configuration to {config_file_path}: {e}", exc_info=True)
+        logger.error(
+            "OS error saving configuration to %s: %s",
+            config_file_path,
+            e,
+            exc_info=True,
+        )
     except Exception as e:
-        logger.error(f"Unexpected error saving configuration to {config_file_path}: {e}", exc_info=True)
+        logger.error(
+            "Unexpected error saving configuration to %s: %s",
+            config_file_path,
+            e,
+            exc_info=True,
+        )
     return False
 
 
 # --- Lean Explore API Key Management ---
+
 
 def save_api_key(api_key: str) -> bool:
     """Saves the Lean Explore API key to the user's configuration file.
@@ -126,17 +150,26 @@ def save_api_key(api_key: str) -> bool:
         _ensure_config_dir_exists()
         config_data = _load_config_data(config_file_path)
 
-        if _LEAN_EXPLORE_API_SECTION_NAME not in config_data or \
-           not isinstance(config_data[_LEAN_EXPLORE_API_SECTION_NAME], dict):
+        if _LEAN_EXPLORE_API_SECTION_NAME not in config_data or not isinstance(
+            config_data[_LEAN_EXPLORE_API_SECTION_NAME], dict
+        ):
             config_data[_LEAN_EXPLORE_API_SECTION_NAME] = {}
-        
-        config_data[_LEAN_EXPLORE_API_SECTION_NAME][_LEAN_EXPLORE_API_KEY_NAME] = api_key
+
+        config_data[_LEAN_EXPLORE_API_SECTION_NAME][_LEAN_EXPLORE_API_KEY_NAME] = (
+            api_key
+        )
 
         if _save_config_data(config_file_path, config_data):
-            logger.info(f"Lean Explore API key saved to {config_file_path}")
+            logger.info("Lean Explore API key saved to %s", config_file_path)
             return True
-    except Exception as e: # Catch any exception from _ensure_config_dir_exists or broad issues
-        logger.error(f"General error during Lean Explore API key saving process: {e}", exc_info=True)
+    except (
+        Exception
+    ) as e:  # Catch any exception from _ensure_config_dir_exists or broad issues
+        logger.error(
+            "General error during Lean Explore API key saving process: %s",
+            e,
+            exc_info=True,
+        )
     return False
 
 
@@ -144,30 +177,47 @@ def load_api_key() -> Optional[str]:
     """Loads the Lean Explore API key from the user's configuration file.
 
     Returns:
-        Optional[str]: The Lean Explore API key string if found and valid, otherwise None.
+        Optional[str]: The Lean Explore API key string if found and valid,
+            otherwise None.
     """
     config_file_path = get_config_file_path()
     if not config_file_path.exists() or not config_file_path.is_file():
-        logger.debug(f"Configuration file not found at {config_file_path} for Lean Explore API key.")
+        logger.debug(
+            "Configuration file not found at %s for Lean Explore API key.",
+            config_file_path,
+        )
         return None
 
     try:
         config_data = _load_config_data(config_file_path)
-        api_key = config_data.get(_LEAN_EXPLORE_API_SECTION_NAME, {}).get(_LEAN_EXPLORE_API_KEY_NAME)
-        
+        api_key = config_data.get(_LEAN_EXPLORE_API_SECTION_NAME, {}).get(
+            _LEAN_EXPLORE_API_KEY_NAME
+        )
+
         if api_key and isinstance(api_key, str):
-            logger.debug(f"Lean Explore API key loaded successfully from {config_file_path}")
-            return api_key
-        elif api_key: # Found but not a string
-            logger.warning(f"Lean Explore API key found in {config_file_path} but is not a valid string.")
-        else: # Not found under the expected keys
             logger.debug(
-                f"Lean Explore API key not found under section "
-                f"'{_LEAN_EXPLORE_API_SECTION_NAME}', key '{_LEAN_EXPLORE_API_KEY_NAME}' "
-                f"in {config_file_path}"
+                "Lean Explore API key loaded successfully from %s", config_file_path
             )
-    except Exception as e: # Catch any other unexpected errors during loading
-        logger.error(f"Unexpected error loading Lean Explore API key from {config_file_path}: {e}", exc_info=True)
+            return api_key
+        elif api_key:  # Found but not a string
+            logger.warning(
+                "Lean Explore API key found in %s but is not a valid string.",
+                config_file_path,
+            )
+        else:  # Not found under the expected keys
+            logger.debug(
+                "Lean Explore API key not found under section '%s', key '%s' in %s",
+                _LEAN_EXPLORE_API_SECTION_NAME,
+                _LEAN_EXPLORE_API_KEY_NAME,
+                config_file_path,
+            )
+    except Exception as e:  # Catch any other unexpected errors during loading
+        logger.error(
+            "Unexpected error loading Lean Explore API key from %s: %s",
+            config_file_path,
+            e,
+            exc_info=True,
+        )
     return None
 
 
@@ -180,35 +230,52 @@ def delete_api_key() -> bool:
     """
     config_file_path = get_config_file_path()
     if not config_file_path.exists():
-        logger.info("No Lean Explore API key to delete: configuration file does not exist.")
+        logger.info(
+            "No Lean Explore API key to delete: configuration file does not exist."
+        )
         return True
 
     try:
         config_data = _load_config_data(config_file_path)
         api_section = config_data.get(_LEAN_EXPLORE_API_SECTION_NAME)
 
-        if api_section and isinstance(api_section, dict) and _LEAN_EXPLORE_API_KEY_NAME in api_section:
+        if (
+            api_section
+            and isinstance(api_section, dict)
+            and _LEAN_EXPLORE_API_KEY_NAME in api_section
+        ):
             del api_section[_LEAN_EXPLORE_API_KEY_NAME]
             logger.info("Lean Explore API key removed from configuration data.")
-            
-            if not api_section: # If the section is now empty
+
+            if not api_section:  # If the section is now empty
                 del config_data[_LEAN_EXPLORE_API_SECTION_NAME]
-                logger.info(f"Empty '{_LEAN_EXPLORE_API_SECTION_NAME}' section removed.")
+                logger.info(
+                    "Empty '%s' section removed.", _LEAN_EXPLORE_API_SECTION_NAME
+                )
 
             if _save_config_data(config_file_path, config_data):
-                logger.info(f"Lean Explore API key deleted from {config_file_path}")
+                logger.info("Lean Explore API key deleted from %s", config_file_path)
                 return True
-            return False # Save failed
+            return False  # Save failed
         else:
-            logger.info(f"Lean Explore API key not found in {config_file_path}, no deletion performed.")
-            return True # Key wasn't there, so considered successful
-            
+            logger.info(
+                "Lean Explore API key not found in %s, no deletion performed.",
+                config_file_path,
+            )
+            return True  # Key wasn't there, so considered successful
+
     except Exception as e:
-        logger.error(f"Unexpected error deleting Lean Explore API key from {config_file_path}: {e}", exc_info=True)
+        logger.error(
+            "Unexpected error deleting Lean Explore API key from %s: %s",
+            config_file_path,
+            e,
+            exc_info=True,
+        )
     return False
 
 
 # --- OpenAI API Key Management ---
+
 
 def save_openai_api_key(api_key: str) -> bool:
     """Saves the OpenAI API key to the user's configuration file.
@@ -231,17 +298,20 @@ def save_openai_api_key(api_key: str) -> bool:
         _ensure_config_dir_exists()
         config_data = _load_config_data(config_file_path)
 
-        if _OPENAI_API_SECTION_NAME not in config_data or \
-           not isinstance(config_data[_OPENAI_API_SECTION_NAME], dict):
+        if _OPENAI_API_SECTION_NAME not in config_data or not isinstance(
+            config_data[_OPENAI_API_SECTION_NAME], dict
+        ):
             config_data[_OPENAI_API_SECTION_NAME] = {}
-        
+
         config_data[_OPENAI_API_SECTION_NAME][_OPENAI_API_KEY_NAME] = api_key
 
         if _save_config_data(config_file_path, config_data):
-            logger.info(f"OpenAI API key saved to {config_file_path}")
+            logger.info("OpenAI API key saved to %s", config_file_path)
             return True
     except Exception as e:
-        logger.error(f"General error during OpenAI API key saving process: {e}", exc_info=True)
+        logger.error(
+            "General error during OpenAI API key saving process: %s", e, exc_info=True
+        )
     return False
 
 
@@ -253,26 +323,39 @@ def load_openai_api_key() -> Optional[str]:
     """
     config_file_path = get_config_file_path()
     if not config_file_path.exists() or not config_file_path.is_file():
-        logger.debug(f"Configuration file not found at {config_file_path} for OpenAI API key.")
+        logger.debug(
+            "Configuration file not found at %s for OpenAI API key.", config_file_path
+        )
         return None
 
     try:
         config_data = _load_config_data(config_file_path)
-        api_key = config_data.get(_OPENAI_API_SECTION_NAME, {}).get(_OPENAI_API_KEY_NAME)
-        
+        api_key = config_data.get(_OPENAI_API_SECTION_NAME, {}).get(
+            _OPENAI_API_KEY_NAME
+        )
+
         if api_key and isinstance(api_key, str):
-            logger.debug(f"OpenAI API key loaded successfully from {config_file_path}")
+            logger.debug("OpenAI API key loaded successfully from %s", config_file_path)
             return api_key
-        elif api_key: # Found but not a string
-            logger.warning(f"OpenAI API key found in {config_file_path} but is not a valid string.")
-        else: # Not found under the expected keys
+        elif api_key:  # Found but not a string
+            logger.warning(
+                "OpenAI API key found in %s but is not a valid string.",
+                config_file_path,
+            )
+        else:  # Not found under the expected keys
             logger.debug(
-                f"OpenAI API key not found under section "
-                f"'{_OPENAI_API_SECTION_NAME}', key '{_OPENAI_API_KEY_NAME}' "
-                f"in {config_file_path}"
+                "OpenAI API key not found under section '%s', key '%s' in %s",
+                _OPENAI_API_SECTION_NAME,
+                _OPENAI_API_KEY_NAME,
+                config_file_path,
             )
     except Exception as e:
-        logger.error(f"Unexpected error loading OpenAI API key from {config_file_path}: {e}", exc_info=True)
+        logger.error(
+            "Unexpected error loading OpenAI API key from %s: %s",
+            config_file_path,
+            e,
+            exc_info=True,
+        )
     return None
 
 
@@ -292,22 +375,34 @@ def delete_openai_api_key() -> bool:
         config_data = _load_config_data(config_file_path)
         api_section = config_data.get(_OPENAI_API_SECTION_NAME)
 
-        if api_section and isinstance(api_section, dict) and _OPENAI_API_KEY_NAME in api_section:
+        if (
+            api_section
+            and isinstance(api_section, dict)
+            and _OPENAI_API_KEY_NAME in api_section
+        ):
             del api_section[_OPENAI_API_KEY_NAME]
             logger.info("OpenAI API key removed from configuration data.")
-            
-            if not api_section: # If the section is now empty
+
+            if not api_section:  # If the section is now empty
                 del config_data[_OPENAI_API_SECTION_NAME]
-                logger.info(f"Empty '{_OPENAI_API_SECTION_NAME}' section removed.")
+                logger.info("Empty '%s' section removed.", _OPENAI_API_SECTION_NAME)
 
             if _save_config_data(config_file_path, config_data):
-                logger.info(f"OpenAI API key deleted from {config_file_path}")
+                logger.info("OpenAI API key deleted from %s", config_file_path)
                 return True
-            return False # Save failed
+            return False  # Save failed
         else:
-            logger.info(f"OpenAI API key not found in {config_file_path}, no deletion performed.")
-            return True # Key wasn't there, so considered successful
-            
+            logger.info(
+                "OpenAI API key not found in %s, no deletion performed.",
+                config_file_path,
+            )
+            return True  # Key wasn't there, so considered successful
+
     except Exception as e:
-        logger.error(f"Unexpected error deleting OpenAI API key from {config_file_path}: {e}", exc_info=True)
+        logger.error(
+            "Unexpected error deleting OpenAI API key from %s: %s",
+            config_file_path,
+            e,
+            exc_info=True,
+        )
     return False

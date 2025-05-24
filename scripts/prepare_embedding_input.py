@@ -23,10 +23,9 @@ from typing import Any, Dict, List, Optional
 try:
     from sqlalchemy import create_engine, select
     from sqlalchemy.exc import OperationalError, SQLAlchemyError
-    from sqlalchemy.orm import Session, sessionmaker
+    from sqlalchemy.orm import sessionmaker
     from tqdm import tqdm
 except ImportError as e:
-    # pylint: disable=broad-exception-raised
     print(
         f"Error: Missing required libraries ({e}).\n"
         "Please install them by running: pip install sqlalchemy tqdm",
@@ -36,10 +35,9 @@ except ImportError as e:
 
 # --- Project Model & Config Imports ---
 try:
-    from lean_explore.models import StatementGroup
-    from lean_explore.config import APP_CONFIG
+    from .config import APP_CONFIG
+    from lean_explore.shared.models.db import StatementGroup
 except ImportError as e:
-    # pylint: disable=broad-exception-raised
     print(
         f"Error: Could not import project modules (StatementGroup, APP_CONFIG): {e}\n"
         "Ensure 'lean_explore' is installed (e.g., 'pip install -e .') "
@@ -171,15 +169,14 @@ def prepare_data(
                         )
                     else:
                         logger.debug(
-                            "SG ID %d: No non-empty lean text found. Skipping lean entry.",
+                            "SG ID %d: No non-empty lean text found. Skipping entry.",
                             sg_id,
                         )
-                elif exclude_lean: # Explicitly log if excluded by flag
-                     logger.debug(
+                elif exclude_lean:  # Explicitly log if excluded by flag
+                    logger.debug(
                         "SG ID %d: Lean text excluded by flag. Skipping lean entry.",
                         sg_id,
                     )
-
 
                 # 2. Handle Informal Description Text
                 if not exclude_english:
@@ -198,12 +195,14 @@ def prepare_data(
                         )
                     else:
                         logger.debug(
-                            "SG ID %d: No non-empty informal description found. Skipping informal description entry.",
+                            "SG ID %d: No non-empty informal description found. "
+                            "Skipping entry.",
                             sg_id,
                         )
                 elif exclude_english:
-                     logger.debug(
-                        "SG ID %d: Informal description excluded by flag. Skipping informal description entry.",
+                    logger.debug(
+                        "SG ID %d: Informal description excluded by flag. "
+                        "Skipping entry.",
                         sg_id,
                     )
 
@@ -224,15 +223,14 @@ def prepare_data(
                         )
                     else:
                         logger.debug(
-                            "SG ID %d: No non-empty docstring found. Skipping docstring entry.",
+                            "SG ID %d: No non-empty docstring found. Skipping entry.",
                             sg_id,
                         )
                 elif exclude_docstrings:
                     logger.debug(
-                        "SG ID %d: Docstring excluded by flag. Skipping docstring entry.",
+                        "SG ID %d: Docstring excluded by flag. Skipping entry.",
                         sg_id,
                     )
-
 
         logger.info("Prepared %d records for JSON output.", len(output_records))
 
@@ -240,9 +238,7 @@ def prepare_data(
         with open(output_file_path, "w", encoding="utf-8") as f:
             json.dump(output_records, f, indent=2)
 
-        logger.info(
-            "Successfully wrote embedding input data to %s", output_file_path
-        )
+        logger.info("Successfully wrote embedding input data to %s", output_file_path)
 
     except OperationalError as e:
         logger.error("Database connection failed or operational error: %s", e)
@@ -255,15 +251,13 @@ def prepare_data(
             "A database error occurred during data preparation: %s", e, exc_info=True
         )
         sys.exit(1)
-    except IOError as e:
+    except OSError as e:
         logger.error(
             "File I/O error when writing to %s: %s", output_file_path, e, exc_info=True
         )
         sys.exit(1)
-    except Exception as e: # pylint: disable=broad-except
-        logger.critical(
-            "An unexpected critical error occurred: %s", e, exc_info=True
-        )
+    except Exception as e:
+        logger.critical("An unexpected critical error occurred: %s", e, exc_info=True)
         sys.exit(1)
     finally:
         if engine:
@@ -278,8 +272,11 @@ def parse_arguments() -> argparse.Namespace:
         argparse.Namespace: An object containing the parsed command-line arguments.
     """
     parser = argparse.ArgumentParser(
-        description="Prepare JSON input for embedding generation from StatementGroups, "
-        "allowing selective inclusion of Lean code, informal descriptions, and docstrings.",
+        description=(
+            "Prepare JSON input for embedding generation from StatementGroups, "
+            "allowing selective inclusion of Lean code, informal descriptions, "
+            "and docstrings."
+        ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 

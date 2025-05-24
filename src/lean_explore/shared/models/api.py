@@ -8,6 +8,7 @@ are used by the API client for data validation and serialization.
 """
 
 from typing import List, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -17,9 +18,9 @@ class APIPrimaryDeclarationInfo(BaseModel):
     Attributes:
         lean_name: The Lean name of the primary declaration, if available.
     """
+
     lean_name: Optional[str] = Field(
-        None,
-        description="The Lean name of the primary declaration."
+        None, description="The Lean name of the primary declaration."
     )
 
 
@@ -33,40 +34,37 @@ class APISearchResultItem(BaseModel):
         id: The unique identifier of the statement group.
         primary_declaration: Information about the primary declaration.
         source_file: The source file where the statement group is located.
-        range_start_line: The starting line number of the statement group in the source file.
-        display_statement_text: A display-friendly version of the statement text, if available.
+        range_start_line: Start line of statement group in source file.
+        display_statement_text: Display-friendly statement text, if available.
         statement_text: The full canonical statement text.
         docstring: The docstring associated with the statement group, if available.
-        informal_description: An informal description of the statement group, if available.
+        informal_description: Informal description of the statement group, if available.
     """
+
     id: int = Field(..., description="Unique identifier for the statement group.")
     primary_declaration: APIPrimaryDeclarationInfo = Field(
         ...,
-        description="Information about the primary declaration of the statement group."
+        description="Information about the primary declaration of the statement group.",
     )
     source_file: str = Field(
-        ...,
-        description="The source file path for the statement group."
+        ..., description="The source file path for the statement group."
     )
     range_start_line: int = Field(
         ...,
-        description="The starting line number of the statement group in its source file."
+        description="Line number of statement group in its source file.",
     )
     display_statement_text: Optional[str] = Field(
-        None,
-        description="A display-optimized version of the statement text."
+        None, description="A display-optimized version of the statement text."
     )
     statement_text: str = Field(
-        ...,
-        description="The complete canonical text of the statement group."
+        ..., description="The complete canonical text of the statement group."
     )
     docstring: Optional[str] = Field(
-        None,
-        description="The docstring associated with the statement group."
+        None, description="The docstring associated with the statement group."
     )
     informal_description: Optional[str] = Field(
         None,
-        description="An informal, human-readable description of the statement group."
+        description="An informal, human-readable description of the statement group.",
     )
 
 
@@ -75,33 +73,29 @@ class APISearchResponse(BaseModel):
 
     Attributes:
         query: The original search query string submitted by the user.
-        packages_applied: A list of package filters that were applied to the search, if any.
+        packages_applied: List of package filters applied to the search, if any.
         results: A list of search result items.
         count: The number of results returned in the current response.
         total_candidates_considered: The total number of potential candidates
             considered by the search algorithm before limiting results.
-        processing_time_ms: The time taken by the server to process the search request, in milliseconds.
+        processing_time_ms: Server processing time for search request, in milliseconds.
     """
+
     query: str = Field(..., description="The search query that was executed.")
     packages_applied: Optional[List[str]] = Field(
-        None,
-        description="List of package filters applied to the search."
+        None, description="List of package filters applied to the search."
     )
     results: List[APISearchResultItem] = Field(
-        ...,
-        description="A list of search results."
+        ..., description="A list of search results."
     )
     count: int = Field(
-        ...,
-        description="The number of results provided in this response."
+        ..., description="The number of results provided in this response."
     )
     total_candidates_considered: int = Field(
-        ...,
-        description="Total number of candidate results before truncation."
+        ..., description="Total number of candidate results before truncation."
     )
     processing_time_ms: int = Field(
-        ...,
-        description="Server-side processing time for the search in milliseconds."
+        ..., description="Server-side processing time for the search in milliseconds."
     )
 
 
@@ -109,19 +103,15 @@ class APICitationsResponse(BaseModel):
     """Represents the response structure for a dependencies (citations) API call.
 
     Attributes:
-        source_group_id: The ID of the statement group for which citations were requested.
+        source_group_id: ID of the statement group for which citations were requested.
         citations: A list of statement groups that are cited by the source group.
         count: The number of citations found and returned.
     """
+
     source_group_id: int = Field(
-        ...,
-        description="The ID of the statement group whose citations are listed."
+        ..., description="The ID of the statement group whose citations are listed."
     )
     citations: List[APISearchResultItem] = Field(
-        ...,
-        description="A list of statement groups cited by the source group."
+        ..., description="A list of statement groups cited by the source group."
     )
-    count: int = Field(
-        ...,
-        description="The number of citations provided."
-    )
+    count: int = Field(..., description="The number of citations provided.")

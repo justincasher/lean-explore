@@ -391,13 +391,15 @@ class GeminiClient:
                 "or in config file ('llm.generation_model')."
             )
 
-        # Get from arg, then APP_CONFIG['llm']['embedding_model'], then fallback constant
+        # Get from arg, then APP_CONFIG['llm']['embedding_model'],
+        # then fallback constant
         _config_emb_model = APP_CONFIG.get("llm", {}).get("embedding_model")
         _emb_model_name = default_embedding_model or _config_emb_model
 
         if not _emb_model_name:
             warnings.warn(
-                f"Default embedding model not set via argument or config ('llm.embedding_model'). "
+                f"Default embedding model not set via argument or "
+                "config ('llm.embedding_model'). "
                 f"Using fallback: {FALLBACK_EMBEDDING_MODEL}"
             )
             self.default_embedding_model = FALLBACK_EMBEDDING_MODEL
@@ -461,9 +463,9 @@ class GeminiClient:
         # --- Initialization ---
         # Pass costs from APP_CONFIG to the tracker if no override is provided
         self.cost_tracker = (
-            cost_tracker if cost_tracker is not None else GeminiCostTracker(
-                 model_costs_override=APP_CONFIG.get("costs")
-            )
+            cost_tracker
+            if cost_tracker is not None
+            else GeminiCostTracker(model_costs_override=APP_CONFIG.get("costs"))
         )
         self.safety_settings = safety_settings  # Used by generate method
 
@@ -576,14 +578,13 @@ class GeminiClient:
 
         # If loop finished without returning, raise the last captured error
         if final_error is not None:
-             raise final_error
+            raise final_error
         else:
-             # This case should ideally not be reached if the loop logic is correct
-             raise Exception(
-                 f"Unknown error during API call to {model_name} after "
-                 f"{total_attempts} attempts"
-             )
-
+            # This case should ideally not be reached if the loop logic is correct
+            raise Exception(
+                f"Unknown error during API call to {model_name} after "
+                f"{total_attempts} attempts"
+            )
 
     # --- Public API Methods ---
 
@@ -778,8 +779,11 @@ class GeminiClient:
 
             # Ensure generated_text is not None before returning
             if generated_text is None:
-                 # This state should be highly unlikely given the checks above
-                 raise ValueError(f"API call for {effective_model} resulted in None text unexpectedly.")
+                # This state should be highly unlikely given the checks above
+                raise ValueError(
+                    f"API call for {effective_model} resulted in "
+                    "None text unexpectedly."
+                )
 
             return generated_text
 
@@ -793,13 +797,12 @@ class GeminiClient:
             # or potential errors during API response processing not caught above.
             # Avoid wrapping ValueError from above again
             if not isinstance(e, ValueError):
-                 raise Exception(
-                     f"API call to generation model '{effective_model}' failed after "
-                     "retries or during processing."
-                 ) from e
+                raise Exception(
+                    f"API call to generation model '{effective_model}' failed after "
+                    "retries or during processing."
+                ) from e
             else:
-                 raise e # Re-raise the original ValueError
-
+                raise e  # Re-raise the original ValueError
 
     async def embed_content(
         self,
@@ -925,7 +928,8 @@ class GeminiClient:
                         f"Invalid embedding format received under 'embedding' key for "
                         f"single input from model {effective_model}."
                     )
-            # Keep 'embeddings' check as fallback just in case API behaviour changes/differs
+            # Keep 'embeddings' check as fallback just
+            # in case API behaviour changes/differs
             elif "embeddings" in response_dict:
                 result = response_dict["embeddings"]
                 if isinstance(result, list) and all(
@@ -983,7 +987,9 @@ class GeminiClient:
                     self.cost_tracker.record_usage(
                         effective_model, input_units, output_units
                     )
-                elif input_units == 0 and token_key in usage_metadata: # Only warn if key exists but value is bad/zero
+                elif (
+                    input_units == 0 and token_key in usage_metadata
+                ):  # Only warn if key exists but value is bad/zero
                     # Only issue a warning if we found metadata but couldn't get
                     # tokens from it.
                     warnings.warn(
@@ -1008,10 +1014,10 @@ class GeminiClient:
         except Exception as e:
             # Catch errors from _execute_with_retry (after all retries failed)
             # or potential errors during API response processing not caught above.
-             if not isinstance(e, ValueError):
-                 raise Exception(
-                     f"API call to embedding model '{effective_model}' failed after "
-                     "retries or during processing."
-                 ) from e
-             else:
-                 raise e # Re-raise the original ValueError
+            if not isinstance(e, ValueError):
+                raise Exception(
+                    f"API call to embedding model '{effective_model}' failed after "
+                    "retries or during processing."
+                ) from e
+            else:
+                raise e  # Re-raise the original ValueError

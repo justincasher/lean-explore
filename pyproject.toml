@@ -31,29 +31,32 @@ classifiers = [
 
 dependencies = [
     # Core data and search (primarily for local backend)
-    "sqlalchemy>=2.0",        # ORM for db models, local.Service, search.py
-    "numpy>=1.20",            # For embeddings and FAISS (used by sentence-transformers, faiss)
-    "faiss-cpu>=1.7",         # For local FAISS search in search.py
-    "sentence-transformers>=2.2.0", # For loading embedding models in search.py
-    "rapidfuzz>=3.0.0",       # For name matching in search.py
-    "filelock>=3.0.0",        # For performance logging in search.py
+    "sqlalchemy>=2.0",
+    "numpy>=1.20",
+    "faiss-cpu>=1.7",
+    "sentence-transformers>=2.2.0",
+    "rapidfuzz>=3.0.0",
+    "filelock>=3.0.0",
 
     # API Client / Shared Data Models
-    "httpx>=0.23.0",          # For asynchronous API client in lean_explore.api.client
-    "pydantic>=2.0",          # For data models in lean_explore.shared.models.api
+    "httpx>=0.23.0",
+    "pydantic>=2.0",
 
     # CLI & Agent Functionality
-    "typer[all]>=0.9.0",      # For CLI application in cli.main (includes rich for console output)
-    "toml>=0.10.0",           # For cli.config_utils to manage API key storage
-    "openai-agents>=0.0.16",  # For AI agent interaction in cli.agent
+    "typer[all]>=0.9.0",
+    "toml>=0.10.0",
+    "openai-agents>=0.0.16",
 
     # MCP Server Components
-    "mcp>=1.9.0",             # For MCP server implementation in mcp.*
+    "mcp>=1.9.0",
 
     # Utilities
-    "tqdm>=4.60",             # For progress bars (e.g., in future data downloaders not in current src/)
-    # "requests>=2.25",       # Keep if specifically needed for sync downloads separate from httpx (not in current src/)
+    "tqdm>=4.60",
 ]
+
+[project.urls]
+Homepage = "https://www.leanexplore.com/"
+Repository = "https://github.com/justincasher/lean-explore"
 
 [project.scripts]
 leanexplore = "lean_explore.cli.main:app"
@@ -64,3 +67,55 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+
+# -- Ruff Configuration --
+
+[tool.ruff]
+# Set the maximum line length.
+line-length = 88
+
+# Set based on your `requires-python = ">=3.8"`.
+target-version = "py38"
+
+# Define the patterns for files Ruff should lint.
+include = [
+    "src/**/*.py",
+    "tests/**/*.py",
+    "scripts/**/*.py",
+    "*.py"
+]
+
+# Specify directories and patterns to exclude from linting.
+exclude = [
+    ".venv",
+    ".ruff_cache",
+    "build",
+    "dist",
+    ".env",
+    ".env.example",
+    ".pytest_cache",
+    ".lake_cache",       # For Lean 4 projects
+    "src/*.egg-info",    # Build artifacts
+    "site",              # Documentation sites (e.g., MkDocs)
+    "docs",              # Documentation source files
+    "*.sqlite",
+    "*.db",
+    "*.json",
+]
+
+# --- Linter specific settings ---
+[tool.ruff.lint]
+# E: pycodestyle errors
+# W: pycodestyle warnings
+# F: Pyflakes
+# I: isort
+# UP: pyupgrade
+# D: pydocstyle
+select = ["E", "W", "F", "I", "UP", "D"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["lean_explore"]
+
+[tool.ruff.lint.pydocstyle]
+# Set the docstring convention to Google style.
+convention = "google"

@@ -21,8 +21,7 @@ from sqlalchemy import (
     MetaData,
     String,
     Text,
-    UniqueConstraint,
-    create_engine, # Kept for potential standalone model testing
+    UniqueConstraint,  # Kept for potential standalone model testing
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -49,7 +48,7 @@ class Base(DeclarativeBase):
 
 
 class StatementGroup(Base):
-    """Represents a unique block of source code text, potentially generating declarations.
+    """Represents a unique block of source code text.
 
     This table groups multiple `Declaration` entries that originate from the
     exact same source code text and location. This allows search results to
@@ -272,9 +271,7 @@ class Declaration(Base):
     def __repr__(self) -> str:
         """Provides a developer-friendly string representation."""
         group_id_str = (
-            f", group_id={self.statement_group_id}"
-            if self.statement_group_id
-            else ""
+            f", group_id={self.statement_group_id}" if self.statement_group_id else ""
         )
         return (
             f"<Declaration(id={self.id}, lean_name='{self.lean_name}', "
@@ -322,7 +319,10 @@ class Dependency(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "source_decl_id", "target_decl_id", "dependency_type", name="uq_dependency_link"
+            "source_decl_id",
+            "target_decl_id",
+            "dependency_type",
+            name="uq_dependency_link",
         ),
         Index("ix_dependencies_source_target", "source_decl_id", "target_decl_id"),
     )
@@ -353,6 +353,7 @@ class StatementGroupDependency(Base):
         source_group: SQLAlchemy relationship to the source StatementGroup.
         target_group: SQLAlchemy relationship to the target StatementGroup.
     """
+
     __tablename__ = "statement_group_dependencies"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -379,24 +380,24 @@ class StatementGroupDependency(Base):
     # Relationships back to StatementGroup
     source_group: Mapped["StatementGroup"] = relationship(
         foreign_keys=[source_statement_group_id],
-        back_populates="dependencies_as_source"
+        back_populates="dependencies_as_source",
     )
     target_group: Mapped["StatementGroup"] = relationship(
         foreign_keys=[target_statement_group_id],
-        back_populates="dependencies_as_target"
+        back_populates="dependencies_as_target",
     )
 
     __table_args__ = (
         UniqueConstraint(
             "source_statement_group_id",
             "target_statement_group_id",
-            "dependency_type", # Consider if type is part of uniqueness
-            name="uq_stmt_group_dependency_link"
+            "dependency_type",  # Consider if type is part of uniqueness
+            name="uq_stmt_group_dependency_link",
         ),
         Index(
             "ix_stmt_group_deps_source_target",
             "source_statement_group_id",
-            "target_statement_group_id"
+            "target_statement_group_id",
         ),
     )
 

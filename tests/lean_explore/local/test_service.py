@@ -6,34 +6,30 @@ of the Service class, which orchestrates local data asset loading and
 provides methods for interacting with the local Lean explore data.
 """
 
-import pytest
-import pathlib
 import logging
-import time # For mocking in search tests if needed, though not directly used yet
-from unittest.mock import MagicMock, patch # Added patch
-from typing import TYPE_CHECKING, List, Dict, Any, Tuple # Added Dict, Any, Tuple
+import pathlib
+from typing import TYPE_CHECKING, Dict, List, Tuple
+from unittest.mock import MagicMock
 
+import faiss
+import pytest
+from sentence_transformers import SentenceTransformer
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session as SQLAlchemySession
 
-from lean_explore.local.service import Service
 from lean_explore import defaults
-from sentence_transformers import SentenceTransformer
-import faiss
+from lean_explore.local.service import Service
+from lean_explore.shared.models.api import (
+    APISearchResponse,
+    APISearchResultItem,
+)
 
 # Import your ORM and API models
 from lean_explore.shared.models.db import (
-    StatementGroup,
     Declaration,
-    StatementGroupDependency
+    StatementGroup,
+    StatementGroupDependency,
 )
-from lean_explore.shared.models.api import (
-    APISearchResultItem,
-    APIPrimaryDeclarationInfo,
-    APISearchResponse,
-    APICitationsResponse
-)
-
 
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
@@ -48,7 +44,7 @@ class TestServiceInitialization:
         mock_load_embedding_model: MagicMock,
         mock_load_faiss_assets: MagicMock,
         mock_sqlalchemy_engine_setup: MagicMock,
-        mocker: "MockerFixture"
+        mocker: "MockerFixture",
     ):
         """Verifies successful instantiation of Service when all assets load.
 
@@ -72,7 +68,8 @@ class TestServiceInitialization:
 
         mock_load_embedding_model.return_value = mock_model_instance
         mock_load_faiss_assets.return_value = (
-            mock_faiss_index_instance, mock_id_map_instance
+            mock_faiss_index_instance,
+            mock_id_map_instance,
         )
 
         service = Service()
@@ -85,9 +82,15 @@ class TestServiceInitialization:
 
         assert service.default_faiss_k == defaults.DEFAULT_FAISS_K
         assert service.default_pagerank_weight == defaults.DEFAULT_PAGERANK_WEIGHT
-        assert service.default_text_relevance_weight == defaults.DEFAULT_TEXT_RELEVANCE_WEIGHT
+        assert (
+            service.default_text_relevance_weight
+            == defaults.DEFAULT_TEXT_RELEVANCE_WEIGHT
+        )
         assert service.default_name_match_weight == defaults.DEFAULT_NAME_MATCH_WEIGHT
-        assert service.default_semantic_similarity_threshold == defaults.DEFAULT_SEMANTIC_SIMILARITY_THRESHOLD
+        assert (
+            service.default_semantic_similarity_threshold
+            == defaults.DEFAULT_SEM_SIM_THRESHOLD
+        )
         assert service.default_results_limit == defaults.DEFAULT_RESULTS_LIMIT
         assert service.default_faiss_nprobe == defaults.DEFAULT_FAISS_NPROBE
 
@@ -95,12 +98,9 @@ class TestServiceInitialization:
             defaults.DEFAULT_EMBEDDING_MODEL_NAME
         )
         mock_load_faiss_assets.assert_called_once_with(
-            str(defaults.DEFAULT_FAISS_INDEX_PATH),
-            str(defaults.DEFAULT_FAISS_MAP_PATH)
+            str(defaults.DEFAULT_FAISS_INDEX_PATH), str(defaults.DEFAULT_FAISS_MAP_PATH)
         )
-        mock_sqlalchemy_engine_setup.assert_called_once_with(
-            defaults.DEFAULT_DB_URL
-        )
+        mock_sqlalchemy_engine_setup.assert_called_once_with(defaults.DEFAULT_DB_URL)
         service.engine.connect.assert_called_once()
 
     def test_init_fails_if_embedding_model_load_fails(
@@ -108,7 +108,7 @@ class TestServiceInitialization:
         isolated_data_paths: pathlib.Path,
         mock_load_embedding_model: MagicMock,
         mock_load_faiss_assets: MagicMock,
-        mock_sqlalchemy_engine_setup: MagicMock
+        mock_sqlalchemy_engine_setup: MagicMock,
     ):
         """Tests Service init raises RuntimeError if embedding model loading fails.
 
@@ -132,7 +132,7 @@ class TestServiceInitialization:
         isolated_data_paths: pathlib.Path,
         mock_load_embedding_model: MagicMock,
         mock_load_faiss_assets: MagicMock,
-        mock_sqlalchemy_engine_setup: MagicMock
+        mock_sqlalchemy_engine_setup: MagicMock,
     ):
         """Tests Service init raises FileNotFoundError if FAISS assets are None.
 
@@ -147,7 +147,9 @@ class TestServiceInitialization:
             mock_sqlalchemy_engine_setup: Mock for SQLAlchemy engine setup.
         """
         defaults.DEFAULT_DB_PATH.touch()
-        base_error_message_regex = r"Failed to load critical FAISS assets \(index or ID map\)"
+        base_error_message_regex = (
+            r"Failed to load critical FAISS assets \(index or ID map\)"
+        )
 
         mock_load_faiss_assets.return_value = (None, ["id1"])
         with pytest.raises(FileNotFoundError, match=base_error_message_regex):
@@ -162,7 +164,7 @@ class TestServiceInitialization:
         isolated_data_paths: pathlib.Path,
         mock_load_embedding_model: MagicMock,
         mock_load_faiss_assets: MagicMock,
-        mock_sqlalchemy_engine_setup: MagicMock
+        mock_sqlalchemy_engine_setup: MagicMock,
     ):
         """Tests Service init raises FileNotFoundError if the DB file is missing.
 
@@ -180,7 +182,8 @@ class TestServiceInitialization:
             defaults.DEFAULT_DB_PATH.unlink()
 
         expected_msg_regex = (
-            f"Database file not found at the expected location: {str(defaults.DEFAULT_DB_PATH).replace('.',r'.')}"
+            "Database file not found at the expected location: "
+            f"{str(defaults.DEFAULT_DB_PATH).replace('.', r'.')}"
         )
         with pytest.raises(FileNotFoundError, match=expected_msg_regex):
             Service()
@@ -190,7 +193,7 @@ class TestServiceInitialization:
         isolated_data_paths: pathlib.Path,
         mock_load_embedding_model: MagicMock,
         mock_load_faiss_assets: MagicMock,
-        mock_sqlalchemy_engine_setup: MagicMock
+        mock_sqlalchemy_engine_setup: MagicMock,
     ):
         """Tests Service init raises RuntimeError if DB connection fails.
 
@@ -206,14 +209,14 @@ class TestServiceInitialization:
         defaults.DEFAULT_DB_PATH.touch()
 
         mock_engine_instance = mock_sqlalchemy_engine_setup.return_value
-        mock_dbapi_exception = Exception("DBAPI connection error detail") 
+        mock_dbapi_exception = Exception("DBAPI connection error detail")
         mock_engine_instance.connect.side_effect = OperationalError(
             "Test DB connection failed", {"param": 1}, mock_dbapi_exception
         )
 
         expected_match_str = (
-            r"Database initialization failed: \(builtins\.Exception\) DBAPI connection error detail\n"
-            r"\[SQL: Test DB connection failed\]\n"
+            r"Database initialization failed: \(builtins\.Exception\) DBAPI connection "
+            r"error detail\n\[SQL: Test DB connection failed\]\n"
             r"\[parameters: \{'param': 1\}\]\n"
             r"\(Background on this error at: https://sqlalche\.me/e/20/e3q8\)\. "
             r"The database file at .* might be corrupted"
@@ -228,7 +231,7 @@ class TestServiceInitialization:
         mock_load_faiss_assets: MagicMock,
         mock_sqlalchemy_engine_setup: MagicMock,
         caplog: pytest.LogCaptureFixture,
-        mocker: "MockerFixture"
+        mocker: "MockerFixture",
     ):
         """Verifies Service init proceeds if toolchain base dir mkdir is handled.
 
@@ -247,15 +250,16 @@ class TestServiceInitialization:
         """
         defaults.DEFAULT_DB_PATH.touch()
         mock_load_embedding_model.return_value = MagicMock(spec=SentenceTransformer)
-        mock_load_faiss_assets.return_value = (
-            MagicMock(spec=faiss.Index), ["id_map"]
-        )
+        mock_load_faiss_assets.return_value = (MagicMock(spec=faiss.Index), ["id_map"])
 
         with caplog.at_level(logging.INFO):
             service = Service()
             assert service is not None
 
-        assert f"User toolchains base directory ensured: {str(defaults.LEAN_EXPLORE_TOOLCHAINS_BASE_DIR)}" in caplog.text
+        assert (
+            "User toolchains base directory ensured: "
+            f"{str(defaults.LEAN_EXPLORE_TOOLCHAINS_BASE_DIR)}" in caplog.text
+        )
         assert "Could not create user toolchains base directory" not in caplog.text
 
 
@@ -265,7 +269,7 @@ def initialized_service(
     mock_load_embedding_model: MagicMock,
     mock_load_faiss_assets: MagicMock,
     mock_sqlalchemy_engine_setup: MagicMock,
-    mocker: "MockerFixture"
+    mocker: "MockerFixture",
 ) -> Service:
     """Provides a successfully initialized Service instance for method testing.
 
@@ -291,7 +295,8 @@ def initialized_service(
 
     mock_load_embedding_model.return_value = mock_model_instance
     mock_load_faiss_assets.return_value = (
-        mock_faiss_index_instance, mock_id_map_instance
+        mock_faiss_index_instance,
+        mock_id_map_instance,
     )
     return Service()
 
@@ -300,7 +305,7 @@ class TestServiceMethods:
     """Tests for the data access and utility methods of the Service class."""
 
     def test_serialize_sg_to_api_item(self, initialized_service: Service):
-        """Tests the conversion of a StatementGroup ORM object to an APISearchResultItem.
+        """Tests StatementGroup ORM object to APISearchResultItem conversion.
 
         Args:
             initialized_service: A successfully initialized Service instance.
@@ -330,7 +335,9 @@ class TestServiceMethods:
         assert api_item.docstring == "This is a docstring."
         assert api_item.informal_description == "An informal description."
 
-    def test_serialize_sg_to_api_item_no_primary_decl(self, initialized_service: Service):
+    def test_serialize_sg_to_api_item_no_primary_decl(
+        self, initialized_service: Service
+    ):
         """Tests serialization when the StatementGroup has no primary_declaration.
 
         Args:
@@ -338,7 +345,7 @@ class TestServiceMethods:
         """
         mock_sg_orm = MagicMock(spec=StatementGroup)
         mock_sg_orm.id = 2
-        mock_sg_orm.primary_declaration = None # Simulate no primary declaration
+        mock_sg_orm.primary_declaration = None  # Simulate no primary declaration
         # Set other required fields for APISearchResultItem
         mock_sg_orm.source_file = "Another.lean"
         mock_sg_orm.range_start_line = 1
@@ -347,16 +354,14 @@ class TestServiceMethods:
         mock_sg_orm.docstring = None
         mock_sg_orm.informal_description = None
 
-
         api_item = initialized_service._serialize_sg_to_api_item(mock_sg_orm)
         assert api_item.primary_declaration.lean_name is None
-
 
     def test_get_by_id_found(
         self,
         initialized_service: Service,
         db_session: SQLAlchemySession,
-        mocker: "MockerFixture"
+        mocker: "MockerFixture",
     ):
         """Tests retrieving a StatementGroup by ID when it exists.
 
@@ -368,16 +373,24 @@ class TestServiceMethods:
         # Populate the in-memory DB
         decl = Declaration(id=1, lean_name="Nat.zero", decl_type="axiom")
         sg = StatementGroup(
-            id=101, text_hash="hash1", statement_text="def zero := 0",
-            source_file="Init.Nat.Zero.lean", range_start_line=5,
-            range_start_col=0, range_end_line=5, range_end_col=15,
-            primary_decl_id=1, primary_declaration=decl
+            id=101,
+            text_hash="hash1",
+            statement_text="def zero := 0",
+            source_file="Init.Nat.Zero.lean",
+            range_start_line=5,
+            range_start_col=0,
+            range_end_line=5,
+            range_end_col=15,
+            primary_decl_id=1,
+            primary_declaration=decl,
         )
         db_session.add_all([decl, sg])
         db_session.commit()
 
         # Mock the service's SessionLocal to return our test db_session
-        mocker.patch.object(initialized_service, "SessionLocal", return_value=db_session)
+        mocker.patch.object(
+            initialized_service, "SessionLocal", return_value=db_session
+        )
 
         result = initialized_service.get_by_id(101)
 
@@ -390,7 +403,7 @@ class TestServiceMethods:
         self,
         initialized_service: Service,
         db_session: SQLAlchemySession,
-        mocker: "MockerFixture"
+        mocker: "MockerFixture",
     ):
         """Tests retrieving a StatementGroup by ID when it does not exist.
 
@@ -399,36 +412,43 @@ class TestServiceMethods:
             db_session: An in-memory SQLite session.
             mocker: Pytest-mock's mocker fixture.
         """
-        mocker.patch.object(initialized_service, "SessionLocal", return_value=db_session)
-        result = initialized_service.get_by_id(999) # Non-existent ID
+        mocker.patch.object(
+            initialized_service, "SessionLocal", return_value=db_session
+        )
+        result = initialized_service.get_by_id(999)  # Non-existent ID
         assert result is None
 
     def test_get_by_id_sqlalchemy_error(
         self,
         initialized_service: Service,
-        db_session: SQLAlchemySession, 
+        db_session: SQLAlchemySession,
         mocker: "MockerFixture",
-        caplog: pytest.LogCaptureFixture
+        caplog: pytest.LogCaptureFixture,
     ):
-        """Tests behavior of get_by_id when an SQLAlchemyError occurs.
+        """Tests get_by_id when an SQLAlchemyError occurs.
 
         Args:
             initialized_service: An initialized Service instance.
-            db_session: An in-memory SQLite session (unused directly here as SessionLocal is mocked).
+            db_session: An in-memory SQLite session (unused directly here
+                as SessionLocal is mocked).
             mocker: Pytest-mock's mocker fixture.
             caplog: Pytest fixture to capture log output.
         """
         mock_session = mocker.MagicMock(spec=SQLAlchemySession)
-        # Configure the chain of calls on the mock_session to raise the error at .first()
-        mock_session.query.return_value.options.return_value.filter.return_value.first.side_effect = \
-            SQLAlchemyError("DB query failed during get_by_id")
+        # Configure the chain of calls on the mock_session to raise the error
+        # at .first()
+        (
+            mock_session.query.return_value.options.return_value.filter.return_value.first
+        ).side_effect = SQLAlchemyError("DB query failed during get_by_id")
 
         # Mock the SessionLocal context manager on the service instance
         mock_session_local_cm = mocker.MagicMock()
         mock_session_local_cm.__enter__.return_value = mock_session
         mock_session_local_cm.__exit__.return_value = None
-        
-        mocker.patch.object(initialized_service, "SessionLocal", return_value=mock_session_local_cm)
+
+        mocker.patch.object(
+            initialized_service, "SessionLocal", return_value=mock_session_local_cm
+        )
 
         with caplog.at_level(logging.ERROR):
             result = initialized_service.get_by_id(101)
@@ -437,12 +457,11 @@ class TestServiceMethods:
         assert "Database error in get_by_id for group_id 101" in caplog.text
         assert "DB query failed during get_by_id" in caplog.text
 
-
     def test_get_dependencies_found(
         self,
         initialized_service: Service,
         db_session: SQLAlchemySession,
-        mocker: "MockerFixture"
+        mocker: "MockerFixture",
     ):
         """Tests retrieving dependencies for a StatementGroup.
 
@@ -454,13 +473,39 @@ class TestServiceMethods:
         # Populate DB
         decl1 = Declaration(id=1, lean_name="Nat.succ", decl_type="def")
         decl2 = Declaration(id=2, lean_name="Nat.zero", decl_type="axiom")
-        sg_source = StatementGroup(id=201, text_hash="hash_source", statement_text="def succ (n: Nat) := Nat.add n 1", primary_decl_id=1, primary_declaration=decl1, source_file="f1", range_start_line=1,range_start_col=1,range_end_line=1,range_end_col=1)
-        sg_target = StatementGroup(id=202, text_hash="hash_target", statement_text="axiom zero : Nat", primary_decl_id=2, primary_declaration=decl2, source_file="f2", range_start_line=1,range_start_col=1,range_end_line=1,range_end_col=1)
-        dependency = StatementGroupDependency(source_statement_group_id=201, target_statement_group_id=202)
+        sg_source = StatementGroup(
+            id=201,
+            text_hash="hash_source",
+            statement_text="def succ (n: Nat) := Nat.add n 1",
+            primary_decl_id=1,
+            primary_declaration=decl1,
+            source_file="f1",
+            range_start_line=1,
+            range_start_col=1,
+            range_end_line=1,
+            range_end_col=1,
+        )
+        sg_target = StatementGroup(
+            id=202,
+            text_hash="hash_target",
+            statement_text="axiom zero : Nat",
+            primary_decl_id=2,
+            primary_declaration=decl2,
+            source_file="f2",
+            range_start_line=1,
+            range_start_col=1,
+            range_end_line=1,
+            range_end_col=1,
+        )
+        dependency = StatementGroupDependency(
+            source_statement_group_id=201, target_statement_group_id=202
+        )
         db_session.add_all([decl1, decl2, sg_source, sg_target, dependency])
         db_session.commit()
 
-        mocker.patch.object(initialized_service, "SessionLocal", return_value=db_session)
+        mocker.patch.object(
+            initialized_service, "SessionLocal", return_value=db_session
+        )
         result = initialized_service.get_dependencies(201)
 
         assert result is not None
@@ -474,7 +519,7 @@ class TestServiceMethods:
         self,
         initialized_service: Service,
         db_session: SQLAlchemySession,
-        mocker: "MockerFixture"
+        mocker: "MockerFixture",
     ):
         """Tests get_dependencies when the source StatementGroup does not exist.
 
@@ -483,15 +528,17 @@ class TestServiceMethods:
             db_session: An in-memory SQLite session.
             mocker: Pytest-mock's mocker fixture.
         """
-        mocker.patch.object(initialized_service, "SessionLocal", return_value=db_session)
-        result = initialized_service.get_dependencies(999) # Non-existent ID
+        mocker.patch.object(
+            initialized_service, "SessionLocal", return_value=db_session
+        )
+        result = initialized_service.get_dependencies(999)  # Non-existent ID
         assert result is None
 
     def test_get_dependencies_no_dependencies(
         self,
         initialized_service: Service,
         db_session: SQLAlchemySession,
-        mocker: "MockerFixture"
+        mocker: "MockerFixture",
     ):
         """Tests get_dependencies when the source group exists but has no dependencies.
 
@@ -501,11 +548,24 @@ class TestServiceMethods:
             mocker: Pytest-mock's mocker fixture.
         """
         decl1 = Declaration(id=1, lean_name="MyAxiom", decl_type="axiom")
-        sg_source = StatementGroup(id=301, text_hash="hash_no_deps", statement_text="axiom lonely : Unit", primary_decl_id=1, primary_declaration=decl1, source_file="f",range_start_line=1,range_start_col=1,range_end_line=1,range_end_col=1)
+        sg_source = StatementGroup(
+            id=301,
+            text_hash="hash_no_deps",
+            statement_text="axiom lonely : Unit",
+            primary_decl_id=1,
+            primary_declaration=decl1,
+            source_file="f",
+            range_start_line=1,
+            range_start_col=1,
+            range_end_line=1,
+            range_end_col=1,
+        )
         db_session.add_all([decl1, sg_source])
         db_session.commit()
 
-        mocker.patch.object(initialized_service, "SessionLocal", return_value=db_session)
+        mocker.patch.object(
+            initialized_service, "SessionLocal", return_value=db_session
+        )
         result = initialized_service.get_dependencies(301)
 
         assert result is not None
@@ -514,9 +574,7 @@ class TestServiceMethods:
         assert len(result.citations) == 0
 
     def test_search_successful(
-        self,
-        initialized_service: Service,
-        mocker: "MockerFixture"
+        self, initialized_service: Service, mocker: "MockerFixture"
     ):
         """Tests the search method's orchestration and result serialization.
 
@@ -531,9 +589,29 @@ class TestServiceMethods:
         """
         mock_perform_search = mocker.patch("lean_explore.local.service.perform_search")
         mock_sg_orm1_decl = Declaration(id=1, lean_name="Res1", decl_type="def")
-        mock_sg_orm1 = StatementGroup(id=10, text_hash="res1", statement_text="res1_text", primary_declaration=mock_sg_orm1_decl, source_file="F1", range_start_line=1, range_start_col=1, range_end_line=1, range_end_col=1)
+        mock_sg_orm1 = StatementGroup(
+            id=10,
+            text_hash="res1",
+            statement_text="res1_text",
+            primary_declaration=mock_sg_orm1_decl,
+            source_file="F1",
+            range_start_line=1,
+            range_start_col=1,
+            range_end_line=1,
+            range_end_col=1,
+        )
         mock_sg_orm2_decl = Declaration(id=2, lean_name="Res2", decl_type="def")
-        mock_sg_orm2 = StatementGroup(id=11, text_hash="res2", statement_text="res2_text", primary_declaration=mock_sg_orm2_decl, source_file="F2", range_start_line=2, range_start_col=1, range_end_line=1, range_end_col=1)
+        mock_sg_orm2 = StatementGroup(
+            id=11,
+            text_hash="res2",
+            statement_text="res2_text",
+            primary_declaration=mock_sg_orm2_decl,
+            source_file="F2",
+            range_start_line=2,
+            range_start_col=1,
+            range_end_line=1,
+            range_end_col=1,
+        )
 
         mock_perform_search_results: List[Tuple[StatementGroup, Dict[str, float]]] = [
             (mock_sg_orm1, {"final_score": 0.9}),
@@ -549,24 +627,27 @@ class TestServiceMethods:
         # Patch SessionLocal on the specific service instance for this test
         initialized_service.SessionLocal = lambda: mock_session_local_cm
 
-
         query_str = "test query"
         pkgs = ["Mathlib"]
         limit = 1
-        response = initialized_service.search(query=query_str, package_filters=pkgs, limit=limit)
+        response = initialized_service.search(
+            query=query_str, package_filters=pkgs, limit=limit
+        )
 
         assert isinstance(response, APISearchResponse)
         assert response.query == query_str
         assert response.packages_applied == pkgs
-        assert response.count == limit # Count after tool's limit
+        assert response.count == limit  # Count after tool's limit
         assert len(response.results) == limit
         assert response.results[0].id == mock_sg_orm1.id
         assert response.results[0].primary_declaration.lean_name == "Res1"
-        assert response.total_candidates_considered == len(mock_perform_search_results) # Before limit
+        assert response.total_candidates_considered == len(
+            mock_perform_search_results
+        )  # Before limit
         assert response.processing_time_ms >= 0
 
         mock_perform_search.assert_called_once_with(
-            session=mock_session, # Ensure it received the session
+            session=mock_session,  # Ensure it received the session
             query_string=query_str,
             model=initialized_service.embedding_model,
             faiss_index=initialized_service.faiss_index,
@@ -577,13 +658,11 @@ class TestServiceMethods:
             name_match_weight=initialized_service.default_name_match_weight,
             selected_packages=pkgs,
             semantic_similarity_threshold=initialized_service.default_semantic_similarity_threshold,
-            faiss_nprobe=initialized_service.default_faiss_nprobe
+            faiss_nprobe=initialized_service.default_faiss_nprobe,
         )
 
     def test_search_perform_search_raises_exception(
-        self,
-        initialized_service: Service,
-        mocker: "MockerFixture"
+        self, initialized_service: Service, mocker: "MockerFixture"
     ):
         """Tests that Service.search re-raises exceptions from perform_search.
 
@@ -614,6 +693,8 @@ class TestServiceMethods:
         """
         # Simulate a scenario where __init__ might have "succeeded" (due to mocks)
         # but a critical asset became None afterwards.
-        initialized_service.embedding_model = None # Tamper with the initialized service
+        initialized_service.embedding_model = (
+            None  # Tamper with the initialized service
+        )
         with pytest.raises(RuntimeError, match="Search service assets not loaded"):
             initialized_service.search(query="any")

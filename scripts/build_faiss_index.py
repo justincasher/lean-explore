@@ -83,12 +83,10 @@ def build_and_save_index(
             logger.error("'ids' array not found in NPZ file: %s", input_npz_path)
             sys.exit(1)
         if embeddings_matrix is None:
-            logger.error(
-                "'embeddings' array not found in NPZ file: %s", input_npz_path
-            )
+            logger.error("'embeddings' array not found in NPZ file: %s", input_npz_path)
             sys.exit(1)
 
-        if not ids_array.size: # Check if array is empty
+        if not ids_array.size:  # Check if array is empty
             logger.error(
                 "'ids' array in NPZ file '%s' is empty. Cannot build index.",
                 input_npz_path,
@@ -116,7 +114,7 @@ def build_and_save_index(
     except FileNotFoundError:
         logger.error("Input NPZ file not found: %s", input_npz_path.resolve())
         sys.exit(1)
-    except Exception as e: # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
         logger.error(
             "Error loading NPZ file %s: %s", input_npz_path.resolve(), e, exc_info=True
         )
@@ -125,7 +123,7 @@ def build_and_save_index(
     num_embeddings, dimension = embeddings_matrix.shape
     logger.info(
         "Loaded %d IDs and %d embeddings, each with dimension %d.",
-        len(ids_array), # Use len(ids_array) for count of IDs
+        len(ids_array),  # Use len(ids_array) for count of IDs
         num_embeddings,
         dimension,
     )
@@ -187,7 +185,7 @@ def build_and_save_index(
                     # Here, we train on all available embeddings.
                     faiss_index.train(embeddings_matrix)
                     logger.info("Index training complete.")
-            else: # num_embeddings == 0
+            else:  # num_embeddings == 0
                 logger.warning(
                     "No embeddings provided; %s will be created untrained.",
                     faiss_index_type,
@@ -205,7 +203,10 @@ def build_and_save_index(
         else:
             # This case is mainly for IndexIVFFlat if created with 0 embeddings.
             # Other scenarios should have exited earlier if embeddings were empty.
-            logger.info("No embeddings to add to the index as the input matrix was empty or training failed to produce a usable index state.")
+            logger.info(
+                "No embeddings to add to the index as the input matrix was "
+                "empty or training failed to produce a usable index state."
+            )
 
         logger.info("Saving FAISS index to: %s", output_index_path.resolve())
         output_index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -220,11 +221,11 @@ def build_and_save_index(
         # Convert NumPy array of string objects to Python list of strings
         id_list = ids_array.tolist()
         with open(output_map_path, "w", encoding="utf-8") as f:
-            json.dump(id_list, f, indent=2) # Indent for readability
+            json.dump(id_list, f, indent=2)  # Indent for readability
 
         logger.info("FAISS index and ID map created and saved successfully.")
 
-    except Exception as e: # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
         logger.error(
             "An error occurred during FAISS index building or saving: %s",
             e,
@@ -249,18 +250,22 @@ def parse_arguments() -> argparse.Namespace:
         type=pathlib.Path,
         required=True,
         help="Path to input NPZ file (e.g., 'data/generated_embeddings.npz') "
-             "containing 'ids' and 'embeddings' arrays.",
+        "containing 'ids' and 'embeddings' arrays.",
     )
     parser.add_argument(
         "--output-index-file",
         type=pathlib.Path,
-        default=pathlib.Path() / "data" / DEFAULT_OUTPUT_INDEX_FILE, # Suggest saving to data/
+        default=pathlib.Path()
+        / "data"
+        / DEFAULT_OUTPUT_INDEX_FILE,  # Suggest saving to data/
         help="Path to save the serialized FAISS index file.",
     )
     parser.add_argument(
         "--output-map-file",
         type=pathlib.Path,
-        default=pathlib.Path() / "data" / DEFAULT_OUTPUT_MAP_FILE, # Suggest saving to data/
+        default=pathlib.Path()
+        / "data"
+        / DEFAULT_OUTPUT_MAP_FILE,  # Suggest saving to data/
         help="Path to save JSON ID map file.",
     )
     parser.add_argument(
@@ -269,16 +274,16 @@ def parse_arguments() -> argparse.Namespace:
         default=DEFAULT_FAISS_INDEX_TYPE,
         choices=["IndexFlatL2", "IndexFlatIP", "IndexIVFFlat"],
         help="Type of FAISS index: IndexFlatL2 (Euclidean), "
-             "IndexFlatIP (cosine similarity - ensure normalized embeddings), "
-             "IndexIVFFlat (for larger datasets, requires training).",
+        "IndexFlatIP (cosine similarity - ensure normalized embeddings), "
+        "IndexIVFFlat (for larger datasets, requires training).",
     )
     parser.add_argument(
         "--ivf-nlist",
         type=int,
         default=100,
         help="Number of Voronoi cells (nlist) for IndexIVFFlat. "
-             "Crucial for performance/accuracy. Typically sqrt(N) to 4*sqrt(N). "
-             "Ignored for other index types.",
+        "Crucial for performance/accuracy. Typically sqrt(N) to 4*sqrt(N). "
+        "Ignored for other index types.",
     )
     return parser.parse_args()
 

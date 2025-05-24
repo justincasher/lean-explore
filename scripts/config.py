@@ -36,7 +36,9 @@ if not logging.getLogger().hasHandlers():
 
 # Default filenames
 DEFAULT_CONFIG_FILENAME = "config.yml"
-DEFAULT_COSTS_FILENAME = "model_costs.json" # Expected in 'data/' subdirectory of project root
+DEFAULT_COSTS_FILENAME = (
+    "model_costs.json"  # Expected in 'data/' subdirectory of project root
+)
 
 # Environment variables for specifying config file paths explicitly
 ENV_CONFIG_PATH = "LEAN_RANK_CONFIG_FILE"
@@ -172,7 +174,7 @@ def load_configuration(
                         "Costs file not found at derived project path: '%s'",
                         candidate_path,
                     )
-        except Exception as e: # pylint: disable=broad-except
+        except Exception as e:  # pylint: disable=broad-except
             logger.warning("Error determining project root or derived paths: %s", e)
 
     # 3. Fallback to Current Working Directory (if paths still not determined)
@@ -184,27 +186,39 @@ def load_configuration(
         cwd = pathlib.Path.cwd()
         if effective_config_path is None:
             effective_config_path = cwd / DEFAULT_CONFIG_FILENAME
-            logger.info("Using fallback config path in CWD: '%s'", effective_config_path)
+            logger.info(
+                "Using fallback config path in CWD: '%s'", effective_config_path
+            )
         if effective_costs_path is None:
             # Costs file fallback to CWD/data/ (consistent with derived) or just CWD?
-            # For simplicity, CWD directly for fallback if 'data' subfolder method is too complex here.
+            # For simplicity, CWD directly for fallback if 'data' subfolder method is
+            # too complex here.
             # Or, stick to project_root/data if project_root itself was CWD
-            # The current logic already checks derived paths first. If project_root was CWD, it would have checked CWD/data/...
+            # The current logic already checks derived paths first. If project_root
+            # was CWD, it would have checked CWD/data/...
             # So, a direct CWD fallback for costs might be CWD/model_costs.json
-            # Let's keep costs fallback relative to CWD, in a 'data' subfolder if that's intended structure,
-            # or directly in CWD if the "data" subfolder is only for the "project root" derived path.
-            # For simplicity and consistency with config.yml, try CWD/data/model_costs.json first, then CWD/model_costs.json
+            # Let's keep costs fallback relative to CWD, in a 'data' subfolder if
+            # that's intended structure,
+            # or directly in CWD if the "data" subfolder is only for the
+            # "project root" derived path.
+            # For simplicity and consistency with config.yml, try
+            # CWD/data/model_costs.json first, then CWD/model_costs.json
             costs_cwd_data_path = cwd / "data" / DEFAULT_COSTS_FILENAME
             costs_cwd_direct_path = cwd / DEFAULT_COSTS_FILENAME
             if costs_cwd_data_path.is_file():
                 effective_costs_path = costs_cwd_data_path
-                logger.info("Using fallback costs path in CWD/data: '%s'", effective_costs_path)
+                logger.info(
+                    "Using fallback costs path in CWD/data: '%s'", effective_costs_path
+                )
             elif costs_cwd_direct_path.is_file():
                 effective_costs_path = costs_cwd_direct_path
-                logger.info("Using fallback costs path in CWD: '%s'", effective_costs_path)
+                logger.info(
+                    "Using fallback costs path in CWD: '%s'", effective_costs_path
+                )
             else:
-                 logger.info("Fallback costs path in CWD (or CWD/data) not found either.")
-
+                logger.info(
+                    "Fallback costs path in CWD (or CWD/data) not found either."
+                )
 
     # --- Load Base YAML Configuration ---
     if effective_config_path:
@@ -216,16 +230,26 @@ def load_configuration(
             logger.info("Loaded base config from '%s'.", resolved_config_path)
         except FileNotFoundError:
             logger.warning("Base config file '%s' not found.", resolved_config_path)
-            config = {} # Initialize if base file is missing but path was determined
+            config = {}  # Initialize if base file is missing but path was determined
         except yaml.YAMLError as e:
-            logger.error("Error parsing YAML '%s': %s", resolved_config_path, e, exc_info=True)
-            return {} # Critical error, return empty
-        except Exception as e: # pylint: disable=broad-except
-            logger.error("Unexpected error loading '%s': %s", resolved_config_path, e, exc_info=True)
+            logger.error(
+                "Error parsing YAML '%s': %s", resolved_config_path, e, exc_info=True
+            )
+            return {}  # Critical error, return empty
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(
+                "Unexpected error loading '%s': %s",
+                resolved_config_path,
+                e,
+                exc_info=True,
+            )
             return {}
     else:
-        logger.error("Could not determine a valid path for the base configuration file. Cannot load configuration.")
-        return {} # Cannot proceed
+        logger.error(
+            "Could not determine a valid path for the base configuration file. "
+            "Cannot load configuration."
+        )
+        return {}  # Cannot proceed
 
     # --- Load and Merge JSON Costs Data ---
     if effective_costs_path:
@@ -238,16 +262,32 @@ def load_configuration(
             )
             logger.info("Loaded and merged costs from '%s'.", resolved_costs_path)
         except FileNotFoundError:
-            logger.warning("Costs file '%s' not found. 'costs' section may be incomplete.", resolved_costs_path)
+            logger.warning(
+                "Costs file '%s' not found. 'costs' section may be incomplete.",
+                resolved_costs_path,
+            )
             config.setdefault("costs", {})
         except json.JSONDecodeError as e:
-            logger.error("Error parsing JSON costs '%s': %s", resolved_costs_path, e, exc_info=True)
+            logger.error(
+                "Error parsing JSON costs '%s': %s",
+                resolved_costs_path,
+                e,
+                exc_info=True,
+            )
             config.setdefault("costs", {})
-        except Exception as e: # pylint: disable=broad-except
-            logger.error("Unexpected error loading '%s': %s", resolved_costs_path, e, exc_info=True)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(
+                "Unexpected error loading '%s': %s",
+                resolved_costs_path,
+                e,
+                exc_info=True,
+            )
             config.setdefault("costs", {})
     else:
-        logger.warning("Could not determine a valid path for the costs file. 'costs' section may be empty or missing.")
+        logger.warning(
+            "Could not determine a valid path for the costs file. 'costs' section "
+            "may be empty or missing."
+        )
         config.setdefault("costs", {})
 
     # --- Load .env file into environment variables ---
@@ -256,10 +296,12 @@ def load_configuration(
         # override=True means .env vars will take precedence over existing OS env vars.
         loaded_env = load_dotenv(dotenv_path=dotenv_path, verbose=False, override=True)
         if loaded_env:
-            logger.info(".env file loaded successfully (values override existing env vars).")
+            logger.info(
+                ".env file loaded successfully (values override existing env vars)."
+            )
         else:
             logger.debug(".env file not found at specified path or standard locations.")
-    except Exception as e: # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
         logger.error("Error loading .env file: %s", e, exc_info=True)
 
     # --- Apply Environment Variable Overrides for config VALUES ---
@@ -280,12 +322,13 @@ def load_configuration(
                 override_count += 1
             except ValueError:
                 logger.warning(
-                    "Value override failed: Cannot convert env var '%s' value '%s' to type %s.",
+                    "Value override failed: Cannot convert env var '%s' value '%s' "
+                    "to type %s.",
                     env_var,
                     env_value_str,
                     target_type.__name__,
                 )
-            except Exception as e: # pylint: disable=broad-except
+            except Exception as e:  # pylint: disable=broad-except
                 logger.error(
                     "Value override error: Unexpected issue applying env var '%s': %s",
                     env_var,
@@ -293,7 +336,9 @@ def load_configuration(
                     exc_info=True,
                 )
     if override_count > 0:
-        logger.info("Applied %d environment variable value override(s).", override_count)
+        logger.info(
+            "Applied %d environment variable value override(s).", override_count
+        )
     else:
         logger.debug("No environment variable value overrides applied from map.")
 
@@ -306,6 +351,7 @@ APP_CONFIG: Dict[str, Any] = load_configuration()
 
 
 # --- Direct Accessors for Sensitive/Specific Environment Variables ---
+
 
 def get_gemini_api_key() -> Optional[str]:
     """Retrieves the Gemini API Key directly from environment variables.
@@ -337,8 +383,10 @@ if __name__ == "__main__":
     env_cfg_var = os.getenv(ENV_CONFIG_PATH)
     env_csts_var = os.getenv(ENV_COSTS_PATH)
 
-    if env_cfg_var: test_cfg_path = pathlib.Path(env_cfg_var)
-    if env_csts_var: test_csts_path = pathlib.Path(env_csts_var)
+    if env_cfg_var:
+        test_cfg_path = pathlib.Path(env_cfg_var)
+    if env_csts_var:
+        test_csts_path = pathlib.Path(env_csts_var)
 
     if not test_cfg_path or not test_csts_path:
         try:
@@ -348,29 +396,46 @@ if __name__ == "__main__":
             _test_project_root = current_module_path.parent.parent.parent
             if not test_cfg_path:
                 _p = _test_project_root / DEFAULT_CONFIG_FILENAME
-                if _p.is_file(): test_cfg_path = _p
+                if _p.is_file():
+                    test_cfg_path = _p
             if not test_csts_path:
                 _p = _test_project_root / "data" / DEFAULT_COSTS_FILENAME
-                if _p.is_file(): test_csts_path = _p
-        except Exception: # pylint: disable=broad-except
-            logger.debug("Error finding project root in standalone test.", exc_info=True)
+                if _p.is_file():
+                    test_csts_path = _p
+        except Exception:  # pylint: disable=broad-except
+            logger.debug(
+                "Error finding project root in standalone test.", exc_info=True
+            )
 
     if not test_cfg_path or not test_csts_path:
         _cwd = pathlib.Path.cwd()
-        if not test_cfg_path: test_cfg_path = _cwd / DEFAULT_CONFIG_FILENAME
+        if not test_cfg_path:
+            test_cfg_path = _cwd / DEFAULT_CONFIG_FILENAME
         if not test_csts_path:
-             _p_data = _cwd / "data" / DEFAULT_COSTS_FILENAME
-             _p_direct = _cwd / DEFAULT_COSTS_FILENAME
-             if _p_data.is_file(): test_csts_path = _p_data
-             elif _p_direct.is_file(): test_csts_path = _p_direct
+            _p_data = _cwd / "data" / DEFAULT_COSTS_FILENAME
+            _p_direct = _cwd / DEFAULT_COSTS_FILENAME
+            if _p_data.is_file():
+                test_csts_path = _p_data
+            elif _p_direct.is_file():
+                test_csts_path = _p_direct
 
-
-    logger.info("Config Path Effective: %s", test_cfg_path.resolve() if test_cfg_path and test_cfg_path.exists() else "Not Found or Determined")
-    logger.info("Costs Path Effective: %s", test_csts_path.resolve() if test_csts_path and test_csts_path.exists() else "Not Found or Determined")
+    logger.info(
+        "Config Path Effective: %s",
+        test_cfg_path.resolve()
+        if test_cfg_path and test_cfg_path.exists()
+        else "Not Found or Determined",
+    )
+    logger.info(
+        "Costs Path Effective: %s",
+        test_csts_path.resolve()
+        if test_csts_path and test_csts_path.exists()
+        else "Not Found or Determined",
+    )
 
     # APP_CONFIG is already loaded when the module is imported.
     logger.info("\n--- Loaded Configuration (APP_CONFIG from module import) ---")
-    import pprint # pylint: disable=import-outside-toplevel
+    import pprint  # pylint: disable=import-outside-toplevel
+
     pprint.pprint(APP_CONFIG)
 
     logger.info("\n--- Accessing Values Example ---")

@@ -11,10 +11,10 @@ instance will be set by the server startup script before running the app.
 
 import logging
 from contextlib import asynccontextmanager
-from typing import Union, AsyncIterator
 from dataclasses import dataclass
+from typing import AsyncIterator, Union
 
-from mcp.server.fastmcp import FastMCP, Context as MCPContext
+from mcp.server.fastmcp import FastMCP
 
 # Import your backend service types for type hinting
 from lean_explore.api.client import Client as APIClient
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # Define a type for the backend service to be used by tools
 BackendServiceType = Union[APIClient, LocalService, None]
 
+
 @dataclass
 class AppContext:
     """Dataclass to hold application-level context for MCP tools.
@@ -34,6 +35,7 @@ class AppContext:
                          LocalService) that tools will use to perform actions.
                          Will be None if not properly initialized by the server script.
     """
+
     backend_service: BackendServiceType
 
 
@@ -52,19 +54,21 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 
     Yields:
         AppContext: The application context containing the backend service.
-    
+
     Raises:
         RuntimeError: If the backend service has not been initialized and
                       set on an attribute of the `server` instance prior to
                       the app running.
     """
     logger.info("MCP application lifespan starting...")
-    
+
     # The main server script (mcp/server.py) is expected to instantiate
     # the backend (APIClient or LocalService) based on its startup arguments
-    # and store it as an attribute on the mcp_app instance (e.g., 
+    # and store it as an attribute on the mcp_app instance (e.g.,
     # mcp_app._lean_explore_backend_service) before mcp_app.run() is called.
-    backend_service_instance: BackendServiceType = getattr(server, '_lean_explore_backend_service', None)
+    backend_service_instance: BackendServiceType = getattr(
+        server, "_lean_explore_backend_service", None
+    )
 
     if backend_service_instance is None:
         logger.error(
@@ -76,10 +80,11 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
             "Backend service not initialized for MCP app. "
             "Ensure the server script correctly sets the backend service attribute "
             "on the FastMCP app instance."
+            "on the FastMCP app instance."
         )
 
     app_context = AppContext(backend_service=backend_service_instance)
-    
+
     try:
         yield app_context
     finally:
@@ -92,7 +97,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 mcp_app = FastMCP(
     "LeanExploreMCPServer",
     version="0.1.0",
-    description="MCP Server for Lean Explore, providing tools to search and query Lean mathematical data.",
+    description=(
+        "MCP Server for Lean Explore, providing tools to search and query Lean"
+        " mathematical data."
+    ),
     lifespan=app_lifespan,
 )
 

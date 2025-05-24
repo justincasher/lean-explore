@@ -16,15 +16,20 @@ from typing import Final
 # downloaded data assets for lean_explore.
 # Example: ~/.lean_explore/data/
 USER_HOME_DIR: Final[pathlib.Path] = pathlib.Path(os.path.expanduser("~"))
-LEAN_EXPLORE_USER_DATA_DIR: Final[pathlib.Path] = USER_HOME_DIR / ".lean_explore" / "data"
+LEAN_EXPLORE_USER_DATA_DIR: Final[pathlib.Path] = (
+    USER_HOME_DIR / ".lean_explore" / "data"
+)
 
 # --- Toolchain Specific Paths ---
 # Directory within the user data directory to store versioned toolchain data.
 # Example: ~/.lean_explore/data/toolchains/
-LEAN_EXPLORE_TOOLCHAINS_BASE_DIR: Final[pathlib.Path] = LEAN_EXPLORE_USER_DATA_DIR / "toolchains"
+LEAN_EXPLORE_TOOLCHAINS_BASE_DIR: Final[pathlib.Path] = (
+    LEAN_EXPLORE_USER_DATA_DIR / "toolchains"
+)
 
 # Default active toolchain version.
-# In future enhancements, this could be determined dynamically or from user configuration.
+# In future enhancements, this could be determined dynamically
+# or from user configuration.
 # For now, it's set to the initial version of data provided ("0.1.0").
 DEFAULT_ACTIVE_TOOLCHAIN_VERSION: Final[str] = "0.1.0"
 
@@ -92,16 +97,18 @@ DEFAULT_EMBEDDING_MODEL_NAME: Final[str] = "BAAI/bge-base-en-v1.5"
 
 # FAISS Search Parameters
 DEFAULT_FAISS_K: Final[int] = 100  # Number of nearest neighbors from FAISS
-DEFAULT_FAISS_NPROBE: Final[int] = 200 # For IVF-type FAISS indexes
+DEFAULT_FAISS_NPROBE: Final[int] = 200  # For IVF-type FAISS indexes
 
 # Scoring and Ranking Parameters
-DEFAULT_SEMANTIC_SIMILARITY_THRESHOLD: Final[float] = 0.525
+DEFAULT_SEM_SIM_THRESHOLD: Final[float] = 0.525
 DEFAULT_PAGERANK_WEIGHT: Final[float] = 1.0
 DEFAULT_TEXT_RELEVANCE_WEIGHT: Final[float] = 0.2
 DEFAULT_NAME_MATCH_WEIGHT: Final[float] = 0.5
 
 # Output Parameters
-DEFAULT_RESULTS_LIMIT: Final[int] = 50 # Default number of final results to display/return
+DEFAULT_RESULTS_LIMIT: Final[int] = (
+    50  # Default number of final results to display/return
+)
 
 
 # --- Other Constants (if any emerge) ---

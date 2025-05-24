@@ -15,7 +15,6 @@ import json
 import logging
 import pathlib
 import sys
-import time # Added for potential use, though not directly used in current logic
 from typing import Any, Dict, List, Optional
 
 # --- Dependency Imports ---
@@ -23,9 +22,7 @@ try:
     import numpy as np
     import torch
     from sentence_transformers import SentenceTransformer
-    from tqdm import tqdm
 except ImportError as e:
-    # pylint: disable=broad-exception-raised
     print(
         f"Error: Missing required libraries ({e}).\n"
         "Please run: pip install torch sentence-transformers numpy tqdm",
@@ -73,7 +70,7 @@ def select_device(requested_device: Optional[str] = None) -> str:
                 logger.info("CUDA device explicitly requested and available.")
                 return "cuda"
             logger.warning(
-                "CUDA device requested but not available. Falling back to auto-detection."
+                "CUDA device requested but not available. Falling back to auto-detect."
             )
         elif device_lower == "mps":
             # Check for MPS (Apple Silicon GPU)
@@ -81,7 +78,7 @@ def select_device(requested_device: Optional[str] = None) -> str:
                 logger.info("MPS device explicitly requested and available.")
                 return "mps"
             logger.warning(
-                "MPS device requested but not available. Falling back to auto-detection."
+                "MPS device requested but not available. Falling back to auto-detect."
             )
         elif device_lower == "cpu":
             logger.info("CPU device explicitly requested.")
@@ -92,7 +89,8 @@ def select_device(requested_device: Optional[str] = None) -> str:
                 requested_device,
             )
 
-    # Auto-detection if no specific device requested or if requested device not available
+    # Auto-detection if no specific device requested or if requested device
+    # not available
     if torch.cuda.is_available():
         logger.info("CUDA device auto-detected and selected.")
         return "cuda"
@@ -132,7 +130,7 @@ def load_embedding_model(model_name: str, device: str) -> SentenceTransformer:
             model.max_seq_length,
         )
         return model
-    except Exception as e: # pylint: disable=broad-except
+    except Exception as e:
         logger.error("Failed to load model '%s': %s", model_name, e, exc_info=True)
         raise RuntimeError(
             f"Model loading failed for '{model_name}' on device '{device}'"
@@ -169,17 +167,15 @@ def generate_embeddings_from_file(
     """
     logger.info("Attempting to read input data from: %s", input_file_path)
     try:
-        with open(input_file_path, "r", encoding="utf-8") as f:
+        with open(input_file_path, encoding="utf-8") as f:
             input_data: List[Dict[str, Any]] = json.load(f)
     except FileNotFoundError:
         logger.error("Input file not found: %s", input_file_path)
         sys.exit(1)
     except json.JSONDecodeError as e:
-        logger.error(
-            "Error decoding JSON from input file %s: %s", input_file_path, e
-        )
+        logger.error("Error decoding JSON from input file %s: %s", input_file_path, e)
         sys.exit(1)
-    except Exception as e: # pylint: disable=broad-except
+    except Exception as e:
         logger.error(
             "Could not read input file %s: %s", input_file_path, e, exc_info=True
         )
@@ -207,10 +203,8 @@ def generate_embeddings_from_file(
                 limit,
                 len(input_data),
             )
-    elif limit is not None: # limit <= 0
-        logger.warning(
-            "Limit value (%d) is not positive. Processing all items.", limit
-        )
+    elif limit is not None:  # limit <= 0
+        logger.warning("Limit value (%d) is not positive. Processing all items.", limit)
 
     if not input_data:
         logger.info(
@@ -261,10 +255,10 @@ def generate_embeddings_from_file(
         batch_size,
     )
     # Disabling type check for model.encode due to dynamic nature of SentenceTransformer
-    embeddings_matrix: np.ndarray = model.encode( # type: ignore
+    embeddings_matrix: np.ndarray = model.encode(  # type: ignore
         texts_to_embed,
         batch_size=batch_size,
-        show_progress_bar=True, # tqdm progress bar
+        show_progress_bar=True,  # tqdm progress bar
         convert_to_numpy=True,
     )
     logger.info(
@@ -275,8 +269,8 @@ def generate_embeddings_from_file(
 
     if len(original_ids) != embeddings_matrix.shape[0]:
         logger.error(
-            "Critical mismatch after embedding: IDs count (%d) vs Embeddings count (%d)."
-            " Aborting to prevent data corruption.",
+            "Critical mismatch after embedding: IDs count (%d) vs Embeddings count "
+            "(%d). Aborting to prevent data corruption.",
             len(original_ids),
             embeddings_matrix.shape[0],
         )
@@ -296,12 +290,12 @@ def generate_embeddings_from_file(
             output_file_path, ids=ids_array, embeddings=embeddings_matrix
         )
         logger.info("Embeddings and IDs successfully written to NPZ output file.")
-    except IOError as e:
+    except OSError as e:
         logger.error(
             "Failed to write NPZ file to %s: %s", output_file_path, e, exc_info=True
         )
         sys.exit(1)
-    except Exception as e: # pylint: disable=broad-except
+    except Exception as e:
         logger.error(
             "An unexpected error occurred during NPZ file writing: %s", e, exc_info=True
         )
@@ -329,7 +323,9 @@ def parse_arguments() -> argparse.Namespace:
         "--output-file",
         "-o",
         type=pathlib.Path,
-        default=pathlib.Path() / "data" / DEFAULT_OUTPUT_FILENAME, # Suggest saving to data/
+        default=pathlib.Path()
+        / "data"
+        / DEFAULT_OUTPUT_FILENAME,  # Suggest saving to data/
         help="Path to save output NPZ file with IDs and embeddings.",
     )
     parser.add_argument(
@@ -341,7 +337,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--device",
         type=str,
-        default=None, # Auto-detects if not specified
+        default=None,  # Auto-detects if not specified
         choices=["cpu", "cuda", "mps"],
         help="Device to run the model on ('cpu', 'cuda', 'mps').",
     )
@@ -366,7 +362,7 @@ if __name__ == "__main__":
     chosen_device = select_device(cli_args.device)
 
     effective_output_file = cli_args.output_file
-    # Advise on .npz extension if not present, as np.savez_compressed might append it unexpectedly.
+    # Advise on .npz extension if not present; np.savez_compressed might append.
     if effective_output_file.suffix.lower() != ".npz":
         suggested_name = effective_output_file.with_suffix(".npz")
         logger.warning(
@@ -374,9 +370,9 @@ if __name__ == "__main__":
             "NumPy will save in NPZ format, possibly as '%s' or '%s.npz'. "
             "Consider using an .npz extension explicitly for clarity (e.g., '%s').",
             effective_output_file,
-            suggested_name.name, # If path is just 'outputfile'
-            effective_output_file.name, # If path is 'outputfile.txt'
-            suggested_name
+            suggested_name.name,
+            effective_output_file.name,
+            suggested_name,
         )
 
     generate_embeddings_from_file(
