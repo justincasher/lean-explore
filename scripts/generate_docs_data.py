@@ -576,10 +576,10 @@ def _serialize_module(module_obj: Module) -> Dict[str, Any]:
     """Serializes the immediate contents of a griffe Module object.
 
     This function processes the direct members of the given module, such as
-    its top-level functions and classes. It extracts their documentation
-    details and structures them into a dictionary. Aliases that cannot be
-    resolved, particularly those pointing to external modules not loaded
-    by griffe, are logged and skipped.
+    its top-level functions and classes that are *defined* within this module.
+    It extracts their documentation details and structures them into a dictionary.
+    Imported items (aliases) are not included in the lists of functions/classes
+    for this specific module, as they are defined elsewhere.
 
     Note:
         Traversal of submodules and their serialization into the main list
@@ -591,57 +591,92 @@ def _serialize_module(module_obj: Module) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: A dictionary representing the module, including its
         name, canonical path, filepath, parsed docstring, lists of
-        serialized functions and classes, and line number.
+        serialized functions and classes (defined in this module), and line number.
     """
     functions_data = []
     classes_data = []
+    current_module_canonical_path = module_obj.canonical_path
 
     for member_name, member_obj_inner in module_obj.members.items():
         try:
-            if member_obj_inner.is_function:
-                actual_function_to_serialize: Optional[Function] = None
-                if member_obj_inner.is_alias:
-                    actual_function_to_serialize = cast(
-                        Function, member_obj_inner.final_target
-                    )
-                else:
-                    actual_function_to_serialize = cast(Function, member_obj_inner)
+            target_object: Optional[Union[Function, Class, Module, Alias]] = None
+            if member_obj_inner.is_alias:
+                # Resolve the alias to its final target
+                target_object = member_obj_inner.final_target
+            else:
+                target_object = member_obj_inner
 
-                if actual_function_to_serialize:
+            if not target_object:
+                continue
+
+            # Determine the canonical path of the module where the target object is
+            # defined
+            if not isinstance(target_object.canonical_path, str):
+                logging.debug(
+                    f"Skipping member '{member_name}' in module "
+                    f"'{current_module_canonical_path}' because its target's "
+                    f"canonical path is not a string: {target_object.canonical_path}"
+                )
+                continue
+
+            # Use the parent's canonical path for a more direct check of definition
+            # scope
+            defined_in_module_path = ""
+            if (
+                hasattr(target_object, "parent")
+                and target_object.parent
+                and hasattr(target_object.parent, "canonical_path")
+            ):
+                defined_in_module_path = target_object.parent.canonical_path
+            elif (  # Fallback for items that might not have parent set as expected
+                "." in target_object.canonical_path
+            ):
+                defined_in_module_path = target_object.canonical_path.rsplit(".", 1)[0]
+            else:  # Likely a top-level module itself, not a function/class defined
+                # in another module
+                defined_in_module_path = target_object.canonical_path
+
+            if target_object.is_function and isinstance(target_object, Function):
+                # Only include if defined in the current module
+                if defined_in_module_path == current_module_canonical_path:
                     functions_data.append(
                         _serialize_function(
-                            actual_function_to_serialize, module_obj.canonical_path
+                            target_object, current_module_canonical_path
                         )
-                    )
-            elif member_obj_inner.is_class:
-                actual_class_to_serialize: Optional[Class] = None
-                if member_obj_inner.is_alias:
-                    actual_class_to_serialize = cast(
-                        Class, member_obj_inner.final_target
                     )
                 else:
-                    actual_class_to_serialize = cast(Class, member_obj_inner)
-
-                if actual_class_to_serialize:
-                    classes_data.append(
-                        _serialize_class(
-                            actual_class_to_serialize, module_obj.canonical_path
-                        )
+                    logging.debug(
+                        f"Function '{target_object.name}' (from "
+                        f"{defined_in_module_path}) is imported into "
+                        f"'{current_module_canonical_path}' and will not be listed "
+                        "directly under it."
                     )
+            elif target_object.is_class and isinstance(target_object, Class):
+                # Only include if defined in the current module
+                if defined_in_module_path == current_module_canonical_path:
+                    classes_data.append(
+                        _serialize_class(target_object, current_module_canonical_path)
+                    )
+                else:
+                    logging.debug(
+                        f"Class '{target_object.name}' (from "
+                        f"{defined_in_module_path}) is imported into "
+                        f"'{current_module_canonical_path}' and will not be listed "
+                        "directly under it."
+                    )
+
         except AliasResolutionError:
-            a = member_obj_inner.target_path
-            b = member_obj_inner.is_alias
+            a = member_obj_inner.target_path if member_obj_inner.is_alias else "self"
             logging.warning(
                 f"Skipping member '{member_obj_inner.name}' in module "
-                f"'{module_obj.canonical_path}' due to AliasResolutionError. "
-                "It likely points to an external or unresolvable module "
-                f"(target: '{a if b else 'self'}')."
+                f"'{current_module_canonical_path}' due to AliasResolutionError. "
+                f"Target: '{a}'."
             )
             continue
         except AttributeError as e_attr:
             logging.error(
                 f"Caught AttributeError for member '{member_obj_inner.name}' in module "
-                f"'{module_obj.canonical_path}'. "
+                f"'{current_module_canonical_path}'. "
                 f"Message: '{e_attr}'. Skipping this member."
             )
             continue

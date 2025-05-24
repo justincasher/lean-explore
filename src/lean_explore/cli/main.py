@@ -49,7 +49,7 @@ app.add_typer(mcp_app)
 app.add_typer(
     data_commands.app,
     name="data",
-    help="Manage local data toolchains (e.g., download, list, select).",
+    help="Manage local data toolchains.",
 )
 
 # Register the agent_chat_command directly on the main app as "chat"
@@ -65,7 +65,7 @@ console = Console()
 PANEL_CONTENT_WIDTH = 80
 
 
-@configure_app.command("lean-key")
+@configure_app.command("api-key")
 def configure_lean_explore_api_key(
     api_key: Optional[str] = typer.Option(
         None,
@@ -138,7 +138,7 @@ def _get_api_client() -> Optional[APIClient]:
         console.print(
             "[bold yellow]Lean Explore API key not configured. Please run:"
             "[/bold yellow]\n"
-            f"  `leanexplore configure lean-key`\n"
+            f"  `leanexplore configure api-key`\n"
             f"Your API key will be stored in: {config_path}"
         )
         return None
@@ -335,7 +335,7 @@ async def search_command(
             )
             console.print(
                 "Please reconfigure your API key using: "
-                "`leanexplore configure lean-key`"
+                "`leanexplore configure api-key`"
             )
         else:
             try:
@@ -402,25 +402,7 @@ async def get_by_id_command(
                 console.print(
                     Panel(
                         formatted_stmt_text,
-                        title="[bold green]Statement Text[/bold green]",
-                        border_style="green",
-                        expand=False,
-                        padding=(0, 1),
-                    )
-                )
-
-            if (
-                item.display_statement_text
-                and item.display_statement_text != item.statement_text
-            ):
-                formatted_display_stmt_text = _format_text_for_fixed_panel(
-                    item.display_statement_text, PANEL_CONTENT_WIDTH
-                )
-                console.print(
-                    Panel(
-                        formatted_display_stmt_text,
-                        title="[bold green]Display Statement Text (Formatted)"
-                        "[/bold green]",
+                        title="[bold green]Code[/bold green]",
                         border_style="green",
                         expand=False,
                         padding=(0, 1),
@@ -616,7 +598,7 @@ def mcp_serve_command(
             console.print(
                 "[bold red]Lean Explore API key is required for 'api' backend."
                 "[/bold red]\n"
-                "Please configure it using `leanexplore configure lean-key` "
+                "Please configure it using `leanexplore configure api-key` "
                 "or provide it with the `--api-key` option for this command."
             )
             raise typer.Abort()

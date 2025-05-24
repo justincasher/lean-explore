@@ -538,16 +538,13 @@ class TestPerformSearch:
             Dict[str, MagicMock]: A dictionary of named mock objects.
         """
         mock_model = MagicMock(spec=SentenceTransformer)
-        # Default behavior for model.encode
         mock_model.encode.return_value = [np.array([0.1, 0.2], dtype=np.float32)]
 
         mock_faiss_index = MagicMock(spec=faiss.Index)
         mock_faiss_index.metric_type = faiss.METRIC_L2
-        mock_faiss_index.nprobe = 1  # Default, can be asserted or changed
-        # Default behavior for faiss_index.search (empty results)
+        mock_faiss_index.nprobe = 1
         mock_faiss_index.search.return_value = (np.array([[]]), np.array([[]]))
 
-        # Patch helpers within the search_module
         mock_log_event = mocker.patch.object(search_module, "log_search_event_to_json")
         mock_calc_name_score = mocker.patch.object(
             search_module, "calculate_name_match_score", return_value=0.0
@@ -573,7 +570,7 @@ class TestPerformSearch:
         """
         results = search_module.perform_search(
             session=db_session,
-            query_string="  ",  # Empty after strip
+            query_string="  ",
             model=mock_search_dependencies["model"],
             faiss_index=mock_search_dependencies["faiss_index"],
             text_chunk_id_map=[],
@@ -581,6 +578,7 @@ class TestPerformSearch:
             pagerank_weight=0.1,
             text_relevance_weight=0.1,
             name_match_weight=0.1,
+            log_searches=True,
         )
         assert results == []
         mock_search_dependencies["log_event"].assert_called_once()
@@ -614,6 +612,7 @@ class TestPerformSearch:
                 pagerank_weight=0.1,
                 text_relevance_weight=0.1,
                 name_match_weight=0.1,
+                log_searches=True,
             )
         mock_search_dependencies["log_event"].assert_called_once()
         assert (
@@ -646,6 +645,7 @@ class TestPerformSearch:
                 pagerank_weight=0.1,
                 text_relevance_weight=0.1,
                 name_match_weight=0.1,
+                log_searches=True,
             )
         mock_search_dependencies["log_event"].assert_called_once()
         assert (
@@ -657,32 +657,36 @@ class TestPerformSearch:
         self,
         db_session: SQLAlchemySession,
         mock_search_dependencies: Dict[str, MagicMock],
+        caplog: pytest.LogCaptureFixture,
     ):
         """Tests when FAISS results don't parse to valid SG IDs.
 
         Args:
             db_session: SQLAlchemy session fixture.
             mock_search_dependencies: Fixture providing common mocks.
+            caplog: Pytest fixture to capture log output.
         """
         mock_search_dependencies["faiss_index"].search.return_value = (
             np.array([[0.5]]),
-            np.array([[0]]),  # One result
+            np.array([[0]]),
         )
-        # text_chunk_id_map[0] is "malformed" -> no valid SG ID
         mock_text_chunk_id_map = ["malformed_id"]
 
-        results = search_module.perform_search(
-            session=db_session,
-            query_string="test",
-            model=mock_search_dependencies["model"],
-            faiss_index=mock_search_dependencies["faiss_index"],
-            text_chunk_id_map=mock_text_chunk_id_map,
-            faiss_k=10,
-            pagerank_weight=0.1,
-            text_relevance_weight=0.1,
-            name_match_weight=0.1,
-        )
+        with caplog.at_level(logging.WARNING):
+            results = search_module.perform_search(
+                session=db_session,
+                query_string="test",
+                model=mock_search_dependencies["model"],
+                faiss_index=mock_search_dependencies["faiss_index"],
+                text_chunk_id_map=mock_text_chunk_id_map,
+                faiss_k=10,
+                pagerank_weight=0.1,
+                text_relevance_weight=0.1,
+                name_match_weight=0.1,
+                log_searches=True,
+            )
         assert results == []
+        assert "Malformed text_chunk_id format" in caplog.text
         assert any(
             call.kwargs["status"] == "NO_FAISS_CANDIDATES"
             for call in mock_search_dependencies["log_event"].call_args_list
@@ -692,23 +696,23 @@ class TestPerformSearch:
         self,
         db_session: SQLAlchemySession,
         mock_search_dependencies: Dict[str, MagicMock],
+        caplog: pytest.LogCaptureFixture,
     ):
         """Tests that semantic similarity threshold correctly filters candidates.
 
         Args:
             db_session: SQLAlchemy session fixture.
             mock_search_dependencies: Fixture providing common mocks.
+            caplog: Pytest fixture to capture log output.
         """
         mock_faiss_index = mock_search_dependencies["faiss_index"]
-        mock_faiss_index.metric_type = faiss.METRIC_INNER_PRODUCT  # Cosine similarity
-        # Distances are similarities for inner product
+        mock_faiss_index.metric_type = faiss.METRIC_INNER_PRODUCT
         mock_faiss_index.search.return_value = (
-            np.array([[0.8, 0.6, 0.4]]),  # Similarities
-            np.array([[0, 1, 2]]),  # Indices
+            np.array([[0.8, 0.6, 0.4]]),
+            np.array([[0, 1, 2]]),
         )
-        text_chunk_id_map = ["sg_1", "sg_2", "sg_3"]  # Link to DB IDs
+        text_chunk_id_map = ["sg_1", "sg_2", "sg_3"]
 
-        # DB entries (only sg_1 and sg_2 should be processed after thresholding)
         decl1 = Declaration(id=1, lean_name="SG1.name", decl_type="def")
         sg1 = StatementGroup(
             id=1,
@@ -737,7 +741,6 @@ class TestPerformSearch:
             range_end_col=1,
             scaled_pagerank_score=0.4,
         )
-        # SG3 should be filtered by threshold
         decl3 = Declaration(id=3, lean_name="SG3.name", decl_type="def")
         sg3 = StatementGroup(
             id=3,
@@ -756,30 +759,252 @@ class TestPerformSearch:
         db_session.add_all([decl1, sg1, decl2, sg2, decl3, sg3])
         db_session.commit()
 
-        results = search_module.perform_search(
-            session=db_session,
-            query_string="find good ones",
-            model=mock_search_dependencies["model"],
-            faiss_index=mock_faiss_index,
-            text_chunk_id_map=text_chunk_id_map,
-            faiss_k=3,
-            pagerank_weight=0.5,
-            text_relevance_weight=0.5,
-            name_match_weight=0.0,
-            semantic_similarity_threshold=0.5,  # sg_3 (sim 0.4) should be excluded
-        )
+        with caplog.at_level(logging.INFO):
+            results = search_module.perform_search(
+                session=db_session,
+                query_string="find good ones",
+                model=mock_search_dependencies["model"],
+                faiss_index=mock_faiss_index,
+                text_chunk_id_map=text_chunk_id_map,
+                faiss_k=3,
+                pagerank_weight=0.5,
+                text_relevance_weight=0.5,
+                name_match_weight=0.0,
+                semantic_similarity_threshold=0.5,
+                log_searches=True,
+            )
 
         assert len(results) == 2
         result_ids = {r[0].id for r in results}
         assert result_ids == {1, 2}
-        # Check that SG3 was not processed deeply (e.g., calculate_name_match_score
-        # not called for it).
-        # This is harder to check without inspecting internal state or more
-        # complex mocking. For now, the length of results is a good indicator.
+        assert (
+            "Post-thresholding: 2 of 3 candidates remaining (threshold: 0.500)."
+            in caplog.text
+        )
+        assert any(
+            call.kwargs["status"] == "SUCCESS"
+            for call in mock_search_dependencies["log_event"].call_args_list
+        )
 
-    # More tests for perform_search: package_filtering, scoring logic, different
-    # FAISS metric_types, etc. These would involve more complex data setup in
-    # db_session and mock configurations.
+    def test_package_filtering(
+        self,
+        db_session: SQLAlchemySession,
+        mock_search_dependencies: Dict[str, MagicMock],
+        caplog: pytest.LogCaptureFixture,
+    ):
+        """Tests that package filtering correctly narrows down results.
+
+        Args:
+            db_session: SQLAlchemy session fixture.
+            mock_search_dependencies: Fixture providing common mocks.
+            caplog: Pytest fixture to capture log output.
+        """
+        mock_faiss_index = mock_search_dependencies["faiss_index"]
+        mock_faiss_index.metric_type = faiss.METRIC_INNER_PRODUCT
+        mock_faiss_index.search.return_value = (
+            np.array([[0.9, 0.8, 0.7]]),
+            np.array([[0, 1, 2]]),
+        )
+        text_chunk_id_map = ["sg_1", "sg_2", "sg_3"]
+
+        decl1 = Declaration(id=1, lean_name="Mathlib.SG1.name", decl_type="def")
+        sg1 = StatementGroup(
+            id=1,
+            primary_decl_id=1,
+            primary_declaration=decl1,
+            text_hash="h1",
+            statement_text="text1",
+            source_file="Mathlib/CategoryTheory/SG1.lean",
+            range_start_line=1,
+            range_start_col=1,
+            range_end_line=1,
+            range_end_col=1,
+            scaled_pagerank_score=0.9,
+        )
+        decl2 = Declaration(id=2, lean_name="Std.SG2.name", decl_type="def")
+        sg2 = StatementGroup(
+            id=2,
+            primary_decl_id=2,
+            primary_declaration=decl2,
+            text_hash="h2",
+            statement_text="text2",
+            source_file="Std/Data/SG2.lean",
+            range_start_line=1,
+            range_start_col=1,
+            range_end_line=1,
+            range_end_col=1,
+            scaled_pagerank_score=0.8,
+        )
+        decl3 = Declaration(id=3, lean_name="MyProj.SG3.name", decl_type="def")
+        sg3 = StatementGroup(
+            id=3,
+            primary_decl_id=3,
+            primary_declaration=decl3,
+            text_hash="h3",
+            statement_text="text3",
+            source_file="MyProj/Utils/SG3.lean",
+            range_start_line=1,
+            range_start_col=1,
+            range_end_line=1,
+            range_end_col=1,
+            scaled_pagerank_score=0.7,
+        )
+
+        db_session.add_all([decl1, sg1, decl2, sg2, decl3, sg3])
+        db_session.commit()
+
+        with caplog.at_level(logging.INFO):
+            results = search_module.perform_search(
+                session=db_session,
+                query_string="test query",
+                model=mock_search_dependencies["model"],
+                faiss_index=mock_faiss_index,
+                text_chunk_id_map=text_chunk_id_map,
+                faiss_k=3,
+                pagerank_weight=0.1,
+                text_relevance_weight=0.1,
+                name_match_weight=0.1,
+                log_searches=True,
+                selected_packages=["Mathlib"],
+            )
+        assert len(results) == 1
+        assert results[0][0].id == 1
+        assert "Filtering search by packages: ['Mathlib']" in caplog.text
+        assert any(
+            call.kwargs["status"] == "SUCCESS"
+            for call in mock_search_dependencies["log_event"].call_args_list
+        )
+
+    def test_full_scoring_and_ranking(
+        self,
+        db_session: SQLAlchemySession,
+        mock_search_dependencies: Dict[str, MagicMock],
+        caplog: pytest.LogCaptureFixture,
+    ):
+        """Tests the combination of similarity, PageRank, and name match for ranking.
+
+        Args:
+            db_session: SQLAlchemy session fixture.
+            mock_search_dependencies: Fixture providing common mocks.
+            caplog: Pytest fixture to capture log output.
+        """
+        mock_faiss_index = mock_search_dependencies["faiss_index"]
+        mock_faiss_index.metric_type = faiss.METRIC_INNER_PRODUCT
+        mock_faiss_index.search.return_value = (
+            np.array([[0.8, 0.7, 0.6]]),
+            np.array([[0, 1, 2]]),
+        )
+        text_chunk_id_map = ["sg_1", "sg_2", "sg_3"]
+
+        # Mock calculate_name_match_score to return specific values
+        def mock_calc_name_match(query, name):
+            if "Target1" in name:
+                return 0.9  # High name match
+            if "Target2" in name:
+                return 0.2
+            return 0.0
+
+        mock_search_dependencies["calc_name_score"].side_effect = mock_calc_name_match
+
+        decl1 = Declaration(id=1, lean_name="Target1.def", decl_type="def")
+        sg1 = StatementGroup(
+            id=1,
+            primary_decl_id=1,
+            primary_declaration=decl1,
+            text_hash="h1",
+            statement_text="text1",
+            source_file="Mathlib/T1.lean",
+            range_start_line=1,
+            range_start_col=1,
+            range_end_line=1,
+            range_end_col=1,
+            scaled_pagerank_score=0.1,  # Low PR
+        )
+        decl2 = Declaration(id=2, lean_name="Something.Else.Target2", decl_type="def")
+        sg2 = StatementGroup(
+            id=2,
+            primary_decl_id=2,
+            primary_declaration=decl2,
+            text_hash="h2",
+            statement_text="text2",
+            source_file="Mathlib/T2.lean",
+            range_start_line=1,
+            range_start_col=1,
+            range_end_line=1,
+            range_end_col=1,
+            scaled_pagerank_score=0.8,  # High PR
+        )
+        decl3 = Declaration(id=3, lean_name="Generic.Name", decl_type="def")
+        sg3 = StatementGroup(
+            id=3,
+            primary_decl_id=3,
+            primary_declaration=decl3,
+            text_hash="h3",
+            statement_text="text3",
+            source_file="Mathlib/T3.lean",
+            range_start_line=1,
+            range_start_col=1,
+            range_end_line=1,
+            range_end_col=1,
+            scaled_pagerank_score=0.5,
+        )
+
+        db_session.add_all([decl1, sg1, decl2, sg2, decl3, sg3])
+        db_session.commit()
+
+        # Weights: text relevance (sem_sim) = 0.6, pagerank = 0.3, name_match = 0.1
+        results = search_module.perform_search(
+            session=db_session,
+            query_string="query Target1",
+            model=mock_search_dependencies["model"],
+            faiss_index=mock_faiss_index,
+            text_chunk_id_map=text_chunk_id_map,
+            faiss_k=3,
+            pagerank_weight=0.3,
+            text_relevance_weight=0.6,
+            name_match_weight=0.1,
+            log_searches=True,
+            semantic_similarity_threshold=0.0,
+        )
+
+        # Raw similarities from FAISS: [0.8, 0.7, 0.6] -> Normalized: [1.0, 0.5, 0.0]
+        # PageRank: SG1=0.1, SG2=0.8, SG3=0.5
+        # Name Match: SG1=0.9, SG2=0.2, SG3=0.0 (based on mock_calc_name_match)
+
+        # Expected scores for SG1 (raw_sim=0.8, norm_sim=1.0, pr=0.1, name_match=0.9)
+        # Final = (0.6 * 1.0) + (0.3 * 0.1) + (0.1 * 0.9) = 0.6 + 0.03 + 0.09 = 0.72
+
+        # Expected scores for SG2 (raw_sim=0.7, norm_sim=0.5, pr=0.8, name_match=0.2)
+        # Final = (0.6 * 0.5) + (0.3 * 0.8) + (0.1 * 0.2) = 0.3 + 0.24 + 0.02 = 0.56
+
+        # Expected scores for SG3 (raw_sim=0.6, norm_sim=0.0, pr=0.5, name_match=0.0)
+        # Final = (0.6 * 0.0) + (0.3 * 0.5) + (0.1 * 0.0) = 0.0 + 0.15 + 0.0 = 0.15
+
+        assert len(results) == 3
+
+        # Check order and approximate scores
+        assert results[0][0].id == 1
+        assert results[0][1]["final_score"] == pytest.approx(0.72)
+        assert results[0][1]["norm_similarity"] == pytest.approx(1.0)
+        assert results[0][1]["scaled_pagerank"] == pytest.approx(0.1)
+        assert results[0][1]["raw_name_match_score"] == pytest.approx(0.9)
+
+        assert results[1][0].id == 2
+        assert results[1][1]["final_score"] == pytest.approx(0.56)
+        assert results[1][1]["norm_similarity"] == pytest.approx(0.5)
+        assert results[1][1]["scaled_pagerank"] == pytest.approx(0.8)
+        assert results[1][1]["raw_name_match_score"] == pytest.approx(0.2)
+
+        assert results[2][0].id == 3
+        assert results[2][1]["final_score"] == pytest.approx(0.15)
+        assert results[2][1]["norm_similarity"] == pytest.approx(0.0)
+        assert results[2][1]["scaled_pagerank"] == pytest.approx(0.5)
+        assert results[2][1]["raw_name_match_score"] == pytest.approx(0.0)
+
+        assert any(
+            call.kwargs["status"] == "SUCCESS"
+            for call in mock_search_dependencies["log_event"].call_args_list
+        )
 
 
 # --- Tests for CLI Aspects (parse_arguments and main) ---
@@ -795,8 +1020,8 @@ class TestSearchScriptCLI:
         monkeypatch.setattr(sys, "argv", ["search.py", "my test query"])
         args = search_module.parse_arguments()
         assert args.query == "my test query"
-        assert args.limit is None  # Default from argparse
-        assert args.packages is None  # Default from argparse
+        assert args.limit is None
+        assert args.packages is None
 
     def test_parse_arguments_all_options(self, monkeypatch: pytest.MonkeyPatch):
         """Tests argument parsing with all options specified.
@@ -824,7 +1049,7 @@ class TestSearchScriptCLI:
 
     @patch.object(search_module, "print_results")
     @patch.object(search_module, "perform_search")
-    @patch.object(search_module, "sessionmaker")  # Used within main for SessionLocal
+    @patch.object(search_module, "sessionmaker")
     @patch.object(search_module, "create_engine")
     @patch.object(search_module, "load_faiss_assets")
     @patch.object(search_module, "load_embedding_model")
@@ -838,7 +1063,7 @@ class TestSearchScriptCLI:
         mock_sessionmaker: MagicMock,
         mock_perform_search: MagicMock,
         mock_print_results: MagicMock,
-        isolated_data_paths: pathlib.Path,  # To ensure defaults point to temp
+        isolated_data_paths: pathlib.Path,
         caplog: pytest.LogCaptureFixture,
     ):
         """Tests the main execution flow for a successful search.
@@ -867,15 +1092,13 @@ class TestSearchScriptCLI:
         mock_id_map = ["id1"]
         mock_load_faiss.return_value = (mock_faiss_idx, mock_id_map)
 
-        mock_engine_instance = MagicMock(
-            spec=SQLAlchemyEngine
-        )  # Use a more specific spec if available
+        mock_engine_instance = MagicMock(spec=SQLAlchemyEngine)
         mock_create_engine.return_value = mock_engine_instance
 
         mock_session_instance = MagicMock(spec=SQLAlchemySession)
-        mock_session_factory_instance = MagicMock()  # This is SessionLocal
+        mock_session_factory_instance = MagicMock()
         mock_session_factory_instance.return_value.__enter__.return_value = (
-            mock_session_instance  # for 'with ... as session:'
+            mock_session_instance
         )
         mock_sessionmaker.return_value = mock_session_factory_instance
 
@@ -892,18 +1115,31 @@ class TestSearchScriptCLI:
         mock_parse_args.assert_called_once()
         mock_load_model.assert_called_once_with(defaults.DEFAULT_EMBEDDING_MODEL_NAME)
         mock_load_faiss.assert_called_once_with(
-            str(defaults.DEFAULT_FAISS_INDEX_PATH.resolve()),  # main uses resolve
+            str(defaults.DEFAULT_FAISS_INDEX_PATH.resolve()),
             str(defaults.DEFAULT_FAISS_MAP_PATH.resolve()),
         )
         mock_create_engine.assert_called_once_with(defaults.DEFAULT_DB_URL, echo=False)
         mock_sessionmaker.assert_called_once()
-        mock_perform_search.assert_called_once()
+        mock_perform_search.assert_called_once_with(
+            session=mock_session_instance,
+            query_string=mock_args.query,
+            model=mock_s_transformer,
+            faiss_index=mock_faiss_idx,
+            text_chunk_id_map=mock_id_map,
+            faiss_k=defaults.DEFAULT_FAISS_K,
+            pagerank_weight=defaults.DEFAULT_PAGERANK_WEIGHT,
+            text_relevance_weight=defaults.DEFAULT_TEXT_RELEVANCE_WEIGHT,
+            name_match_weight=defaults.DEFAULT_NAME_MATCH_WEIGHT,
+            log_searches=True,
+            selected_packages=mock_args.packages,
+            semantic_similarity_threshold=defaults.DEFAULT_SEM_SIM_THRESHOLD,
+            faiss_nprobe=defaults.DEFAULT_FAISS_NPROBE,
+        )
         mock_print_results.assert_called_once_with(
             ranked_results_fixture[: mock_args.limit]
         )
 
         assert "Starting Search (Direct Script Execution)" in caplog.text
-        # Ensure USER_LOGS_BASE_DIR was attempted to be created
         assert (search_module._USER_LOGS_BASE_DIR).exists()
 
     @patch.object(search_module, "sys")

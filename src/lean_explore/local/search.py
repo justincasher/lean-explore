@@ -309,6 +309,7 @@ def perform_search(
     pagerank_weight: float,
     text_relevance_weight: float,
     name_match_weight: float,
+    log_searches: bool,  # Added parameter
     selected_packages: Optional[List[str]] = None,
     semantic_similarity_threshold: float = defaults.DEFAULT_SEM_SIM_THRESHOLD,
     faiss_nprobe: int = defaults.DEFAULT_FAISS_NPROBE,
@@ -325,6 +326,7 @@ def perform_search(
         pagerank_weight: Weight for the pre-scaled PageRank score.
         text_relevance_weight: Weight for the normalized semantic similarity score.
         name_match_weight: Weight for the raw name match score.
+        log_searches: If True, search performance data will be logged.
         selected_packages: Optional list of package names to filter search by.
         semantic_similarity_threshold: Minimum similarity for a result to be considered.
         faiss_nprobe: Number of closest cells/clusters to search for IVF-type FAISS
@@ -348,10 +350,11 @@ def perform_search(
 
     if not query_string.strip():
         logger.warning("Empty query provided. Returning no results.")
-        duration_ms = (time.time() - overall_start_time) * 1000
-        log_search_event_to_json(
-            status="EMPTY_QUERY_SUBMITTED", duration_ms=duration_ms, results_count=0
-        )
+        if log_searches:
+            duration_ms = (time.time() - overall_start_time) * 1000
+            log_search_event_to_json(
+                status="EMPTY_QUERY_SUBMITTED", duration_ms=duration_ms, results_count=0
+            )
         return []
 
     try:
@@ -366,13 +369,14 @@ def perform_search(
             faiss.normalize_L2(query_embedding_reshaped)
     except Exception as e:
         logger.error("Failed to embed query: %s", e, exc_info=True)
-        duration_ms = (time.time() - overall_start_time) * 1000
-        log_search_event_to_json(
-            status="EMBEDDING_ERROR",
-            duration_ms=duration_ms,
-            results_count=0,
-            error_type=type(e).__name__,
-        )
+        if log_searches:
+            duration_ms = (time.time() - overall_start_time) * 1000
+            log_search_event_to_json(
+                status="EMBEDDING_ERROR",
+                duration_ms=duration_ms,
+                results_count=0,
+                error_type=type(e).__name__,
+            )
         raise Exception(f"Query embedding failed: {e}") from e
 
     try:
@@ -393,13 +397,14 @@ def perform_search(
         distances, indices = faiss_index.search(query_embedding_reshaped, faiss_k)
     except Exception as e:
         logger.error("FAISS search failed: %s", e, exc_info=True)
-        duration_ms = (time.time() - overall_start_time) * 1000
-        log_search_event_to_json(
-            status="FAISS_SEARCH_ERROR",
-            duration_ms=duration_ms,
-            results_count=0,
-            error_type=type(e).__name__,
-        )
+        if log_searches:
+            duration_ms = (time.time() - overall_start_time) * 1000
+            log_search_event_to_json(
+                status="FAISS_SEARCH_ERROR",
+                duration_ms=duration_ms,
+                results_count=0,
+                error_type=type(e).__name__,
+            )
         raise Exception(f"FAISS search failed: {e}") from e
 
     sg_candidates_raw_similarity: Dict[int, float] = {}
@@ -470,10 +475,11 @@ def perform_search(
         logger.info(
             "No valid StatementGroup candidates found after FAISS search and parsing."
         )
-        duration_ms = (time.time() - overall_start_time) * 1000
-        log_search_event_to_json(
-            status="NO_FAISS_CANDIDATES", duration_ms=duration_ms, results_count=0
-        )
+        if log_searches:
+            duration_ms = (time.time() - overall_start_time) * 1000
+            log_search_event_to_json(
+                status="NO_FAISS_CANDIDATES", duration_ms=duration_ms, results_count=0
+            )
         return []
     logger.info(
         "Aggregated %d unique StatementGroup candidates from FAISS results.",
@@ -500,12 +506,13 @@ def perform_search(
                 "threshold of %.3f.",
                 semantic_similarity_threshold,
             )
-            duration_ms = (time.time() - overall_start_time) * 1000
-            log_search_event_to_json(
-                status="NO_CANDIDATES_POST_THRESHOLD",
-                duration_ms=duration_ms,
-                results_count=0,
-            )
+            if log_searches:
+                duration_ms = (time.time() - overall_start_time) * 1000
+                log_search_event_to_json(
+                    status="NO_CANDIDATES_POST_THRESHOLD",
+                    duration_ms=duration_ms,
+                    results_count=0,
+                )
             return []
 
     candidate_sg_ids = list(sg_candidates_raw_similarity.keys())
@@ -565,13 +572,14 @@ def perform_search(
         logger.error(
             "Database query for StatementGroup details failed: %s", e, exc_info=True
         )
-        duration_ms = (time.time() - overall_start_time) * 1000
-        log_search_event_to_json(
-            status="DB_FETCH_ERROR",
-            duration_ms=duration_ms,
-            results_count=0,
-            error_type=type(e).__name__,
-        )
+        if log_searches:
+            duration_ms = (time.time() - overall_start_time) * 1000
+            log_search_event_to_json(
+                status="DB_FETCH_ERROR",
+                duration_ms=duration_ms,
+                results_count=0,
+                error_type=type(e).__name__,
+            )
         raise  # Re-raise to be handled by the caller
 
     results_with_scores: List[Tuple[StatementGroup, Dict[str, float]]] = []
@@ -620,12 +628,13 @@ def perform_search(
             "No candidates remaining after matching with DB data or other "
             "processing steps."
         )
-        duration_ms = (time.time() - overall_start_time) * 1000
-        log_search_event_to_json(
-            status="NO_CANDIDATES_POST_PROCESSING",
-            duration_ms=duration_ms,
-            results_count=0,
-        )
+        if log_searches:
+            duration_ms = (time.time() - overall_start_time) * 1000
+            log_search_event_to_json(
+                status="NO_CANDIDATES_POST_PROCESSING",
+                duration_ms=duration_ms,
+                results_count=0,
+            )
         return []
 
     # Normalize semantic similarity scores for the retrieved candidates
@@ -706,10 +715,11 @@ def perform_search(
         elif not sg_candidates_raw_similarity:
             final_status = "NO_CANDIDATES_POST_THRESHOLD"
 
-    duration_ms = (time.time() - overall_start_time) * 1000
-    log_search_event_to_json(
-        status=final_status, duration_ms=duration_ms, results_count=results_count
-    )
+    if log_searches:
+        duration_ms = (time.time() - overall_start_time) * 1000
+        log_search_event_to_json(
+            status=final_status, duration_ms=duration_ms, results_count=results_count
+        )
 
     return results_with_scores
 
@@ -924,6 +934,7 @@ def main():
                 faiss_k=faiss_k_cand,
                 pagerank_weight=pr_weight,
                 text_relevance_weight=sem_sim_weight,
+                log_searches=True,
                 name_match_weight=name_match_w,
                 selected_packages=args.packages,
                 semantic_similarity_threshold=semantic_sim_thresh,  # from defaults

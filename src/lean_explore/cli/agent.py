@@ -61,7 +61,7 @@ except ImportError:
         "in PYTHONPATH (e.g., by running 'pip install -e .' from the project root)."
     )
 
-    class MockConfigUtils:
+    class _MockConfigUtils:
         """A mock for config_utils if it cannot be imported."""
 
         def load_api_key(self) -> Optional[str]:
@@ -80,7 +80,7 @@ except ImportError:
             """Saves OpenAI API key."""
             return False
 
-    config_utils = MockConfigUtils()
+    config_utils = _MockConfigUtils()
 
 
 # --- Async Wrapper for Typer Commands ---
@@ -104,7 +104,7 @@ def typer_async(f):
 
 
 # --- ANSI Color Codes ---
-class Colors:
+class _Colors:
     """ANSI color codes for terminal output for enhanced readability."""
 
     BLUE = "\033[94m"
@@ -506,7 +506,7 @@ async def _run_agent_session(
             agent_model = "gpt-4.1"
             agent_object_name = "Assistant"
             agent_display_name = (
-                f"{Colors.BOLD}{Colors.GREEN}{agent_object_name}{Colors.ENDC}"
+                f"{_Colors.BOLD}{_Colors.GREEN}{agent_object_name}{_Colors.ENDC}"
             )
 
             agent = Agent(
@@ -609,7 +609,8 @@ async def _run_agent_session(
                     console.print()
 
                     thinking_line_str_ansi = (
-                        f"{agent_display_name}: {Colors.YELLOW}Thinking...{Colors.ENDC}"
+                        f"{agent_display_name}: "
+                        f"{_Colors.YELLOW}Thinking...{_Colors.ENDC}"
                     )
                     sys.stdout.write(thinking_line_str_ansi)
                     sys.stdout.flush()
