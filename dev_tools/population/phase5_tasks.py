@@ -14,7 +14,11 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from tqdm import tqdm
 
-from lean_explore.shared.models.db import Declaration, Dependency, StatementGroupDependency
+from lean_explore.shared.models.db import (
+    Declaration,
+    Dependency,
+    StatementGroupDependency,
+)
 
 logger = logging.getLogger(__name__)
 

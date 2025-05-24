@@ -32,13 +32,14 @@ except ImportError as e:
 
 # --- Project Model & Config Imports ---
 try:
-    from .config import APP_CONFIG
     from lean_explore.shared.models.db import (
         Declaration,
         Dependency,
         StatementGroup,
         StatementGroupDependency,
     )
+
+    from .config import APP_CONFIG
 except ImportError as e:
     # pylint: disable=broad-exception-raised
     print(
