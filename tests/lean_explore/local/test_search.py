@@ -2,7 +2,7 @@
 
 """Tests for core search logic and helper functions in `lean_explore.search`.
 
-This module includes tests for name matching, performance logging,
+This module includes tests for performance logging,
 asset loading (embedding models, FAISS indices), the main
 `perform_search` algorithm, and the script's CLI execution.
 """
@@ -35,68 +35,6 @@ if TYPE_CHECKING:
 
 
 # --- Tests for Helper Functions (Assumed to be passing from previous steps) ---
-class TestCalculateNameMatchScore:
-    """Tests for the `calculate_name_match_score` function."""
-
-    def test_empty_inputs(self):
-        """Ensures score is 0.0 if either query or name is empty."""
-        assert search_module.calculate_name_match_score("", "Nat.add") == 0.0
-        assert search_module.calculate_name_match_score("Nat.add", "") == 0.0
-        assert search_module.calculate_name_match_score("", "") == 0.0
-
-    def test_exact_match(self):
-        """Ensures exact matches (case-insensitive) score approximately 1.0."""
-        assert search_module.calculate_name_match_score(
-            "Nat.add", "Nat.add"
-        ) == pytest.approx(1.0)
-        assert search_module.calculate_name_match_score(
-            "nat.add", "Nat.add"
-        ) == pytest.approx(1.0)
-        assert search_module.calculate_name_match_score(
-            "Nat.Add", "nat.ADD"
-        ) == pytest.approx(1.0)
-
-    def test_no_match(self):
-        """Ensures completely different strings score 0.0."""
-        assert search_module.calculate_name_match_score("Nat.mul", "Nat.add") == 0.0
-        assert search_module.calculate_name_match_score("foo", "bar") == 0.0
-
-    @pytest.mark.parametrize(
-        "query, name, raw_score_ratio, expected_mapped_score",
-        [
-            ("Sim1", "Sim1", 0.90, 0.0),
-            ("Sim2", "Sim2", 0.95, 0.5),
-            ("Sim3", "Sim3", 0.99, 0.9),
-            ("Sim4", "Sim4", 1.0, 1.0),
-            ("Sim5", "Sim5", 0.89, 0.0),
-            ("Sim6", "Sim6", 0.50, 0.0),
-        ],
-    )
-    def test_score_mapping_logic(
-        self,
-        query: str,
-        name: str,
-        raw_score_ratio: float,
-        expected_mapped_score: float,
-        mocker: "MockerFixture",
-    ):
-        """Tests the thresholding and linear scaling logic for name matching.
-
-        Args:
-            query: The query string for the test.
-            name: The Lean declaration name for the test.
-            raw_score_ratio: The simulated raw fuzz.WRatio / 100.0.
-            expected_mapped_score: The expected mapped score after processing.
-            mocker: Pytest-mock's mocker fixture.
-        """
-        mocker.patch.object(
-            search_module.fuzz, "WRatio", return_value=raw_score_ratio * 100
-        )
-        assert search_module.calculate_name_match_score(query, name) == pytest.approx(
-            expected_mapped_score, abs=1e-2
-        )
-
-
 class TestLogSearchEventToJson:
     """Tests for the `log_search_event_to_json` function."""
 
@@ -529,7 +467,7 @@ class TestPerformSearch:
         """Provides common mocks for `perform_search` dependencies.
 
         Yields a dictionary of mocks for: model, faiss_index,
-        log_search_event_to_json, and calculate_name_match_score.
+        and log_search_event_to_json.
 
         Args:
             mocker: Pytest-mock's mocker fixture.
@@ -546,15 +484,11 @@ class TestPerformSearch:
         mock_faiss_index.search.return_value = (np.array([[]]), np.array([[]]))
 
         mock_log_event = mocker.patch.object(search_module, "log_search_event_to_json")
-        mock_calc_name_score = mocker.patch.object(
-            search_module, "calculate_name_match_score", return_value=0.0
-        )
 
         return {
             "model": mock_model,
             "faiss_index": mock_faiss_index,
             "log_event": mock_log_event,
-            "calc_name_score": mock_calc_name_score,
         }
 
     def test_empty_query_string(
@@ -577,7 +511,6 @@ class TestPerformSearch:
             faiss_k=10,
             pagerank_weight=0.1,
             text_relevance_weight=0.1,
-            name_match_weight=0.1,
             log_searches=True,
         )
         assert results == []
@@ -611,7 +544,6 @@ class TestPerformSearch:
                 faiss_k=10,
                 pagerank_weight=0.1,
                 text_relevance_weight=0.1,
-                name_match_weight=0.1,
                 log_searches=True,
             )
         mock_search_dependencies["log_event"].assert_called_once()
@@ -644,7 +576,6 @@ class TestPerformSearch:
                 faiss_k=10,
                 pagerank_weight=0.1,
                 text_relevance_weight=0.1,
-                name_match_weight=0.1,
                 log_searches=True,
             )
         mock_search_dependencies["log_event"].assert_called_once()
@@ -682,7 +613,6 @@ class TestPerformSearch:
                 faiss_k=10,
                 pagerank_weight=0.1,
                 text_relevance_weight=0.1,
-                name_match_weight=0.1,
                 log_searches=True,
             )
         assert results == []
@@ -769,7 +699,6 @@ class TestPerformSearch:
                 faiss_k=3,
                 pagerank_weight=0.5,
                 text_relevance_weight=0.5,
-                name_match_weight=0.0,
                 semantic_similarity_threshold=0.5,
                 log_searches=True,
             )
@@ -863,7 +792,6 @@ class TestPerformSearch:
                 faiss_k=3,
                 pagerank_weight=0.1,
                 text_relevance_weight=0.1,
-                name_match_weight=0.1,
                 log_searches=True,
                 selected_packages=["Mathlib"],
             )
@@ -881,7 +809,7 @@ class TestPerformSearch:
         mock_search_dependencies: Dict[str, MagicMock],
         caplog: pytest.LogCaptureFixture,
     ):
-        """Tests the combination of similarity, PageRank, and name match for ranking.
+        """Tests the combination of similarity and PageRank for ranking.
 
         Args:
             db_session: SQLAlchemy session fixture.
@@ -891,20 +819,10 @@ class TestPerformSearch:
         mock_faiss_index = mock_search_dependencies["faiss_index"]
         mock_faiss_index.metric_type = faiss.METRIC_INNER_PRODUCT
         mock_faiss_index.search.return_value = (
-            np.array([[0.8, 0.7, 0.6]]),
-            np.array([[0, 1, 2]]),
+            np.array([[0.8, 0.7, 0.6]]),  # Raw similarities
+            np.array([[0, 1, 2]]),  # FAISS indices
         )
         text_chunk_id_map = ["sg_1", "sg_2", "sg_3"]
-
-        # Mock calculate_name_match_score to return specific values
-        def mock_calc_name_match(query, name):
-            if "Target1" in name:
-                return 0.9  # High name match
-            if "Target2" in name:
-                return 0.2
-            return 0.0
-
-        mock_search_dependencies["calc_name_score"].side_effect = mock_calc_name_match
 
         decl1 = Declaration(id=1, lean_name="Target1.def", decl_type="def")
         sg1 = StatementGroup(
@@ -952,7 +870,7 @@ class TestPerformSearch:
         db_session.add_all([decl1, sg1, decl2, sg2, decl3, sg3])
         db_session.commit()
 
-        # Weights: text relevance (sem_sim) = 0.6, pagerank = 0.3, name_match = 0.1
+        # Weights: text relevance (sem_sim) = 0.6, pagerank = 0.3
         results = search_module.perform_search(
             session=db_session,
             query_string="query Target1",
@@ -962,44 +880,42 @@ class TestPerformSearch:
             faiss_k=3,
             pagerank_weight=0.3,
             text_relevance_weight=0.6,
-            name_match_weight=0.1,
             log_searches=True,
             semantic_similarity_threshold=0.0,
         )
 
         # Raw similarities from FAISS: [0.8, 0.7, 0.6] -> Normalized: [1.0, 0.5, 0.0]
         # PageRank: SG1=0.1, SG2=0.8, SG3=0.5
-        # Name Match: SG1=0.9, SG2=0.2, SG3=0.0 (based on mock_calc_name_match)
 
-        # Expected scores for SG1 (raw_sim=0.8, norm_sim=1.0, pr=0.1, name_match=0.9)
-        # Final = (0.6 * 1.0) + (0.3 * 0.1) + (0.1 * 0.9) = 0.6 + 0.03 + 0.09 = 0.72
+        # Expected scores for SG1 (raw_sim=0.8, norm_sim=1.0, pr=0.1)
+        # Final = (0.6 * 1.0) + (0.3 * 0.1) = 0.6 + 0.03 = 0.63
 
-        # Expected scores for SG2 (raw_sim=0.7, norm_sim=0.5, pr=0.8, name_match=0.2)
-        # Final = (0.6 * 0.5) + (0.3 * 0.8) + (0.1 * 0.2) = 0.3 + 0.24 + 0.02 = 0.56
+        # Expected scores for SG2 (raw_sim=0.7, norm_sim=0.5, pr=0.8)
+        # Final = (0.6 * 0.5) + (0.3 * 0.8) = 0.3 + 0.24 = 0.54
 
-        # Expected scores for SG3 (raw_sim=0.6, norm_sim=0.0, pr=0.5, name_match=0.0)
-        # Final = (0.6 * 0.0) + (0.3 * 0.5) + (0.1 * 0.0) = 0.0 + 0.15 + 0.0 = 0.15
+        # Expected scores for SG3 (raw_sim=0.6, norm_sim=0.0, pr=0.5)
+        # Final = (0.6 * 0.0) + (0.3 * 0.5) = 0.0 + 0.15 = 0.15
 
         assert len(results) == 3
 
         # Check order and approximate scores
         assert results[0][0].id == 1
-        assert results[0][1]["final_score"] == pytest.approx(0.72)
+        assert results[0][1]["final_score"] == pytest.approx(0.63)
         assert results[0][1]["norm_similarity"] == pytest.approx(1.0)
         assert results[0][1]["scaled_pagerank"] == pytest.approx(0.1)
-        assert results[0][1]["raw_name_match_score"] == pytest.approx(0.9)
+        assert "raw_name_match_score" not in results[0][1]
 
         assert results[1][0].id == 2
-        assert results[1][1]["final_score"] == pytest.approx(0.56)
+        assert results[1][1]["final_score"] == pytest.approx(0.54)
         assert results[1][1]["norm_similarity"] == pytest.approx(0.5)
         assert results[1][1]["scaled_pagerank"] == pytest.approx(0.8)
-        assert results[1][1]["raw_name_match_score"] == pytest.approx(0.2)
+        assert "raw_name_match_score" not in results[1][1]
 
         assert results[2][0].id == 3
         assert results[2][1]["final_score"] == pytest.approx(0.15)
         assert results[2][1]["norm_similarity"] == pytest.approx(0.0)
         assert results[2][1]["scaled_pagerank"] == pytest.approx(0.5)
-        assert results[2][1]["raw_name_match_score"] == pytest.approx(0.0)
+        assert "raw_name_match_score" not in results[2][1]
 
         assert any(
             call.kwargs["status"] == "SUCCESS"
@@ -1129,7 +1045,6 @@ class TestSearchScriptCLI:
             faiss_k=defaults.DEFAULT_FAISS_K,
             pagerank_weight=defaults.DEFAULT_PAGERANK_WEIGHT,
             text_relevance_weight=defaults.DEFAULT_TEXT_RELEVANCE_WEIGHT,
-            name_match_weight=defaults.DEFAULT_NAME_MATCH_WEIGHT,
             log_searches=True,
             selected_packages=mock_args.packages,
             semantic_similarity_threshold=defaults.DEFAULT_SEM_SIM_THRESHOLD,

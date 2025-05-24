@@ -4,12 +4,13 @@
 
 Connects to a database, queries StatementGroups, and for each group,
 conditionally generates entries for its Lean code representation,
-informal English description, and docstring. Entries are only created if the
-respective text content is non-empty and not excluded by command-line flags.
+informal English description, docstring, and the Lean name of its
+primary declaration. Entries are only created if the respective text
+content is non-empty and not excluded by command-line flags.
 
 The output JSON file contains objects with 'id', 'source_statement_group_id',
-'text_type' ('lean', 'informal_description', or 'docstring'), and 'text' fields.
-This file serves as input for subsequent embedding generation.
+'text_type' ('lean', 'informal_description', 'docstring', or 'lean_name'),
+and 'text' fields. This file serves as input for subsequent embedding generation.
 """
 
 import argparse
@@ -23,7 +24,7 @@ from typing import Any, Dict, List, Optional
 try:
     from sqlalchemy import create_engine, select
     from sqlalchemy.exc import OperationalError, SQLAlchemyError
-    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.orm import selectinload, sessionmaker
     from tqdm import tqdm
 except ImportError as e:
     print(
@@ -98,12 +99,13 @@ def prepare_data(
     exclude_lean: bool = False,
     exclude_english: bool = False,
     exclude_docstrings: bool = False,
+    exclude_lean_names: bool = False,
 ) -> None:
     """Fetches StatementGroups and prepares a JSON file for embedding.
 
     For each StatementGroup, this function conditionally creates entries for
-    Lean code, informal descriptions, and docstrings, based on content
-    availability and exclusion flags.
+    Lean code, informal descriptions, docstrings, and Lean names of primary
+    declarations, based on content availability and exclusion flags.
 
     Args:
         db_url: SQLAlchemy database URL.
@@ -112,6 +114,8 @@ def prepare_data(
         exclude_lean: If True, Lean code text will not be included.
         exclude_english: If True, informal English descriptions will not be included.
         exclude_docstrings: If True, docstrings will not be included.
+        exclude_lean_names: If True, Lean names of primary declarations
+            will not be included.
 
     Returns:
         None. The function writes to a file or exits on error.
@@ -128,6 +132,8 @@ def prepare_data(
         logger.info("Excluding informal English descriptions.")
     if exclude_docstrings:
         logger.info("Excluding docstrings.")
+    if exclude_lean_names:
+        logger.info("Excluding Lean names of primary declarations.")
 
     engine = None
     try:
@@ -137,7 +143,11 @@ def prepare_data(
         output_records: List[Dict[str, Any]] = []
 
         with SessionLocal() as session:
-            query = select(StatementGroup).order_by(StatementGroup.id)
+            query = (
+                select(StatementGroup)
+                .order_by(StatementGroup.id)
+                .options(selectinload(StatementGroup.primary_declaration))
+            )
             if limit:
                 query = query.limit(limit)
 
@@ -173,7 +183,7 @@ def prepare_data(
                             "SG ID %d: No non-empty lean text found. Skipping entry.",
                             sg_id,
                         )
-                elif exclude_lean:  # Explicitly log if excluded by flag
+                elif exclude_lean:
                     logger.debug(
                         "SG ID %d: Lean text excluded by flag. Skipping lean entry.",
                         sg_id,
@@ -233,6 +243,36 @@ def prepare_data(
                         sg_id,
                     )
 
+                # 4. Handle Lean Name Text
+                if not exclude_lean_names:
+                    lean_name_content = ""
+                    if (
+                        sg_obj.primary_declaration
+                        and sg_obj.primary_declaration.lean_name
+                    ):
+                        lean_name_content = sg_obj.primary_declaration.lean_name.strip()
+
+                    if lean_name_content:
+                        output_records.append(
+                            {
+                                "id": f"sg_{sg_id}_lean_name",
+                                "source_statement_group_id": sg_id,
+                                "text_type": "lean_name",
+                                "text": lean_name_content,
+                            }
+                        )
+                    else:
+                        logger.debug(
+                            "SG ID %d: No non-empty lean name found for primary "
+                            "declaration. Skipping entry.",
+                            sg_id,
+                        )
+                elif exclude_lean_names:
+                    logger.debug(
+                        "SG ID %d: Lean name excluded by flag. Skipping entry.",
+                        sg_id,
+                    )
+
         logger.info("Prepared %d records for JSON output.", len(output_records))
 
         output_file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -276,12 +316,11 @@ def parse_arguments() -> argparse.Namespace:
         description=(
             "Prepare JSON input for embedding generation from StatementGroups, "
             "allowing selective inclusion of Lean code, informal descriptions, "
-            "and docstrings."
+            "docstrings, and Lean names."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # APP_CONFIG should be loaded by this point from the project imports
     db_url_default = APP_CONFIG.get("database", {}).get("url")
 
     parser.add_argument(
@@ -319,6 +358,11 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Exclude docstrings from the output.",
     )
+    parser.add_argument(
+        "--exclude-lean-names",
+        action="store_true",
+        help="Exclude Lean names of primary declarations from the output.",
+    )
 
     args = parser.parse_args()
     if not args.db_url:
@@ -332,7 +376,6 @@ def parse_arguments() -> argparse.Namespace:
 if __name__ == "__main__":
     cli_args = parse_arguments()
 
-    # Resolve output file path to ensure it's absolute before passing
     resolved_output_file = cli_args.output_file.resolve()
 
     prepare_data(
@@ -342,5 +385,6 @@ if __name__ == "__main__":
         exclude_lean=cli_args.exclude_lean,
         exclude_english=cli_args.exclude_english,
         exclude_docstrings=cli_args.exclude_docstrings,
+        exclude_lean_names=cli_args.exclude_lean_names,
     )
     logger.info("--- Embedding input preparation finished ---")

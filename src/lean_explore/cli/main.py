@@ -334,8 +334,7 @@ async def search_command(
                 "Your API key might be invalid or expired.[/bold red]"
             )
             console.print(
-                "Please reconfigure your API key using: "
-                "`leanexplore configure api-key`"
+                "Please reconfigure your API key using: `leanexplore configure api-key`"
             )
         else:
             try:

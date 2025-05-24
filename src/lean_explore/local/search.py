@@ -2,14 +2,14 @@
 
 """Performs semantic search and ranked retrieval of StatementGroups.
 
-Combines semantic similarity from FAISS, pre-scaled PageRank scores, and
-Lean name matching to rank StatementGroups. It loads necessary assets
-(embedding model, FAISS index, ID map) using default configurations,
-embeds the user query, performs FAISS search, filters based on a
-similarity threshold, retrieves group details from the database, calculates
-a name match score, normalizes semantic similarity scores, and then combines
-these scores using configurable weights to produce a final ranked list.
-It also logs search performance statistics to a dedicated JSONL file.
+Combines semantic similarity from FAISS and pre-scaled PageRank scores
+to rank StatementGroups. It loads necessary assets (embedding model,
+FAISS index, ID map) using default configurations, embeds the user query,
+performs FAISS search, filters based on a similarity threshold,
+retrieves group details from the database, normalizes semantic similarity scores,
+and then combines these scores using configurable weights to produce a final
+ranked list. It also logs search performance statistics to a dedicated
+JSONL file.
 """
 
 import argparse
@@ -28,7 +28,6 @@ from filelock import FileLock, Timeout
 try:
     import faiss
     import numpy as np
-    from rapidfuzz import fuzz  # Using rapidfuzz for name matching
     from sentence_transformers import SentenceTransformer
     from sqlalchemy import create_engine, or_, select
     from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -38,7 +37,7 @@ except ImportError as e:
     print(
         f"Error: Missing required libraries ({e}).\n"
         "Please install them: pip install SQLAlchemy faiss-cpu "
-        "sentence-transformers numpy rapidfuzz filelock",
+        "sentence-transformers numpy filelock rapidfuzz",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -84,44 +83,6 @@ PERFORMANCE_LOG_DIR = str(_USER_LOGS_BASE_DIR)
 PERFORMANCE_LOG_FILENAME = "search_stats.jsonl"
 PERFORMANCE_LOG_PATH = os.path.join(PERFORMANCE_LOG_DIR, PERFORMANCE_LOG_FILENAME)
 LOCK_PATH = os.path.join(PERFORMANCE_LOG_DIR, f"{PERFORMANCE_LOG_FILENAME}.lock")
-
-
-# --- Helper & Scoring Functions ---
-
-
-def calculate_name_match_score(query_string: str, lean_name: str) -> float:
-    """Calculates a name match score using fuzzy matching (WRatio), possibly mapped.
-
-    Compares the lowercased query string and Lean name using `fuzz.WRatio`.
-    The raw WRatio (0-100) is normalized to 0-1. Then, a threshold-based
-    mapping is applied: scores below a threshold become 0, and scores above
-    are linearly scaled to the 0-1 range.
-
-    Args:
-        query_string: The user's search query.
-        lean_name: The Lean declaration name.
-
-    Returns:
-        A score between 0.0 and 1.0. Returns 0.0 if inputs are empty.
-    """
-    if not query_string or not lean_name:
-        return 0.0
-
-    norm_query = query_string.lower()
-    norm_lean_name = lean_name.lower()
-
-    score = fuzz.WRatio(norm_query, norm_lean_name) / 100.0
-
-    threshold = 0.90
-    if score < threshold:
-        mapped_score = 0.0
-    else:
-        scale_factor = 1.0 / (1.0 - threshold + EPSILON)
-        offset = -threshold * scale_factor
-        mapped_score = (scale_factor * score) + offset
-        mapped_score = min(1.0, max(0.0, mapped_score))
-
-    return mapped_score
 
 
 # --- Performance Logging Helper ---
@@ -308,7 +269,6 @@ def perform_search(
     faiss_k: int,
     pagerank_weight: float,
     text_relevance_weight: float,
-    name_match_weight: float,
     log_searches: bool,  # Added parameter
     selected_packages: Optional[List[str]] = None,
     semantic_similarity_threshold: float = defaults.DEFAULT_SEM_SIM_THRESHOLD,
@@ -325,7 +285,6 @@ def perform_search(
         faiss_k: The number of nearest neighbors to retrieve from FAISS.
         pagerank_weight: Weight for the pre-scaled PageRank score.
         text_relevance_weight: Weight for the normalized semantic similarity score.
-        name_match_weight: Weight for the raw name match score.
         log_searches: If True, search performance data will be logged.
         selected_packages: Optional list of package names to filter search by.
         semantic_similarity_threshold: Minimum similarity for a result to be considered.
@@ -594,31 +553,11 @@ def perform_search(
         raw_sem_sim = sg_candidates_raw_similarity[
             sg_id
         ]  # This ID came from FAISS initially
-        raw_name_match = 0.0
-        if sg_obj.primary_declaration and sg_obj.primary_declaration.lean_name:
-            try:
-                raw_name_match = calculate_name_match_score(
-                    query_string, sg_obj.primary_declaration.lean_name
-                )
-            except Exception as e_nm:  # Catch any error from name matching
-                logger.warning(
-                    "Error calculating name match score for SG %d ('%s'): %s",
-                    sg_id,
-                    sg_obj.primary_declaration.lean_name,
-                    e_nm,
-                )
-        else:
-            logger.debug(
-                "Missing primary declaration or Lean name for SG ID %d, "
-                "name score is 0.",
-                sg_id,
-            )
 
         processed_candidates_data.append(
             {
                 "sg_obj": sg_obj,
                 "raw_sem_sim": raw_sem_sim,
-                "raw_name_match": raw_name_match,
             }
         )
         candidate_semantic_similarities.append(raw_sem_sim)
@@ -654,7 +593,6 @@ def perform_search(
     for candidate_data in processed_candidates_data:
         sg_obj = candidate_data["sg_obj"]
         current_raw_sem_sim = candidate_data["raw_sem_sim"]
-        current_raw_name_match = candidate_data["raw_name_match"]
 
         # Normalize semantic similarity: scale to [0,1]
         norm_sem_sim = 0.5  # Default if range is zero (e.g., only one candidate)
@@ -681,19 +619,14 @@ def perform_search(
         # Combine scores using weights
         weighted_norm_similarity = text_relevance_weight * norm_sem_sim
         weighted_scaled_pagerank = pagerank_weight * current_scaled_pagerank
-        weighted_name_match = name_match_weight * current_raw_name_match
-        final_score = (
-            weighted_norm_similarity + weighted_scaled_pagerank + weighted_name_match
-        )
+        final_score = weighted_norm_similarity + weighted_scaled_pagerank
 
         score_dict = {
             "final_score": final_score,
             "norm_similarity": norm_sem_sim,
             "scaled_pagerank": current_scaled_pagerank,
-            "raw_name_match_score": current_raw_name_match,
             "weighted_norm_similarity": weighted_norm_similarity,
             "weighted_scaled_pagerank": weighted_scaled_pagerank,
-            "weighted_name_match_score": weighted_name_match,
             "raw_similarity": current_raw_sem_sim,  # Keep raw similarity for inspection
         }
         results_with_scores.append((sg_obj, score_dict))
@@ -749,13 +682,11 @@ def print_results(results: List[Tuple[StatementGroup, Dict[str, float]]]) -> Non
             f"\n{i + 1}. Lean Name: {primary_decl_name} (SG ID: {sg_obj.id})\n"
             f"   Final Score: {scores['final_score']:.4f} ("
             f"NormSim*W: {scores['weighted_norm_similarity']:.4f}, "
-            f"ScaledPR*W: {scores['weighted_scaled_pagerank']:.4f}, "
-            f"NameMatch*W: {scores['weighted_name_match_score']:.4f})"
+            f"ScaledPR*W: {scores['weighted_scaled_pagerank']:.4f})"
         )
         print(
             f"   Scores: [NormSim: {scores['norm_similarity']:.4f}, "
             f"ScaledPR: {scores['scaled_pagerank']:.4f}, "
-            f"RawNameMatch: {scores['raw_name_match_score']:.4f}, "
             f"RawSim: {scores['raw_similarity']:.4f}]"
         )
 
@@ -834,7 +765,6 @@ def main():
     faiss_k_cand = defaults.DEFAULT_FAISS_K
     pr_weight = defaults.DEFAULT_PAGERANK_WEIGHT
     sem_sim_weight = defaults.DEFAULT_TEXT_RELEVANCE_WEIGHT
-    name_match_w = defaults.DEFAULT_NAME_MATCH_WEIGHT
     results_disp_limit = (
         args.limit if args.limit is not None else defaults.DEFAULT_RESULTS_LIMIT
     )
@@ -859,10 +789,9 @@ def main():
         "Semantic Similarity Threshold (from defaults): %.3f", semantic_sim_thresh
     )
     logger.info(
-        "Weights -> NormTextSim: %.2f, ScaledPR: %.2f, RawNameMatch: %.2f",
+        "Weights -> NormTextSim: %.2f, ScaledPR: %.2f",
         sem_sim_weight,
         pr_weight,
-        name_match_w,
     )
     logger.info("Using FAISS index: %s", resolved_idx_path)
     logger.info("Using ID map: %s", resolved_map_path)
@@ -935,7 +864,6 @@ def main():
                 pagerank_weight=pr_weight,
                 text_relevance_weight=sem_sim_weight,
                 log_searches=True,
-                name_match_weight=name_match_w,
                 selected_packages=args.packages,
                 semantic_similarity_threshold=semantic_sim_thresh,  # from defaults
                 faiss_nprobe=faiss_nprobe_val,  # from defaults
