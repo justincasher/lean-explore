@@ -211,7 +211,7 @@ temp/
 
 # Project-specific ignores
 data/
-extractor/.lake/
+lean_project/.lake/
 **/.DS_Store
 .wrangler/
 search_results.json
