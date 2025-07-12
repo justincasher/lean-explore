@@ -49,6 +49,10 @@ dependencies = [
     # MCP Server Components
     "mcp>=1.9.0",
 
+    # Data Extraction and Processing
+    "lean-interact @ git+https://github.com/augustepoiroux/LeanInteract.git@5c0b61a5ae8c6cc23f3bb37ae554423332112ff8",
+    "GitPython>=3.1",
+
     # Utilities
     "tqdm>=4.60",
     "requests>=2.25.0",
@@ -74,8 +78,8 @@ asyncio_default_fixture_loop_scope = "function"
 # Set the maximum line length.
 line-length = 88
 
-# Set based on your `requires-python = ">=3.8"`.
-target-version = "py38"
+# Set based on your `requires-python = ">=3.10"`.
+target-version = "py310"
 
 # Define the patterns for files Ruff should lint.
 include = [
@@ -94,13 +98,15 @@ exclude = [
     ".env",
     ".env.example",
     ".pytest_cache",
-    ".lake_cache",       # For Lean 4 projects
-    "src/*.egg-info",    # Build artifacts
-    "site",              # Documentation sites (e.g., MkDocs)
-    "docs",              # Documentation source files
+    ".lake_cache",
+    "src/*.egg-info",
+    "site",
+    "docs",
     "*.sqlite",
     "*.db",
     "*.json",
+    "lean_project/",      # Exclude the project config/setup files
+    "scripts/temp_projects/", # Exclude downloaded Git repos
 ]
 
 # --- Linter specific settings ---

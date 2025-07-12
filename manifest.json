@@ -1,5 +1,5 @@
 {
-  "latest_manifest_version": "0.2.0",
+  "latest_manifest_version": "0.4.0",
   "default_toolchain": "0.2.0",
   "toolchains": {
     "0.1.0": {
@@ -55,6 +55,34 @@
           "sha256": "9bc070d5886be460f230b8e95c7cb11a09dcf186bc94de4af5ddffab55d88c4c",
           "size_bytes_compressed": 2208600,
           "size_bytes_uncompressed": 19166595
+        }
+      ]
+    },
+    "0.4.0": {
+      "description": "v4.21.0 update",
+      "release_date": "2025-07-10",
+      "assets_base_path_r2": "assets/0.4.0/",
+      "files": [
+        {
+          "local_name": "lean_explore_data.db",
+          "remote_name": "lean_explore_data.db.gz",
+          "sha256": "e77ac683c7f1f6b1b4512304e6c90581108f8f9562e1585a420296a3f931c0a2",
+          "size_bytes_compressed": 933843816,
+          "size_bytes_uncompressed": 3313098752
+        },
+        {
+          "local_name": "main_faiss.index",
+          "remote_name": "main_faiss.index.gz",
+          "sha256": "234c207b690a389734570c347a8595e2e26f5b7c53d4c65bd9b576d66b23bdb1",
+          "size_bytes_compressed": 2530110684,
+          "size_bytes_uncompressed": 2745139459
+        },
+        {
+          "local_name": "faiss_ids_map.json",
+          "remote_name": "faiss_ids_map.json.gz",
+          "sha256": "709c3ea496de079399cb62aabdfbccde60d477f4af55c1b90d097ebeefb05c2d",
+          "size_bytes_compressed": 2333114,
+          "size_bytes_uncompressed": 20197299
         }
       ]
     }
