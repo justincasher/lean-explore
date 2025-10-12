@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Type
 
-from sqlalchemy import delete, or_, select, Table
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.expression import ColumnElement  # Used for type hinting columns
