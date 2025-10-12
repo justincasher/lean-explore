@@ -36,7 +36,11 @@ The current indexed projects include:
 
 This code is distributed under an Apache License (see [LICENSE](LICENSE)).
 
-### Cite
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on code style, testing, and development setup.
+
+## Cite
 
 If you use LeanExplore in your research or work, please cite it as follows:
 
