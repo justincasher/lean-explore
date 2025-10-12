@@ -217,3 +217,7 @@ extractor/.lake/
 search_results.json
 evaluation_output.json
 evaluation_output_llm.txt
+
+# Agent documentation (generated from CONTRIBUTING.md)
+AGENTS.md
+CLAUDE.md

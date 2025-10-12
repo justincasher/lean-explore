@@ -15,6 +15,8 @@ help:
 
 install:
 	pip install -e ".[dev]"
+	cp CONTRIBUTING.md AGENTS.md
+	cp CONTRIBUTING.md CLAUDE.md
 
 lint:
 	ruff check .
