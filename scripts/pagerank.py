@@ -10,8 +10,8 @@ min-max scaled version of their PageRank scores.
 
 import argparse
 import logging
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -38,7 +38,6 @@ except ImportError as e:
 # --- Project Model & Config Imports ---
 try:
     from dev_tools.config import APP_CONFIG
-
     from lean_explore.shared.models.db import (
         Declaration,
         Dependency,
