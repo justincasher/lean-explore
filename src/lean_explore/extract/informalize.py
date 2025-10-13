@@ -65,61 +65,145 @@ def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declar
     return result
 
 
-async def generate_informalization(
-    declaration: Declaration,
+async def _load_existing_informalizations(session: AsyncSession) -> dict[str, str]:
+    """Load all existing informalizations from the database."""
+    logger.info("Loading existing informalizations...")
+    stmt = select(Declaration).where(Declaration.informalization.isnot(None))
+    result = await session.execute(stmt)
+    decls = result.scalars().all()
+    informalizations_map = {decl.name: decl.informalization for decl in decls}
+    logger.info(f"Loaded {len(informalizations_map)} existing informalizations")
+    return informalizations_map
+
+
+async def _get_declarations_to_process(
+    session: AsyncSession, limit: int | None
+) -> list[Declaration]:
+    """Query and return declarations that need informalization."""
+    stmt = select(Declaration).where(Declaration.informalization.is_(None))
+    if limit:
+        stmt = stmt.limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def _process_one_declaration(
+    decl: Declaration,
     client: OpenRouterClient,
     model: str,
     prompt_template: str,
     informalizations_map: dict[str, str],
-) -> str | None:
-    """Generate an informal description for a single declaration.
+    semaphore: asyncio.Semaphore,
+) -> tuple[int, str, str | None]:
+    """Process a single declaration and generate its informalization.
 
     Args:
-        declaration: The Declaration to informalize
+        decl: Declaration to process
         client: OpenRouter client
         model: Model name to use
-        prompt_template: Template for the prompt
-        informalizations_map: Mapping of declaration names to their informalizations
+        prompt_template: Prompt template string
+        informalizations_map: Map of existing informalizations
+        semaphore: Concurrency control semaphore
 
     Returns:
-        Generated description or None if failed
+        Tuple of (declaration_id, declaration_name, informalization)
     """
-    try:
-        # Build dependencies section
-        dependencies_text = ""
-        if declaration.dependencies:
-            deps = json.loads(declaration.dependencies) if isinstance(declaration.dependencies, str) else declaration.dependencies
-            dep_infos = []
-            for dep_name in deps:
-                if dep_name in informalizations_map:
-                    dep_infos.append(f"- {dep_name}: {informalizations_map[dep_name]}")
+    if decl.informalization is not None:
+        return decl.id, decl.name, None
 
-            if dep_infos:
-                dependencies_text = "Dependencies:\n" + "\n".join(dep_infos)
+    async with semaphore:
+        try:
+            dependencies_text = ""
+            if decl.dependencies:
+                deps = json.loads(decl.dependencies) if isinstance(decl.dependencies, str) else decl.dependencies
+                dep_infos = []
+                for dep_name in deps:
+                    if dep_name in informalizations_map:
+                        dep_infos.append(f"- {dep_name}: {informalizations_map[dep_name]}")
 
-        prompt = prompt_template.format(
-            name=declaration.name,
-            source_text=declaration.source_text,
-            docstring=declaration.docstring or "No docstring available",
-            dependencies=dependencies_text,
-        )
+                if dep_infos:
+                    dependencies_text = "Dependencies:\n" + "\n".join(dep_infos)
 
-        response = await client.generate(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=500,
-        )
+            prompt = prompt_template.format(
+                name=decl.name,
+                source_text=decl.source_text,
+                docstring=decl.docstring or "No docstring available",
+                dependencies=dependencies_text,
+            )
 
-        if response.choices and response.choices[0].message.content:
-            return response.choices[0].message.content.strip()
+            response = await client.generate(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=500,
+            )
 
-        logger.warning(f"Empty response for declaration {declaration.name}")
-        return None
+            if response.choices and response.choices[0].message.content:
+                result = response.choices[0].message.content.strip()
+                return decl.id, decl.name, result
 
-    except Exception as e:
-        logger.error(f"Failed to informalize {declaration.name}: {e}")
-        return None
+            logger.warning(f"Empty response for declaration {decl.name}")
+            return decl.id, decl.name, None
+
+        except Exception as e:
+            logger.error(f"Failed to informalize {decl.name}: {e}")
+            return decl.id, decl.name, None
+
+
+async def _process_declarations_in_batches(
+    session: AsyncSession,
+    declarations: list[Declaration],
+    client: OpenRouterClient,
+    model: str,
+    prompt_template: str,
+    informalizations_map: dict[str, str],
+    semaphore: asyncio.Semaphore,
+    batch_size: int,
+) -> int:
+    """Process declarations in batches with progress tracking.
+
+    Returns:
+        Number of declarations processed
+    """
+    total = len(declarations)
+    processed = 0
+    pending_updates = []
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+    ) as progress:
+        task = progress.add_task("Informalizing declarations", total=total)
+
+        for i in range(0, total, batch_size):
+            chunk = declarations[i : i + batch_size]
+            tasks = [
+                _process_one_declaration(
+                    decl, client, model, prompt_template, informalizations_map, semaphore
+                )
+                for decl in chunk
+            ]
+            results = await asyncio.gather(*tasks)
+
+            for decl_id, decl_name, informalization in results:
+                if informalization:
+                    pending_updates.append(
+                        {"id": decl_id, "informalization": informalization}
+                    )
+                    informalizations_map[decl_name] = informalization
+                processed += 1
+                progress.update(task, advance=1)
+
+            if pending_updates:
+                await session.execute(update(Declaration), pending_updates)
+                await session.commit()
+                logger.info(f"Committed batch of {len(pending_updates)} updates")
+                pending_updates.clear()
+
+    return processed
 
 
 async def informalize_declarations(
@@ -127,117 +211,35 @@ async def informalize_declarations(
     model: str = "anthropic/claude-3.5-sonnet",
     batch_size: int = 50,
     max_concurrent: int = 10,
-    prompt_template: str | None = None,
     limit: int | None = None,
 ) -> None:
-    """Generate informalizations for declarations missing them.
-
-    Args:
-        engine: Async SQLAlchemy engine
-        model: OpenRouter model name
-        batch_size: Number of updates to commit at once
-        max_concurrent: Maximum concurrent LLM calls
-        prompt_template: Custom prompt template (uses default if None)
-        limit: Maximum number of declarations to process (for testing)
-    """
-    if prompt_template is None:
-        prompt_file = Path(__file__).parent / "prompt.txt"
-        prompt_template = prompt_file.read_text()
-
+    """Generate informalizations for declarations missing them."""
+    prompt_template = (Path(__file__).parent / "prompt.txt").read_text()
     logger.info("Starting informalization process...")
-    logger.info(f"Model: {model}")
-    logger.info(f"Max concurrent calls: {max_concurrent}")
-    logger.info(f"Batch size: {batch_size}")
+    logger.info(f"Model: {model}, Max concurrent: {max_concurrent}, Batch size: {batch_size}")
 
     client = OpenRouterClient()
+    semaphore = asyncio.Semaphore(max_concurrent)
 
     async with AsyncSession(engine) as session:
-        # Load existing informalizations to avoid re-processing and to use as context
-        logger.info("Loading existing informalizations...")
-        existing_stmt = select(Declaration).where(Declaration.informalization.isnot(None))
-        existing_result = await session.execute(existing_stmt)
-        existing_decls = existing_result.scalars().all()
-        informalizations_map = {decl.name: decl.informalization for decl in existing_decls}
-        logger.info(f"Loaded {len(informalizations_map)} existing informalizations")
+        informalizations_map = await _load_existing_informalizations(session)
+        declarations = await _get_declarations_to_process(session, limit)
 
-        # Find declarations needing informalization
-        stmt = select(Declaration).where(Declaration.informalization.is_(None))
-        if limit:
-            stmt = stmt.limit(limit)
-
-        result = await session.execute(stmt)
-        declarations = list(result.scalars().all())
-
-        total = len(declarations)
-        logger.info(f"Found {total} declarations needing informalization")
-
-        if total == 0:
+        logger.info(f"Found {len(declarations)} declarations needing informalization")
+        if not declarations:
             logger.info("No declarations to process")
             return
 
-        # Sort declarations in topological order (dependencies first)
         logger.info("Building dependency order and breaking cycles...")
         declarations = _find_cycles_and_build_order(declarations)
         logger.info("Dependency order established")
 
-        # Process with concurrency control
-        semaphore = asyncio.Semaphore(max_concurrent)
-        pending_updates = []
-        processed = 0
-
-        async def process_one(decl: Declaration) -> tuple[int, str, str | None]:
-            # Double-check that this declaration hasn't been informalized
-            # (could happen if processing resumed after partial completion)
-            if decl.informalization is not None:
-                return decl.id, decl.name, None
-
-            async with semaphore:
-                result = await generate_informalization(
-                    decl, client, model, prompt_template, informalizations_map
-                )
-                return decl.id, decl.name, result
-
-        # Create progress bar with time estimates
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            TimeRemainingColumn(),
-        ) as progress:
-            task = progress.add_task("Informalizing declarations", total=total)
-
-            try:
-                # Process in chunks to avoid memory issues
-                for i in range(0, total, batch_size):
-                    chunk = declarations[i : i + batch_size]
-                    tasks = [process_one(decl) for decl in chunk]
-                    results = await asyncio.gather(*tasks)
-
-                    # Collect successful updates and build map for next batch
-                    for decl_id, decl_name, informalization in results:
-                        if informalization:
-                            pending_updates.append(
-                                {"id": decl_id, "informalization": informalization}
-                            )
-                            informalizations_map[decl_name] = informalization
-                        processed += 1
-                        progress.update(task, advance=1)
-
-                    # Commit batch
-                    if pending_updates:
-                        await session.execute(update(Declaration), pending_updates)
-                        await session.commit()
-                        logger.info(f"Committed batch of {len(pending_updates)} updates")
-                        pending_updates.clear()
-
-            except Exception as e:
-                logger.error(f"Error during informalization: {e}")
-                raise
-
-        logger.info(
-            f"Informalization complete. Processed {processed}/{total} declarations"
+        processed = await _process_declarations_in_batches(
+            session, declarations, client, model, prompt_template,
+            informalizations_map, semaphore, batch_size
         )
+
+        logger.info(f"Informalization complete. Processed {processed}/{len(declarations)} declarations")
 
 
 async def main():
