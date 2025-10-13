@@ -1,5 +1,0 @@
-group definition
-ring definition
-natural numbers type
-addition commutativity theorem
-topological space definition
