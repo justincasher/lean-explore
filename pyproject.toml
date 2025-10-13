@@ -53,6 +53,7 @@ dependencies = [
     # Utilities
     "tqdm>=4.60",
     "requests>=2.25.0",
+    "tenacity>=8.0.0",
 ]
 
 [project.urls]
