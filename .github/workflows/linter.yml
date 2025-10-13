@@ -1,7 +1,11 @@
 # .github/workflows/linter.yml
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+  pull_request:
 
 jobs:
   lint:
