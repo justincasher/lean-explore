@@ -16,16 +16,14 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 class OpenRouterClient:
     """Client for interacting with OpenRouter API using OpenAI SDK types."""
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self):
         """Initialize OpenRouter client.
 
-        Args:
-            api_key: OpenRouter API key. If None, reads from OPENROUTER_API_KEY env var.
+        Reads API key from OPENROUTER_API_KEY environment variable.
         """
-        if api_key is None:
-            api_key = os.getenv("OPENROUTER_API_KEY")
-            if not api_key:
-                raise ValueError("OPENROUTER_API_KEY environment variable not set")
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError("OPENROUTER_API_KEY environment variable not set")
 
         self.client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",
