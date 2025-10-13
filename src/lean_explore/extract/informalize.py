@@ -15,7 +15,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from lean_explore.extract.schemas import Declaration
-from lean_explore.util.openrouter import OpenRouterClient
+from lean_explore.util.openrouter_client import OpenRouterClient
 
 logger = logging.getLogger(__name__)
 

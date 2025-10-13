@@ -7,7 +7,7 @@ Uses SQLAlchemy 2.0 syntax.
 """
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Index, Integer, Text
+from sqlalchemy import Float, Index, Integer, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -33,6 +33,18 @@ class Declaration(Base):
             "informalization_embedding",
             postgresql_using="hnsw",
             postgresql_ops={"informalization_embedding": "vector_cosine_ops"},
+        ),
+        Index(
+            "ix_declarations_source_text_embedding_hnsw",
+            "source_text_embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"source_text_embedding": "vector_cosine_ops"},
+        ),
+        Index(
+            "ix_declarations_docstring_embedding_hnsw",
+            "docstring_embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"docstring_embedding": "vector_cosine_ops"},
         ),
     )
 
@@ -65,3 +77,12 @@ class Declaration(Base):
 
     informalization_embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
     """768-dimensional embedding of the informalization text."""
+
+    source_text_embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    """768-dimensional embedding of the source text."""
+
+    docstring_embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    """768-dimensional embedding of the docstring."""
+
+    pagerank: Mapped[float | None] = mapped_column(Float, nullable=True)
+    """PageRank score based on dependency graph."""
