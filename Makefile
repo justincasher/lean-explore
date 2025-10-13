@@ -15,6 +15,7 @@ help:
 
 install:
 	pip install -e ".[dev]"
+	pre-commit install
 	cp CONTRIBUTING.md AGENTS.md
 	cp CONTRIBUTING.md CLAUDE.md
 
