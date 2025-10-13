@@ -52,6 +52,7 @@ dependencies = [
 
     # Utilities
     "tqdm>=4.60",
+    "rich>=13.0.0",
     "requests>=2.25.0",
     "tenacity>=8.0.0",
 ]

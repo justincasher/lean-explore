@@ -9,6 +9,8 @@ import logging
 import re
 from pathlib import Path
 
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from lean_explore.extract.schemas import Declaration as DBDeclaration
@@ -157,21 +159,24 @@ async def extract_declarations(engine: AsyncEngine) -> None:
             )
 
     batch_size = 1000
+    inserted_count = 0
     async with AsyncSession(engine) as session:
         async with session.begin():
             for i in range(0, len(declarations), batch_size):
                 batch = declarations[i : i + batch_size]
-                db_decls = [
-                    DBDeclaration(
+
+                # Use INSERT ON CONFLICT to skip duplicates
+                for decl in batch:
+                    stmt = insert(DBDeclaration).values(
                         name=decl.name,
                         module=decl.module,
                         docstring=decl.docstring,
                         source_text=decl.source_text,
                         source_link=decl.source_link,
                         dependencies=json.dumps(decl.dependencies) if decl.dependencies else None,
-                    )
-                    for decl in batch
-                ]
-                session.add_all(db_decls)
+                    ).on_conflict_do_nothing(index_elements=["name"])
 
-    logger.info(f"Inserted {len(declarations)} declarations into database")
+                    result = await session.execute(stmt)
+                    inserted_count += result.rowcount
+
+    logger.info(f"Inserted {inserted_count} new declarations into database (skipped {len(declarations) - inserted_count} duplicates)")

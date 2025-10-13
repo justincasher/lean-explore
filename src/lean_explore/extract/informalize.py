@@ -10,9 +10,9 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from tqdm.asyncio import tqdm
 
 from lean_explore.extract.schemas import Declaration
 from lean_explore.util.openrouter import OpenRouterClient
@@ -152,6 +152,14 @@ async def informalize_declarations(
     client = OpenRouterClient()
 
     async with AsyncSession(engine) as session:
+        # Load existing informalizations to avoid re-processing and to use as context
+        logger.info("Loading existing informalizations...")
+        existing_stmt = select(Declaration).where(Declaration.informalization.isnot(None))
+        existing_result = await session.execute(existing_stmt)
+        existing_decls = existing_result.scalars().all()
+        informalizations_map = {decl.name: decl.informalization for decl in existing_decls}
+        logger.info(f"Loaded {len(informalizations_map)} existing informalizations")
+
         # Find declarations needing informalization
         stmt = select(Declaration).where(Declaration.informalization.is_(None))
         if limit:
@@ -176,44 +184,56 @@ async def informalize_declarations(
         semaphore = asyncio.Semaphore(max_concurrent)
         pending_updates = []
         processed = 0
-        informalizations_map = {}
 
         async def process_one(decl: Declaration) -> tuple[int, str, str | None]:
+            # Double-check that this declaration hasn't been informalized
+            # (could happen if processing resumed after partial completion)
+            if decl.informalization is not None:
+                return decl.id, decl.name, None
+
             async with semaphore:
                 result = await generate_informalization(
                     decl, client, model, prompt_template, informalizations_map
                 )
                 return decl.id, decl.name, result
 
-        # Create progress bar
-        pbar = tqdm(total=total, desc="Informalizing", unit="decl")
+        # Create progress bar with time estimates
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+        ) as progress:
+            task = progress.add_task("Informalizing declarations", total=total)
 
-        try:
-            # Process in chunks to avoid memory issues
-            for i in range(0, total, batch_size):
-                chunk = declarations[i : i + batch_size]
-                tasks = [process_one(decl) for decl in chunk]
-                results = await asyncio.gather(*tasks)
+            try:
+                # Process in chunks to avoid memory issues
+                for i in range(0, total, batch_size):
+                    chunk = declarations[i : i + batch_size]
+                    tasks = [process_one(decl) for decl in chunk]
+                    results = await asyncio.gather(*tasks)
 
-                # Collect successful updates and build map for next batch
-                for decl_id, decl_name, informalization in results:
-                    if informalization:
-                        pending_updates.append(
-                            {"id": decl_id, "informalization": informalization}
-                        )
-                        informalizations_map[decl_name] = informalization
-                    processed += 1
-                    pbar.update(1)
+                    # Collect successful updates and build map for next batch
+                    for decl_id, decl_name, informalization in results:
+                        if informalization:
+                            pending_updates.append(
+                                {"id": decl_id, "informalization": informalization}
+                            )
+                            informalizations_map[decl_name] = informalization
+                        processed += 1
+                        progress.update(task, advance=1)
 
-                # Commit batch
-                if pending_updates:
-                    await session.execute(update(Declaration), pending_updates)
-                    await session.commit()
-                    logger.info(f"Committed batch of {len(pending_updates)} updates")
-                    pending_updates.clear()
+                    # Commit batch
+                    if pending_updates:
+                        await session.execute(update(Declaration), pending_updates)
+                        await session.commit()
+                        logger.info(f"Committed batch of {len(pending_updates)} updates")
+                        pending_updates.clear()
 
-        finally:
-            pbar.close()
+            except Exception as e:
+                logger.error(f"Error during informalization: {e}")
+                raise
 
         logger.info(
             f"Informalization complete. Processed {processed}/{total} declarations"
