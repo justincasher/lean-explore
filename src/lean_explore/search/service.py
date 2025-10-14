@@ -1,19 +1,16 @@
-"""Service layer for search operations.
+"""Service layer for search operations."""
 
-Provides a simple interface for search, retrieval, and dependency operations.
-"""
-
-from typing import List, Optional
+import time
+from typing import Optional
 
 from lean_explore.search.engine import SearchEngine
-from lean_explore.search.types import SearchResult
+from lean_explore.search.types import SearchResponse, SearchResult
 
 
 class Service:
     """Service wrapper for search operations.
 
-    Provides a clean interface for searching, retrieving declarations,
-    and fetching dependencies.
+    Provides a clean interface for searching and retrieving declarations.
     """
 
     def __init__(self, engine: Optional[SearchEngine] = None):
@@ -31,7 +28,7 @@ class Service:
         semantic_weight: float = 0.4,
         pagerank_weight: float = 0.3,
         lexical_weight: float = 0.3,
-    ) -> List[SearchResult]:
+    ) -> SearchResponse:
         """Search for Lean declarations.
 
         Args:
@@ -42,14 +39,25 @@ class Service:
             lexical_weight: Weight for lexical matching (0-1).
 
         Returns:
-            List of SearchResult objects, ranked by combined score.
+            SearchResponse containing results and metadata.
         """
-        return self.engine.search(
+        start_time = time.time()
+
+        results = self.engine.search(
             query=query,
             limit=limit,
             semantic_weight=semantic_weight,
             pagerank_weight=pagerank_weight,
             lexical_weight=lexical_weight,
+        )
+
+        processing_time_ms = int((time.time() - start_time) * 1000)
+
+        return SearchResponse(
+            query=query,
+            results=results,
+            count=len(results),
+            processing_time_ms=processing_time_ms,
         )
 
     def get_by_id(self, declaration_id: int) -> Optional[SearchResult]:
@@ -62,14 +70,3 @@ class Service:
             SearchResult if found, None otherwise.
         """
         return self.engine.get_by_id(declaration_id)
-
-    def get_dependencies(self, declaration_id: int) -> List[SearchResult]:
-        """Get dependencies for a declaration.
-
-        Args:
-            declaration_id: The declaration ID.
-
-        Returns:
-            List of SearchResult objects for dependencies.
-        """
-        return self.engine.get_dependencies(declaration_id)

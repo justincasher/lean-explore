@@ -122,30 +122,6 @@ class SearchEngine:
             decl = session.get(Declaration, declaration_id)
             return self._to_search_result(decl) if decl else None
 
-    def get_dependencies(self, declaration_id: int) -> List[SearchResult]:
-        """Get dependencies for a declaration.
-
-        Args:
-            declaration_id: The declaration ID.
-
-        Returns:
-            List of SearchResult objects for dependencies.
-        """
-        with self.SessionLocal() as session:
-            decl = session.get(Declaration, declaration_id)
-            if not decl or not decl.dependencies:
-                return []
-
-            # Dependencies stored as JSON array of names
-            import json
-            dep_names = json.loads(decl.dependencies)
-
-            # Fetch dependency declarations
-            stmt = select(Declaration).where(Declaration.name.in_(dep_names))
-            deps = session.execute(stmt).scalars().all()
-
-            return [self._to_search_result(d) for d in deps]
-
     def _compute_semantic_similarity(
         self, query_embedding: List[float], decl: Declaration
     ) -> float:
