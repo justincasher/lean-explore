@@ -18,7 +18,7 @@ from mcp.server.fastmcp import FastMCP
 
 # Import your backend service types for type hinting
 from lean_explore.api.client import Client as APIClient
-from lean_explore.local.service import Service as LocalService
+from lean_explore.search import Service as LocalService
 
 logger = logging.getLogger(__name__)
 

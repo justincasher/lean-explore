@@ -159,7 +159,7 @@ def main():
 
         # If pre-checks pass, proceed to initialize LocalService
         try:
-            from lean_explore.local.service import Service
+            from lean_explore.search import Service
 
             backend_service_instance = Service()
             logger.info("Local backend service initialized successfully.")
