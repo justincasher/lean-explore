@@ -6,6 +6,6 @@ BM25 lexical matching, PageRank scoring, and the service layer for search operat
 
 from lean_explore.search.engine import SearchEngine
 from lean_explore.search.service import Service
-from lean_explore.search.types import SearchResult
+from lean_explore.search.types import SearchResponse, SearchResult
 
-__all__ = ["SearchEngine", "Service", "SearchResult"]
+__all__ = ["SearchEngine", "Service", "SearchResponse", "SearchResult"]

@@ -1,6 +1,6 @@
 """Type definitions for search results and related data structures."""
 
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel
 
@@ -43,3 +43,19 @@ class SearchResult(BaseModel):
         """Pydantic configuration."""
 
         from_attributes = True
+
+
+class SearchResponse(BaseModel):
+    """Response from a search operation containing results and metadata."""
+
+    query: str
+    """The original search query string."""
+
+    results: List[SearchResult]
+    """List of search results."""
+
+    count: int
+    """Number of results returned."""
+
+    processing_time_ms: Optional[int] = None
+    """Processing time in milliseconds, if available."""
