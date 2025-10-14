@@ -202,9 +202,9 @@ def main():
             sys.exit(1)
             return
         try:
-            from lean_explore.api.client import Client
+            from lean_explore.api import ApiClient
 
-            backend_service_instance = Client(api_key=args.api_key)
+            backend_service_instance = ApiClient(api_key=args.api_key)
             logger.info("API client backend initialized successfully.")
         except Exception as e:
             msg = f"An unexpected error occurred while initializing APIClient: {e}"
