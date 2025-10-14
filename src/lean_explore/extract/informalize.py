@@ -10,7 +10,14 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
@@ -36,9 +43,12 @@ def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declar
     # Build graph
     for decl in declarations:
         if decl.dependencies:
-            deps = json.loads(decl.dependencies) if isinstance(decl.dependencies, str) else decl.dependencies
+            if isinstance(decl.dependencies, str):
+                deps = json.loads(decl.dependencies)
+            else:
+                deps = decl.dependencies
             for dep_name in deps:
-                if dep_name in name_to_decl: 
+                if dep_name in name_to_decl:
                     graph[dep_name].append(decl.name)
                     in_degree[decl.name] += 1
 
@@ -59,7 +69,10 @@ def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declar
     # Add them anyway (cycle is broken by arbitrary order)
     remaining = [name_to_decl[name] for name in in_degree if in_degree[name] > 0]
     if remaining:
-        logger.warning(f"Found {len(remaining)} declarations in cycles, adding in arbitrary order")
+        logger.warning(
+            f"Found {len(remaining)} declarations in cycles, "
+            "adding in arbitrary order"
+        )
         result.extend(remaining)
 
     return result
@@ -115,11 +128,15 @@ async def _process_one_declaration(
         try:
             dependencies_text = ""
             if decl.dependencies:
-                deps = json.loads(decl.dependencies) if isinstance(decl.dependencies, str) else decl.dependencies
+                if isinstance(decl.dependencies, str):
+                    deps = json.loads(decl.dependencies)
+                else:
+                    deps = decl.dependencies
                 dep_infos = []
                 for dep_name in deps:
                     if dep_name in informalizations_map:
-                        dep_infos.append(f"- {dep_name}: {informalizations_map[dep_name]}")
+                        informal_desc = informalizations_map[dep_name]
+                        dep_infos.append(f"- {dep_name}: {informal_desc}")
 
                 if dep_infos:
                     dependencies_text = "Dependencies:\n" + "\n".join(dep_infos)
@@ -182,7 +199,12 @@ async def _process_declarations_in_batches(
             chunk = declarations[i : i + batch_size]
             tasks = [
                 _process_one_declaration(
-                    decl, client, model, prompt_template, informalizations_map, semaphore
+                    decl,
+                    client,
+                    model,
+                    prompt_template,
+                    informalizations_map,
+                    semaphore,
                 )
                 for decl in chunk
             ]
@@ -216,7 +238,10 @@ async def informalize_declarations(
     """Generate informalizations for declarations missing them."""
     prompt_template = (Path(__file__).parent / "prompt.txt").read_text()
     logger.info("Starting informalization process...")
-    logger.info(f"Model: {model}, Max concurrent: {max_concurrent}, Batch size: {batch_size}")
+    logger.info(
+        f"Model: {model}, Max concurrent: {max_concurrent}, "
+        f"Batch size: {batch_size}"
+    )
 
     client = OpenRouterClient()
     semaphore = asyncio.Semaphore(max_concurrent)
@@ -239,7 +264,10 @@ async def informalize_declarations(
             informalizations_map, semaphore, batch_size
         )
 
-        logger.info(f"Informalization complete. Processed {processed}/{len(declarations)} declarations")
+        logger.info(
+            f"Informalization complete. Processed {processed}/"
+            f"{len(declarations)} declarations"
+        )
 
 
 async def main():

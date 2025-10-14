@@ -72,16 +72,24 @@ class Declaration(Base):
     informalization: Mapped[str | None] = mapped_column(Text, nullable=True)
     """Natural language description of the declaration."""
 
-    name_embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    name_embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(768), nullable=True
+    )
     """768-dimensional embedding of the declaration name."""
 
-    informalization_embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    informalization_embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(768), nullable=True
+    )
     """768-dimensional embedding of the informalization text."""
 
-    source_text_embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    source_text_embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(768), nullable=True
+    )
     """768-dimensional embedding of the source text."""
 
-    docstring_embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    docstring_embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(768), nullable=True
+    )
     """768-dimensional embedding of the docstring."""
 
     pagerank: Mapped[float | None] = mapped_column(Float, nullable=True)

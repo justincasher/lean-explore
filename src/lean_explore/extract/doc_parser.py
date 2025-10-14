@@ -9,7 +9,6 @@ import logging
 import re
 from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -49,7 +48,7 @@ def _extract_dependencies_from_html(html: str) -> list[str]:
 
 def _read_source_lines(file_path: Path, line_start: int, line_end: int) -> str:
     """Read specific lines from a source file."""
-    with open(file_path, "r", encoding="utf-8") as f:
+    with open(file_path, encoding="utf-8") as f:
         lines = f.readlines()
         if line_start <= len(lines) and line_end <= len(lines):
             return "".join(lines[line_start - 1 : line_end])
@@ -81,10 +80,20 @@ def _extract_source_text(
         toolchain_file = lean_root / "lean-toolchain"
         if toolchain_file.exists():
             version = toolchain_file.read_text().strip().split(":")[-1]
-            lean4_path = file_path_str[4:] if file_path_str.startswith("src/") else file_path_str
-            candidates.append(
-                Path.home() / ".elan" / "toolchains" / f"leanprover--lean4---{version}" / "src" / "lean" / lean4_path
+            if file_path_str.startswith("src/"):
+                lean4_path = file_path_str[4:]
+            else:
+                lean4_path = file_path_str
+            toolchain_path = (
+                Path.home()
+                / ".elan"
+                / "toolchains"
+                / f"leanprover--lean4---{version}"
+                / "src"
+                / "lean"
+                / lean4_path
             )
+            candidates.append(toolchain_path)
 
     # 2. Package variations
     for variant in [
@@ -109,7 +118,9 @@ def _extract_source_text(
         if candidate.exists():
             return _read_source_lines(candidate, line_start, line_end)
 
-    raise FileNotFoundError(f"Could not find {file_path_str} for package {package_name}")
+    raise FileNotFoundError(
+        f"Could not find {file_path_str} for package {package_name}"
+    )
 
 
 async def extract_declarations(engine: AsyncEngine) -> None:
@@ -135,14 +146,16 @@ async def extract_declarations(engine: AsyncEngine) -> None:
 
     declarations = []
     for file_path in bmp_files:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             data = json.load(f)
 
         module_name = data["name"]
 
         for decl_data in data.get("declarations", []):
             info = decl_data["info"]
-            source_text = _extract_source_text(info["sourceLink"], lean_root, package_cache)
+            source_text = _extract_source_text(
+                info["sourceLink"], lean_root, package_cache
+            )
 
             header_html = decl_data.get("header", "")
             dependencies = _extract_dependencies_from_html(header_html)
@@ -167,16 +180,25 @@ async def extract_declarations(engine: AsyncEngine) -> None:
 
                 # Use INSERT ON CONFLICT to skip duplicates
                 for decl in batch:
+                    dependencies_json = (
+                        json.dumps(decl.dependencies)
+                        if decl.dependencies
+                        else None
+                    )
                     stmt = insert(DBDeclaration).values(
                         name=decl.name,
                         module=decl.module,
                         docstring=decl.docstring,
                         source_text=decl.source_text,
                         source_link=decl.source_link,
-                        dependencies=json.dumps(decl.dependencies) if decl.dependencies else None,
+                        dependencies=dependencies_json,
                     ).on_conflict_do_nothing(index_elements=["name"])
 
                     result = await session.execute(stmt)
                     inserted_count += result.rowcount
 
-    logger.info(f"Inserted {inserted_count} new declarations into database (skipped {len(declarations) - inserted_count} duplicates)")
+    skipped = len(declarations) - inserted_count
+    logger.info(
+        f"Inserted {inserted_count} new declarations into database "
+        f"(skipped {skipped} duplicates)"
+    )

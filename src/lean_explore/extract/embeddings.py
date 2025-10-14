@@ -9,7 +9,14 @@ Reads declarations from the database and generates embeddings for:
 
 import logging
 
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -125,8 +132,9 @@ async def _process_batch(
         await session.execute(update(Declaration), list(updates.values()))
         await session.commit()
 
+    responses = [name_response, info_response, source_response, doc_response]
     total = sum(
-        len(response.embeddings) for response in [name_response, info_response, source_response, doc_response] if response
+        len(response.embeddings) for response in responses if response
     )
     return total
 
@@ -146,7 +154,10 @@ async def generate_embeddings(
         limit: Maximum number of declarations to process (None for all)
     """
     client = EmbeddingClient(model_name=model_name)
-    logger.info(f"Starting embedding generation with {client.model_name} on {client.device}")
+    logger.info(
+        f"Starting embedding generation with {client.model_name} "
+        f"on {client.device}"
+    )
 
     async with AsyncSession(engine) as session:
         declarations = await _get_declarations_needing_embeddings(session, limit)

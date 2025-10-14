@@ -12,14 +12,13 @@ import sys
 import textwrap
 from typing import Optional
 
-import httpx
 import typer
 from rich.console import Console
 from rich.panel import Panel
 
 from lean_explore.api import ApiClient
 from lean_explore.cli import data_commands
-from lean_explore.search.types import SearchResponse, SearchResult
+from lean_explore.search.types import SearchResponse
 
 
 def async_command(f):
@@ -130,7 +129,11 @@ def _display_search_results(response: SearchResponse, display_limit: int = 5):
     )
 
     num_results_to_show = min(len(response.results), display_limit)
-    time_info = f"Time: {response.processing_time_ms}ms" if response.processing_time_ms else ""
+    time_info = (
+        f"Time: {response.processing_time_ms}ms"
+        if response.processing_time_ms
+        else ""
+    )
     console.print(
         f"Showing {num_results_to_show} of {response.count} results. {time_info}"
     )
@@ -151,9 +154,11 @@ def _display_search_results(response: SearchResponse, display_limit: int = 5):
         console.print(
             f"[bold cyan]Module:[/bold cyan] [green]{item.module}[/green]"
         )
-        console.print(
-            f"[bold cyan]Source:[/bold cyan] [link={item.source_link}]{item.source_link}[/link]"
+        source_formatted = (
+            f"[bold cyan]Source:[/bold cyan] "
+            f"[link={item.source_link}]{item.source_link}[/link]"
         )
+        console.print(source_formatted)
 
         if item.source_text:
             formatted_code = _format_text_for_fixed_panel(

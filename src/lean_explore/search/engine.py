@@ -8,8 +8,8 @@ import asyncio
 import logging
 from typing import List, Optional
 
-from sqlalchemy import create_engine, select, text
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 
 from lean_explore import defaults
 from lean_explore.extract.schemas import Declaration

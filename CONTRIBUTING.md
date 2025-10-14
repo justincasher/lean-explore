@@ -39,13 +39,15 @@ make help             # Show all available commands
 
 ## Coding Guidelines
 
+**Absolute imports.** Use absolute imports throughout the codebase (e.g., `from lean_explore.api.client import Client`). Avoid relative imports. All imports must be at the top of the file.
+
+**Naming.** Avoid abbreviations in variable, function, and class names—use full words for clarity (e.g., `configuration` not `config`, `document` not `doc`). For acronyms in class names, capitalize only the first letter (e.g., `ReplHandler`, `McpServer`, `HtmlParser`).
+
 **Documentation.** Every module must have a module-level docstring. Every method which is not self-explanatory must have a Google-style docstring. Public-facing methods must use detailed docstrings that explain parameters, return values, and exceptions.
 
 **Inline comments.** Add inline comments for complex code and questions that will come up during code review.
 
-**Methods.** Keep method bodies under 40 lines (soft limit). Write self-documenting code: use descriptive variable and function names
-
-**Imports.** All imports must be at the top of the file.
+**Methods.** Keep method bodies under 40 lines (soft limit). Write self-documenting code: use descriptive variable and function names.
 
 **Logging.** Use loggers and not print statements when needing to print to console.
 

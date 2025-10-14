@@ -69,7 +69,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 mcp_app = FastMCP(
     "LeanExploreMCPServer",
     version="0.1.0",
-    description="MCP Server for Lean Explore, providing tools to search Lean declarations.",
+    description=(
+        "MCP Server for Lean Explore, "
+        "providing tools to search Lean declarations."
+    ),
     lifespan=app_lifespan,
 )
 
