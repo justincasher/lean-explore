@@ -84,13 +84,19 @@ async def get_by_id(
 
     if not hasattr(backend, "get_by_id"):
         logger.error("Backend service does not have a 'get_by_id' method.")
-        raise RuntimeError("Get by ID functionality not available on configured backend.")
+        raise RuntimeError(
+            "Get by ID functionality not available on configured backend."
+        )
 
     # Call backend get_by_id (handle both async and sync)
     if asyncio.iscoroutinefunction(backend.get_by_id):
-        result: SearchResult | None = await backend.get_by_id(declaration_id=declaration_id)
+        result: SearchResult | None = await backend.get_by_id(
+            declaration_id=declaration_id
+        )
     else:
-        result: SearchResult | None = backend.get_by_id(declaration_id=declaration_id)
+        result: SearchResult | None = backend.get_by_id(
+            declaration_id=declaration_id
+        )
 
     # Return as dict for MCP, or None
     return result.model_dump(exclude_none=True) if result else None

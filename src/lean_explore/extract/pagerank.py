@@ -4,7 +4,13 @@ import json
 import logging
 
 import networkx as nx
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+)
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -37,13 +43,19 @@ async def _build_dependency_graph(session: AsyncSession) -> nx.DiGraph:
     # Add edges
     for decl in declarations:
         if decl.dependencies:
-            deps = json.loads(decl.dependencies) if isinstance(decl.dependencies, str) else decl.dependencies
+            if isinstance(decl.dependencies, str):
+                deps = json.loads(decl.dependencies)
+            else:
+                deps = decl.dependencies
             for dep_name in deps:
                 if dep_name in name_to_id:
                     # Edge from dependent to dependency
                     graph.add_edge(decl.id, name_to_id[dep_name])
 
-    logger.info(f"Built graph with {graph.number_of_nodes()} nodes and {graph.number_of_edges()} edges")
+    logger.info(
+        f"Built graph with {graph.number_of_nodes()} nodes and "
+        f"{graph.number_of_edges()} edges"
+    )
     return graph
 
 
