@@ -1,1 +1,1 @@
-"""Local package for lean explore."""
+"""MCP package for lean explore."""

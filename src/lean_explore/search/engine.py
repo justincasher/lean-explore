@@ -6,7 +6,6 @@ for semantic search, combined with BM25 lexical matching and PageRank scoring.
 
 import asyncio
 import logging
-from typing import List, Optional
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -28,8 +27,8 @@ class SearchEngine:
 
     def __init__(
         self,
-        db_url: Optional[str] = None,
-        embedding_client: Optional[EmbeddingClient] = None,
+        db_url: str | None = None,
+        embedding_client: EmbeddingClient | None = None,
         embedding_model_name: str = "nomic-ai/nomic-embed-text-v1",
     ):
         """Initialize the search engine.
@@ -53,7 +52,7 @@ class SearchEngine:
         semantic_weight: float = 0.4,
         pagerank_weight: float = 0.3,
         lexical_weight: float = 0.3,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """Search for Lean declarations.
 
         Args:
@@ -73,9 +72,15 @@ class SearchEngine:
 
             # Perform vector similarity search
             # Using informalization_embedding as primary semantic signal
-            stmt = select(Declaration).order_by(
-                Declaration.informalization_embedding.cosine_distance(query_embedding)
-            ).limit(limit * 3)  # Get more candidates for reranking
+            stmt = (
+                select(Declaration)
+                .order_by(
+                    Declaration.informalization_embedding.cosine_distance(
+                        query_embedding
+                    )
+                )
+                .limit(limit * 3)
+            )  # Get more candidates for reranking
 
             candidates = session.execute(stmt).scalars().all()
 
@@ -104,12 +109,9 @@ class SearchEngine:
 
             # Sort by score and convert to SearchResult
             scored_results.sort(key=lambda x: x[1], reverse=True)
-            return [
-                self._to_search_result(decl)
-                for decl, _ in scored_results[:limit]
-            ]
+            return [self._to_search_result(decl) for decl, _ in scored_results[:limit]]
 
-    def get_by_id(self, declaration_id: int) -> Optional[SearchResult]:
+    def get_by_id(self, declaration_id: int) -> SearchResult | None:
         """Retrieve a declaration by ID.
 
         Args:
@@ -123,7 +125,7 @@ class SearchEngine:
             return self._to_search_result(decl) if decl else None
 
     def _compute_semantic_similarity(
-        self, query_embedding: List[float], decl: Declaration
+        self, query_embedding: list[float], decl: Declaration
     ) -> float:
         """Compute semantic similarity score.
 

@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from mcp.server.fastmcp import Context as MCPContext
 
@@ -37,7 +37,7 @@ async def search(
     ctx: MCPContext,
     query: str,
     limit: int = 10,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Searches Lean declarations by a query string.
 
     Args:
@@ -69,7 +69,7 @@ async def search(
 async def get_by_id(
     ctx: MCPContext,
     declaration_id: int,
-) -> Dict[str, Any] | None:
+) -> dict[str, Any] | None:
     """Retrieves a specific declaration by its unique identifier.
 
     Args:
@@ -94,9 +94,7 @@ async def get_by_id(
             declaration_id=declaration_id
         )
     else:
-        result: SearchResult | None = backend.get_by_id(
-            declaration_id=declaration_id
-        )
+        result: SearchResult | None = backend.get_by_id(declaration_id=declaration_id)
 
     # Return as dict for MCP, or None
     return result.model_dump(exclude_none=True) if result else None

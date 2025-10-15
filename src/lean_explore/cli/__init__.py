@@ -1,1 +1,1 @@
-"""Local package for lean explore."""
+"""CLI package for lean explore."""

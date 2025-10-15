@@ -10,7 +10,6 @@ import os
 import subprocess
 import sys
 import textwrap
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -29,6 +28,7 @@ def async_command(f):
         return asyncio.run(f(*args, **kwargs))
 
     return wrapper
+
 
 # Initialize Typer app and Rich console
 app = typer.Typer(
@@ -55,7 +55,7 @@ error_console = Console(stderr=True)
 PANEL_CONTENT_WIDTH = 80
 
 
-def _get_api_client() -> Optional[ApiClient]:
+def _get_api_client() -> ApiClient | None:
     """Loads Lean Explore API key from environment and initializes the ApiClient."""
     api_key = os.getenv("LEANEXPLORE_API_KEY")
     if not api_key:
@@ -67,7 +67,7 @@ def _get_api_client() -> Optional[ApiClient]:
     return ApiClient(api_key=api_key)
 
 
-def _format_text_for_fixed_panel(text_content: Optional[str], width: int) -> str:
+def _format_text_for_fixed_panel(text_content: str | None, width: int) -> str:
     """Wraps text and pads lines to ensure fixed content width for a Panel."""
     if not text_content:
         return " " * width
@@ -130,9 +130,7 @@ def _display_search_results(response: SearchResponse, display_limit: int = 5):
 
     num_results_to_show = min(len(response.results), display_limit)
     time_info = (
-        f"Time: {response.processing_time_ms}ms"
-        if response.processing_time_ms
-        else ""
+        f"Time: {response.processing_time_ms}ms" if response.processing_time_ms else ""
     )
     console.print(
         f"Showing {num_results_to_show} of {response.count} results. {time_info}"
@@ -151,9 +149,7 @@ def _display_search_results(response: SearchResponse, display_limit: int = 5):
         console.rule(f"[bold]Result {i + 1}[/bold]", style="dim")
         console.print(f"[bold cyan]ID:[/bold cyan] [dim]{item.id}[/dim]")
         console.print(f"[bold cyan]Name:[/bold cyan] {item.name}")
-        console.print(
-            f"[bold cyan]Module:[/bold cyan] [green]{item.module}[/green]"
-        )
+        console.print(f"[bold cyan]Module:[/bold cyan] [green]{item.module}[/green]")
         source_formatted = (
             f"[bold cyan]Source:[/bold cyan] "
             f"[link={item.source_link}]{item.source_link}[/link]"
@@ -241,7 +237,7 @@ def mcp_serve_command(
         case_sensitive=False,
         show_choices=True,
     ),
-    api_key_override: Optional[str] = typer.Option(
+    api_key_override: str | None = typer.Option(
         None,
         "--api-key",
         help="API key to use if backend is 'api'. Overrides env var.",

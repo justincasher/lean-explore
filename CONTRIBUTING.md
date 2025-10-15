@@ -51,6 +51,8 @@ make help             # Show all available commands
 
 **Logging.** Use loggers and not print statements when needing to print to console.
 
+**Type hints.** Use modern Python type hints (PEP 604 and PEP 585): use `|` instead of `Union`, use `| None` instead of `Optional`, and use built-in collection types like `list`, `dict`, `set`, and `tuple` instead of their `typing` module equivalents (`List`, `Dict`, `Set`, `Tuple`).
+
 
 ## Testing
 

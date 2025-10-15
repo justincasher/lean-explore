@@ -1,7 +1,6 @@
 """Service layer for search operations."""
 
 import time
-from typing import Optional
 
 from lean_explore.search.engine import SearchEngine
 from lean_explore.search.types import SearchResponse, SearchResult
@@ -13,7 +12,7 @@ class Service:
     Provides a clean interface for searching and retrieving declarations.
     """
 
-    def __init__(self, engine: Optional[SearchEngine] = None):
+    def __init__(self, engine: SearchEngine | None = None):
         """Initialize the search service.
 
         Args:
@@ -60,7 +59,7 @@ class Service:
             processing_time_ms=processing_time_ms,
         )
 
-    def get_by_id(self, declaration_id: int) -> Optional[SearchResult]:
+    def get_by_id(self, declaration_id: int) -> SearchResult | None:
         """Retrieve a declaration by ID.
 
         Args:
