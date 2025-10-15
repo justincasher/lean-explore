@@ -181,18 +181,20 @@ async def extract_declarations(engine: AsyncEngine) -> None:
                 # Use INSERT ON CONFLICT to skip duplicates
                 for decl in batch:
                     dependencies_json = (
-                        json.dumps(decl.dependencies)
-                        if decl.dependencies
-                        else None
+                        json.dumps(decl.dependencies) if decl.dependencies else None
                     )
-                    stmt = insert(DBDeclaration).values(
-                        name=decl.name,
-                        module=decl.module,
-                        docstring=decl.docstring,
-                        source_text=decl.source_text,
-                        source_link=decl.source_link,
-                        dependencies=dependencies_json,
-                    ).on_conflict_do_nothing(index_elements=["name"])
+                    stmt = (
+                        insert(DBDeclaration)
+                        .values(
+                            name=decl.name,
+                            module=decl.module,
+                            docstring=decl.docstring,
+                            source_text=decl.source_text,
+                            source_link=decl.source_link,
+                            dependencies=dependencies_json,
+                        )
+                        .on_conflict_do_nothing(index_elements=["name"])
+                    )
 
                     result = await session.execute(stmt)
                     inserted_count += result.rowcount

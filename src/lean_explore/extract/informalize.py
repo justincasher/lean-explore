@@ -70,8 +70,7 @@ def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declar
     remaining = [name_to_decl[name] for name in in_degree if in_degree[name] > 0]
     if remaining:
         logger.warning(
-            f"Found {len(remaining)} declarations in cycles, "
-            "adding in arbitrary order"
+            f"Found {len(remaining)} declarations in cycles, adding in arbitrary order"
         )
         result.extend(remaining)
 
@@ -239,8 +238,7 @@ async def informalize_declarations(
     prompt_template = (Path(__file__).parent / "prompt.txt").read_text()
     logger.info("Starting informalization process...")
     logger.info(
-        f"Model: {model}, Max concurrent: {max_concurrent}, "
-        f"Batch size: {batch_size}"
+        f"Model: {model}, Max concurrent: {max_concurrent}, Batch size: {batch_size}"
     )
 
     client = OpenRouterClient()
@@ -260,8 +258,14 @@ async def informalize_declarations(
         logger.info("Dependency order established")
 
         processed = await _process_declarations_in_batches(
-            session, declarations, client, model, prompt_template,
-            informalizations_map, semaphore, batch_size
+            session,
+            declarations,
+            client,
+            model,
+            prompt_template,
+            informalizations_map,
+            semaphore,
+            batch_size,
         )
 
         logger.info(

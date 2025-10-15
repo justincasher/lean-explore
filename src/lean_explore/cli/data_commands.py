@@ -13,7 +13,7 @@ import hashlib
 import json
 import pathlib
 import shutil
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 import typer
@@ -44,7 +44,7 @@ console = Console()
 # --- Internal Helper Functions ---
 
 
-def _fetch_remote_json(url: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
+def _fetch_remote_json(url: str, timeout: int = 10) -> dict[str, Any] | None:
     """Fetches JSON data from a remote URL.
 
     Args:
@@ -66,8 +66,8 @@ def _fetch_remote_json(url: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
 
 
 def _resolve_toolchain_version_info(
-    manifest_data: Dict[str, Any], requested_identifier: str
-) -> Optional[Dict[str, Any]]:
+    manifest_data: dict[str, Any], requested_identifier: str
+) -> dict[str, Any] | None:
     """Resolves a requested version identifier to its concrete toolchain info.
 
     Handles aliases like "stable" by looking up "default_toolchain" in the manifest.
@@ -119,7 +119,7 @@ def _download_file_with_progress(
     url: str,
     destination_path: pathlib.Path,
     description: str,
-    expected_size_bytes: Optional[int] = None,
+    expected_size_bytes: int | None = None,
     timeout: int = 30,
 ) -> bool:
     """Downloads a file from a URL with a progress bar, saving raw bytes.
@@ -371,7 +371,7 @@ def fetch() -> None:
         raise typer.Exit(code=1)
 
     # 4. Process Files for the Target Version
-    files_to_process: List[Dict[str, Any]] = version_info.get("files", [])
+    files_to_process: list[dict[str, Any]] = version_info.get("files", [])
     if not files_to_process:
         console.print(
             f"[yellow]No files listed in the manifest for version "

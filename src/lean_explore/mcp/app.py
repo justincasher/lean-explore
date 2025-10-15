@@ -3,7 +3,7 @@
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import AsyncIterator, Union
+from typing import AsyncIterator
 
 from mcp.server.fastmcp import FastMCP
 
@@ -13,7 +13,7 @@ from lean_explore.search import Service
 logger = logging.getLogger(__name__)
 
 # Define a type for the backend service
-BackendServiceType = Union[ApiClient, Service, None]
+BackendServiceType = ApiClient | Service | None
 
 
 @dataclass
@@ -70,8 +70,7 @@ mcp_app = FastMCP(
     "LeanExploreMCPServer",
     version="0.1.0",
     description=(
-        "MCP Server for Lean Explore, "
-        "providing tools to search Lean declarations."
+        "MCP Server for Lean Explore, providing tools to search Lean declarations."
     ),
     lifespan=app_lifespan,
 )

@@ -24,7 +24,7 @@ class ApiClient:
         self.base_url: str = _DEFAULT_API_BASE_URL
         self.api_key: str = api_key
         self.timeout: float = timeout
-        self._headers: dict = {"Authorization": f"Bearer {self.api_key}"}
+        self._headers: dict[str, str] = {"Authorization": f"Bearer {self.api_key}"}
 
     async def search(
         self,

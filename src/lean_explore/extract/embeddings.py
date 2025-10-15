@@ -133,9 +133,7 @@ async def _process_batch(
         await session.commit()
 
     responses = [name_response, info_response, source_response, doc_response]
-    total = sum(
-        len(response.embeddings) for response in responses if response
-    )
+    total = sum(len(response.embeddings) for response in responses if response)
     return total
 
 
@@ -155,8 +153,7 @@ async def generate_embeddings(
     """
     client = EmbeddingClient(model_name=model_name)
     logger.info(
-        f"Starting embedding generation with {client.model_name} "
-        f"on {client.device}"
+        f"Starting embedding generation with {client.model_name} on {client.device}"
     )
 
     async with AsyncSession(engine) as session:

@@ -1,7 +1,5 @@
 """Type definitions for search results and related data structures."""
 
-from typing import List, Optional
-
 from pydantic import BaseModel
 
 
@@ -21,7 +19,7 @@ class SearchResult(BaseModel):
     module: str
     """Module name (e.g., 'Mathlib.Data.List.Basic')."""
 
-    docstring: Optional[str]
+    docstring: str | None
     """Documentation string from the source code, if available."""
 
     source_text: str
@@ -30,13 +28,13 @@ class SearchResult(BaseModel):
     source_link: str
     """GitHub URL to the declaration source code."""
 
-    dependencies: Optional[str]
+    dependencies: str | None
     """JSON array of declaration names this declaration depends on."""
 
-    informalization: Optional[str]
+    informalization: str | None
     """Natural language description of the declaration."""
 
-    pagerank: Optional[float]
+    pagerank: float | None
     """PageRank score based on dependency graph."""
 
     class Config:
@@ -51,11 +49,11 @@ class SearchResponse(BaseModel):
     query: str
     """The original search query string."""
 
-    results: List[SearchResult]
+    results: list[SearchResult]
     """List of search results."""
 
     count: int
     """Number of results returned."""
 
-    processing_time_ms: Optional[int] = None
+    processing_time_ms: int | None = None
     """Processing time in milliseconds, if available."""
