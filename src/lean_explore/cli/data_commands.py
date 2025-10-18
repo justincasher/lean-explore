@@ -27,8 +27,6 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
-from lean_explore import defaults  # For R2 URLs and local paths
-
 # Typer application for data commands
 app = typer.Typer(
     name="data",
@@ -39,6 +37,19 @@ app = typer.Typer(
 
 # Initialize console for rich output
 console = Console()
+
+# Local data paths
+LEAN_EXPLORE_TOOLCHAINS_BASE_DIRECTORY = (
+    pathlib.Path.home() / ".lean_explore" / "data" / "toolchains"
+)
+
+# Remote data asset configuration
+R2_MANIFEST_DEFAULT_URL: str = (
+    "https://pub-48b75babc4664808b15520033423c765.r2.dev/manifest.json"
+)
+R2_ASSETS_BASE_URL: str = (
+    "https://pub-48b75babc4664808b15520033423c765.r2.dev/"
+)
 
 
 # --- Internal Helper Functions ---
@@ -336,8 +347,8 @@ def fetch() -> None:
     version_to_request = "stable"  # Always fetch the stable/default version
 
     # 1. Fetch and Parse Manifest
-    console.print(f"Fetching data manifest from {defaults.R2_MANIFEST_DEFAULT_URL}...")
-    manifest_data = _fetch_remote_json(defaults.R2_MANIFEST_DEFAULT_URL)
+    console.print(f"Fetching data manifest from {R2_MANIFEST_DEFAULT_URL}...")
+    manifest_data = _fetch_remote_json(R2_MANIFEST_DEFAULT_URL)
     if not manifest_data:
         console.print(
             "[bold red]Failed to fetch or parse the manifest. Aborting.[/bold red]"
@@ -359,7 +370,7 @@ def fetch() -> None:
     )
 
     # 3. Determine Local Paths and Ensure Directory Exists
-    local_version_dir = defaults.LEAN_EXPLORE_TOOLCHAINS_BASE_DIR / resolved_version_key
+    local_version_dir = LEAN_EXPLORE_TOOLCHAINS_BASE_DIRECTORY / resolved_version_key
     try:
         local_version_dir.mkdir(parents=True, exist_ok=True)
         console.print(f"Data will be stored in: [dim]{local_version_dir}[/dim]")
@@ -401,7 +412,7 @@ def fetch() -> None:
         temp_download_path = local_version_dir / remote_name
 
         remote_url = (
-            defaults.R2_ASSETS_BASE_URL.rstrip("/")
+            R2_ASSETS_BASE_URL.rstrip("/")
             + "/"
             + assets_r2_path_prefix.strip("/")
             + "/"
@@ -488,7 +499,7 @@ def clean_data_toolchains() -> None:
 
     Configuration files will not be affected.
     """
-    toolchains_dir = defaults.LEAN_EXPLORE_TOOLCHAINS_BASE_DIR
+    toolchains_dir = LEAN_EXPLORE_TOOLCHAINS_BASE_DIRECTORY
     console.print(
         f"Attempting to clean local data toolchains from: [dim]{toolchains_dir}[/dim]"
     )
