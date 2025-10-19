@@ -12,6 +12,8 @@ from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from lean_explore.config import Config
+
 
 class OpenRouterClient:
     """Client for interacting with OpenRouter API using OpenAI SDK types."""
@@ -26,7 +28,7 @@ class OpenRouterClient:
             raise ValueError("OPENROUTER_API_KEY environment variable not set")
 
         self.client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
+            base_url=Config.OPENROUTER_API_BASE_URL,
             api_key=api_key,
         )
 

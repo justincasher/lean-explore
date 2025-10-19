@@ -4,6 +4,7 @@ import os
 
 import httpx
 
+from lean_explore.config import Config
 from lean_explore.models import SearchResponse, SearchResult
 
 
@@ -25,7 +26,7 @@ class ApiClient:
         Raises:
             ValueError: If no API key is provided and LEANEXPLORE_API_KEY is not set.
         """
-        self.base_url: str = "https://www.leanexplore.com/api/v1"
+        self.base_url: str = Config.API_BASE_URL
         self.api_key: str = api_key or os.getenv("LEANEXPLORE_API_KEY", "")
         if not self.api_key:
             raise ValueError(
