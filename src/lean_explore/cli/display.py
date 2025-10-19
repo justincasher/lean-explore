@@ -11,12 +11,8 @@ from lean_explore.models import SearchResponse
 
 console = Console()
 
-PANEL_CONTENT_WIDTH = 80
 
-
-def format_text_for_panel(
-    text_content: str | None, width: int = PANEL_CONTENT_WIDTH
-) -> str:
+def format_text_for_panel(text_content: str | None, width: int = 80) -> str:
     """Wraps text and pads lines to ensure fixed content width for a Panel.
 
     Args:

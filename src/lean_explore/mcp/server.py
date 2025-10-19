@@ -16,12 +16,13 @@ Command-line arguments:
 import argparse
 import builtins
 import logging
-import pathlib
 import sys
 import types
 from unittest.mock import ANY
 
 from rich.console import Console as RichConsole
+
+from lean_explore.config import Config
 
 # Import backend clients/services
 # Import tools to ensure they are registered with the mcp_app
@@ -29,18 +30,6 @@ from lean_explore.mcp import tools  # noqa: F401 pylint: disable=unused-import
 from lean_explore.mcp.app import BackendServiceType, mcp_app
 
 error_console = RichConsole(stderr=True)
-
-# Local data paths
-DEFAULT_ACTIVE_TOOLCHAIN_VERSION = "0.2.0"
-LEAN_EXPLORE_TOOLCHAINS_BASE_DIRECTORY = (
-    pathlib.Path.home() / ".lean_explore" / "data" / "toolchains"
-)
-_ACTIVE_TOOLCHAIN_VERSION_DATA_PATH = (
-    LEAN_EXPLORE_TOOLCHAINS_BASE_DIRECTORY / DEFAULT_ACTIVE_TOOLCHAIN_VERSION
-)
-DEFAULT_DATABASE_PATH = _ACTIVE_TOOLCHAIN_VERSION_DATA_PATH / "lean_explore_data.db"
-DEFAULT_FAISS_INDEX_PATH = _ACTIVE_TOOLCHAIN_VERSION_DATA_PATH / "main_faiss.index"
-DEFAULT_FAISS_MAP_PATH = _ACTIVE_TOOLCHAIN_VERSION_DATA_PATH / "faiss_ids_map.json"
 
 
 # allow tests to refer to mocker.ANY even though they don't import it
@@ -137,9 +126,9 @@ def main():
     if args.backend == "local":
         # Pre-check for essential data files before initializing LocalService
         required_files_info = {
-            "Database file": DEFAULT_DATABASE_PATH,
-            "FAISS index file": DEFAULT_FAISS_INDEX_PATH,
-            "FAISS ID map file": DEFAULT_FAISS_MAP_PATH,
+            "Database file": Config.DATABASE_PATH,
+            "FAISS index file": Config.FAISS_INDEX_PATH,
+            "FAISS ID map file": Config.FAISS_MAP_PATH,
         }
         missing_files_messages = []
         for name, path_obj in required_files_info.items():
@@ -149,17 +138,13 @@ def main():
                 )
 
         if missing_files_messages:
-            expected_toolchain_dir = (
-                LEAN_EXPLORE_TOOLCHAINS_BASE_DIRECTORY
-                / DEFAULT_ACTIVE_TOOLCHAIN_VERSION
-            )
             error_summary = (
                 "Error: Essential data files for the local backend are missing.\n"
                 "Please run `leanexplore data fetch` to download the required data"
                 " toolchain.\n"
                 f"Expected data directory for active toolchain "
-                f"('{DEFAULT_ACTIVE_TOOLCHAIN_VERSION}'):"
-                f" {expected_toolchain_dir.resolve()}\n"
+                f"('{Config.ACTIVE_TOOLCHAIN_VERSION}'):"
+                f" {Config.ACTIVE_TOOLCHAIN_DIRECTORY.resolve()}\n"
                 "Details of missing files:\n"
                 + "\n".join(f"  - {msg}" for msg in missing_files_messages)
             )

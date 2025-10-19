@@ -6,7 +6,6 @@ Provides CLI commands to download, install, and clean data files (database,
 FAISS index, etc.) from remote storage using Pooch for checksums and caching.
 """
 
-import pathlib
 import shutil
 from typing import Any
 
@@ -15,9 +14,7 @@ import requests
 import typer
 from rich.console import Console
 
-# Constants
-LEAN_EXPLORE_DATA_CACHE = pathlib.Path.home() / ".lean_explore" / "data"
-MANIFEST_URL = "https://pub-48b75babc4664808b15520033423c765.r2.dev/manifest.json"
+from lean_explore.config import Config
 
 # Typer application for data commands
 app = typer.Typer(
@@ -40,7 +37,7 @@ def fetch_manifest() -> dict[str, Any] | None:
         The manifest dictionary, or None if fetch fails.
     """
     try:
-        response = requests.get(MANIFEST_URL, timeout=10)
+        response = requests.get(Config.MANIFEST_URL, timeout=10)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -80,9 +77,9 @@ def install_toolchain(version: str | None = None) -> None:
 
     # Create Pooch instance
     base_path = version_info.get("assets_base_path_r2", "")
-    base_url = f"https://pub-48b75babc4664808b15520033423c765.r2.dev/{base_path}/"
+    base_url = f"{Config.R2_ASSETS_BASE_URL}/{base_path}/"
     pup = pooch.create(
-        path=LEAN_EXPLORE_DATA_CACHE / version,
+        path=Config.DATA_DIRECTORY / version,
         base_url=base_url,
         registry=registry,
     )
@@ -131,12 +128,12 @@ def fetch(
 @app.command("clean")
 def clean_data_toolchains() -> None:
     """Removes all downloaded local data toolchains."""
-    if not LEAN_EXPLORE_DATA_CACHE.exists():
+    if not Config.DATA_DIRECTORY.exists():
         console.print("[yellow]No local data found to clean.[/yellow]")
         return
 
     if typer.confirm("Delete all cached data?", default=False, abort=True):
-        shutil.rmtree(LEAN_EXPLORE_DATA_CACHE)
+        shutil.rmtree(Config.DATA_DIRECTORY)
         console.print("[green]Data cache cleared.[/green]")
 
 
