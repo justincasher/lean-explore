@@ -49,12 +49,6 @@ class Config:
     DATABASE_PATH: pathlib.Path = ACTIVE_TOOLCHAIN_DIRECTORY / "lean_explore_data.db"
     """Path to the SQLite database file for the active toolchain."""
 
-    FAISS_INDEX_PATH: pathlib.Path = ACTIVE_TOOLCHAIN_DIRECTORY / "main_faiss.index"
-    """Path to the FAISS vector index file for semantic search."""
-
-    FAISS_MAP_PATH: pathlib.Path = ACTIVE_TOOLCHAIN_DIRECTORY / "faiss_ids_map.json"
-    """Path to the JSON file mapping FAISS indices to document IDs."""
-
     DATABASE_URL: str = f"sqlite:///{DATABASE_PATH.resolve()}"
     """SQLAlchemy database URL for the active toolchain database."""
 
@@ -79,10 +73,4 @@ class Config:
     """Base URL for the LeanExplore remote API service.
 
     Used by the API client to make requests to the remote backend.
-    """
-
-    OPENROUTER_API_BASE_URL: str = "https://openrouter.ai/api/v1"
-    """Base URL for the OpenRouter API service.
-
-    Used by the OpenRouter client for LLM API requests.
     """

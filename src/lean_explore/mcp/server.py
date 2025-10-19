@@ -127,8 +127,6 @@ def main():
         # Pre-check for essential data files before initializing LocalService
         required_files_info = {
             "Database file": Config.DATABASE_PATH,
-            "FAISS index file": Config.FAISS_INDEX_PATH,
-            "FAISS ID map file": Config.FAISS_MAP_PATH,
         }
         missing_files_messages = []
         for name, path_obj in required_files_info.items():
