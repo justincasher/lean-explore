@@ -1,9 +1,7 @@
-# src/lean_explore/extract/models.py
-
-"""SQLAlchemy ORM models for doc-gen4 data extraction.
+"""SQLAlchemy ORM models for Lean declaration database.
 
 Simple schema for a Lean declaration search engine.
-Uses SQLAlchemy 2.0 syntax.
+Uses SQLAlchemy 2.0 syntax with pgvector for vector similarity search.
 """
 
 from pgvector.sqlalchemy import Vector

@@ -12,8 +12,7 @@ import pathlib
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from lean_explore.extract.schemas import Declaration
-from lean_explore.search.types import SearchResult
+from lean_explore.models import Declaration, SearchResult
 from lean_explore.util.embedding_client import EmbeddingClient
 
 logger = logging.getLogger(__name__)

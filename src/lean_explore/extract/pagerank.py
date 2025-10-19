@@ -14,7 +14,7 @@ from rich.progress import (
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from lean_explore.extract.schemas import Declaration
+from lean_explore.models import Declaration
 
 logger = logging.getLogger(__name__)
 

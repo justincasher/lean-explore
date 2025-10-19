@@ -7,7 +7,7 @@ from typing import Any
 from mcp.server.fastmcp import Context as MCPContext
 
 from lean_explore.mcp.app import AppContext, BackendServiceType, mcp_app
-from lean_explore.search.types import SearchResponse, SearchResult
+from lean_explore.models import SearchResponse, SearchResult
 
 logger = logging.getLogger(__name__)
 
