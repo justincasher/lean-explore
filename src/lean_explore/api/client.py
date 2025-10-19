@@ -1,10 +1,10 @@
 """Client for interacting with the remote Lean Explore API."""
 
+import os
+
 import httpx
 
-from lean_explore.search.types import SearchResponse, SearchResult
-
-_DEFAULT_API_BASE_URL = "https://www.leanexplore.com/api/v1"
+from lean_explore.models import SearchResponse, SearchResult
 
 
 class ApiClient:
@@ -14,15 +14,24 @@ class ApiClient:
     with an API key, and parsing responses into SearchResult objects.
     """
 
-    def __init__(self, api_key: str, timeout: float = 10.0):
+    def __init__(self, api_key: str | None = None, timeout: float = 10.0):
         """Initialize the API client.
 
         Args:
-            api_key: The API key for authentication.
+            api_key: The API key for authentication. If None, reads from
+                LEANEXPLORE_API_KEY environment variable.
             timeout: Default timeout for HTTP requests in seconds.
+
+        Raises:
+            ValueError: If no API key is provided and LEANEXPLORE_API_KEY is not set.
         """
-        self.base_url: str = _DEFAULT_API_BASE_URL
-        self.api_key: str = api_key
+        self.base_url: str = "https://www.leanexplore.com/api/v1"
+        self.api_key: str = api_key or os.getenv("LEANEXPLORE_API_KEY", "")
+        if not self.api_key:
+            raise ValueError(
+                "API key required. Pass api_key parameter or set LEANEXPLORE_API_KEY "
+                "environment variable."
+            )
         self.timeout: float = timeout
         self._headers: dict[str, str] = {"Authorization": f"Bearer {self.api_key}"}
 

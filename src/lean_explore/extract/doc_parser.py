@@ -12,8 +12,8 @@ from pathlib import Path
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from lean_explore.extract.schemas import Declaration as DBDeclaration
 from lean_explore.extract.types import Declaration
+from lean_explore.models import Declaration as DBDeclaration
 
 logger = logging.getLogger(__name__)
 

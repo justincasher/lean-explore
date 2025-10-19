@@ -6,16 +6,28 @@ for semantic search, combined with BM25 lexical matching and PageRank scoring.
 
 import asyncio
 import logging
+import os
+import pathlib
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from lean_explore import defaults
-from lean_explore.extract.schemas import Declaration
-from lean_explore.search.types import SearchResult
+from lean_explore.models import Declaration, SearchResult
 from lean_explore.util.embedding_client import EmbeddingClient
 
 logger = logging.getLogger(__name__)
+
+# Default database path and URL
+_USER_HOME_DIRECTORY = pathlib.Path(os.path.expanduser("~"))
+_DEFAULT_DATABASE_PATH = (
+    _USER_HOME_DIRECTORY
+    / ".lean_explore"
+    / "data"
+    / "toolchains"
+    / "0.2.0"
+    / "lean_explore_data.db"
+)
+DEFAULT_DATABASE_URL = f"sqlite:///{_DEFAULT_DATABASE_PATH.resolve()}"
 
 
 class SearchEngine:
@@ -38,7 +50,7 @@ class SearchEngine:
             embedding_client: Client for generating embeddings. Defaults to new client.
             embedding_model_name: Name of the embedding model to use.
         """
-        self.db_url = db_url or defaults.DEFAULT_DB_URL
+        self.db_url = db_url or DEFAULT_DATABASE_URL
         self.engine = create_engine(self.db_url)
         self.SessionLocal = sessionmaker(bind=self.engine)
         self.embedding_client = embedding_client or EmbeddingClient(

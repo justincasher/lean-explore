@@ -2,8 +2,8 @@
 
 import time
 
+from lean_explore.models import SearchResponse, SearchResult
 from lean_explore.search.engine import SearchEngine
-from lean_explore.search.types import SearchResponse, SearchResult
 
 
 class Service:
