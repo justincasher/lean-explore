@@ -46,11 +46,25 @@ class Config:
     )
     """Directory path for the active toolchain version's data files."""
 
-    DATABASE_PATH: pathlib.Path = ACTIVE_TOOLCHAIN_DIRECTORY / "lean_explore_data.db"
-    """Path to the SQLite database file for the active toolchain."""
+    DATABASE_URL: str = os.getenv(
+        "LEAN_EXPLORE_DATABASE_URL",
+        "postgresql+psycopg2://postgres:@localhost:5432/lean_explore",
+    )
+    """SQLAlchemy database URL for the active toolchain database.
 
-    DATABASE_URL: str = f"sqlite:///{DATABASE_PATH.resolve()}"
-    """SQLAlchemy database URL for the active toolchain database."""
+    Can be overridden with LEAN_EXPLORE_DATABASE_URL environment variable.
+    Default: postgresql+psycopg2://postgres:@localhost:5432/lean_explore
+    """
+
+    DATABASE_URL_ASYNC: str = os.getenv(
+        "LEAN_EXPLORE_DATABASE_URL_ASYNC",
+        "postgresql+asyncpg://postgres:@localhost:5432/lean_explore",
+    )
+    """Async SQLAlchemy database URL for the extract pipeline.
+
+    Can be overridden with LEAN_EXPLORE_DATABASE_URL_ASYNC environment variable.
+    Default: postgresql+asyncpg://postgres:@localhost:5432/lean_explore
+    """
 
     MANIFEST_URL: str = (
         "https://pub-48b75babc4664808b15520033423c765.r2.dev/manifest.json"
