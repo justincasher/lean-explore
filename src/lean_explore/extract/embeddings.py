@@ -17,7 +17,7 @@ from rich.progress import (
     TextColumn,
     TimeRemainingColumn,
 )
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from lean_explore.models import Declaration
@@ -65,101 +65,58 @@ async def _process_batch(
     Returns:
         Number of embeddings generated
     """
-    updates = {}
+    # Collect all texts that need embeddings
+    all_texts = []
+    # Track which declaration and field each text belongs to
+    text_metadata = []
 
-    # Collect texts that need embeddings
-    names = []
-    informalizations = []
-    sources = []
-    docstrings = []
-
-    name_indices = []
-    informalization_indices = []
-    source_indices = []
-    docstring_indices = []
-
-    for index, declaration in enumerate(declarations):
+    for declaration in declarations:
         if declaration.name_embedding is None:
-            names.append(declaration.name)
-            name_indices.append(index)
+            all_texts.append(declaration.name)
+            text_metadata.append((declaration, "name"))
+
         if (
             declaration.informalization
             and declaration.informalization_embedding is None
         ):
-            informalizations.append(declaration.informalization)
-            informalization_indices.append(index)
+            all_texts.append(declaration.informalization)
+            text_metadata.append((declaration, "informalization"))
+
         if declaration.source_text_embedding is None:
-            sources.append(declaration.source_text)
-            source_indices.append(index)
+            all_texts.append(declaration.source_text)
+            text_metadata.append((declaration, "source_text"))
+
         if declaration.docstring and declaration.docstring_embedding is None:
-            docstrings.append(declaration.docstring)
-            docstring_indices.append(index)
+            all_texts.append(declaration.docstring)
+            text_metadata.append((declaration, "docstring"))
 
-    # Generate embeddings
-    name_response = (
-        await client.embed(names) if names else None
-    )
-    informalization_response = (
-        await client.embed(informalizations) if informalizations else None
-    )
-    source_response = (
-        await client.embed(sources) if sources else None
-    )
-    docstring_response = (
-        await client.embed(docstrings) if docstrings else None
-    )
+    if not all_texts:
+        return 0
 
-    # Build updates
-    if name_response:
-        for index, embedding in zip(name_indices, name_response.embeddings):
-            declaration_id = declarations[index].id
-            if declaration_id not in updates:
-                updates[declaration_id] = {"id": declaration_id}
-            updates[declaration_id]["name_embedding"] = embedding
+    # Generate all embeddings in one call
+    response = await client.embed(all_texts)
 
-    if informalization_response:
-        for index, embedding in zip(
-            informalization_indices,
-            informalization_response.embeddings,
-        ):
-            declaration_id = declarations[index].id
-            if declaration_id not in updates:
-                updates[declaration_id] = {"id": declaration_id}
-            updates[declaration_id]["informalization_embedding"] = embedding
+    # Assign embeddings back to declarations
+    for (declaration, field_name), embedding in zip(text_metadata, response.embeddings):
+        if field_name == "name":
+            declaration.name_embedding = embedding
+        elif field_name == "informalization":
+            declaration.informalization_embedding = embedding
+        elif field_name == "source_text":
+            declaration.source_text_embedding = embedding
+        elif field_name == "docstring":
+            declaration.docstring_embedding = embedding
 
-    if source_response:
-        for index, embedding in zip(source_indices, source_response.embeddings):
-            declaration_id = declarations[index].id
-            if declaration_id not in updates:
-                updates[declaration_id] = {"id": declaration_id}
-            updates[declaration_id]["source_text_embedding"] = embedding
+    # Save to database
+    await session.commit()
 
-    if docstring_response:
-        for index, embedding in zip(docstring_indices, docstring_response.embeddings):
-            declaration_id = declarations[index].id
-            if declaration_id not in updates:
-                updates[declaration_id] = {"id": declaration_id}
-            updates[declaration_id]["docstring_embedding"] = embedding
-
-    # Apply updates
-    if updates:
-        await session.execute(update(Declaration), list(updates.values()))
-        await session.commit()
-
-    responses = [
-        name_response,
-        informalization_response,
-        source_response,
-        docstring_response,
-    ]
-    total = sum(len(response.embeddings) for response in responses if response)
-    return total
+    return len(all_texts)
 
 
 async def generate_embeddings(
     engine: AsyncEngine,
     model_name: str,
-    batch_size: int = 50,
+    batch_size: int = 250,
     limit: int | None = None,
 ) -> None:
     """Generate embeddings for all declarations.
@@ -167,7 +124,7 @@ async def generate_embeddings(
     Args:
         engine: Async database engine
         model_name: Name of the sentence transformer model to use
-        batch_size: Number of declarations to process in each batch
+        batch_size: Number of declarations to process in each batch (default 250)
         limit: Maximum number of declarations to process (None for all)
     """
     client = EmbeddingClient(model_name=model_name)
@@ -200,4 +157,6 @@ async def generate_embeddings(
                 total_embeddings += count
                 progress.update(task, advance=len(batch))
 
-        logger.info(f"Generated {total_embeddings} embeddings for {total} declarations")
+        logger.info(
+            f"Generated {total_embeddings} embeddings for {total} declarations"
+        )
