@@ -9,7 +9,6 @@ This module provides functions to coordinate the complete data extraction pipeli
 
 import logging
 import os
-import sys
 
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -18,18 +17,9 @@ from lean_explore.extract.embeddings import generate_embeddings
 from lean_explore.extract.informalize import informalize_declarations
 from lean_explore.extract.pagerank import calculate_pagerank
 from lean_explore.models import Base
+from lean_explore.util import setup_logging
 
 logger = logging.getLogger(__name__)
-
-
-def setup_logging(verbose: bool) -> None:
-    """Configure logging for the extraction pipeline."""
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
 
 
 async def create_database_schema(engine: AsyncEngine) -> None:

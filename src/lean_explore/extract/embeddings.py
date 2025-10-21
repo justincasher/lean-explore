@@ -21,7 +21,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from lean_explore.models import Declaration
-from lean_explore.util.embedding_client import EmbeddingClient
+from lean_explore.util import EmbeddingClient
 
 logger = logging.getLogger(__name__)
 
