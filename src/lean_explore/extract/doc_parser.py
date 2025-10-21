@@ -18,8 +18,9 @@ from lean_explore.models import Declaration as DBDeclaration
 logger = logging.getLogger(__name__)
 
 
-def _build_package_cache(lean_root: Path) -> dict[str, Path]:
+def _build_package_cache(lean_root: str | Path) -> dict[str, Path]:
     """Build a cache of package names to their actual directories."""
+    lean_root = Path(lean_root)
     cache = {}
     packages_dir = lean_root / ".lake" / "packages"
     if packages_dir.exists():
@@ -46,8 +47,9 @@ def _extract_dependencies_from_html(html: str) -> list[str]:
     return dependencies
 
 
-def _read_source_lines(file_path: Path, line_start: int, line_end: int) -> str:
+def _read_source_lines(file_path: str | Path, line_start: int, line_end: int) -> str:
     """Read specific lines from a source file."""
+    file_path = Path(file_path)
     with open(file_path, encoding="utf-8") as f:
         lines = f.readlines()
         if line_start <= len(lines) and line_end <= len(lines):
@@ -58,9 +60,10 @@ def _read_source_lines(file_path: Path, line_start: int, line_end: int) -> str:
 
 
 def _extract_source_text(
-    source_link: str, lean_root: Path, package_cache: dict[str, Path]
+    source_link: str, lean_root: str | Path, package_cache: dict[str, Path]
 ) -> str:
     """Extract source text from a Lean file given a GitHub source link."""
+    lean_root = Path(lean_root)
     match = re.search(
         r"github\.com/([^/]+)/([^/]+)/blob/[^/]+/(.+\.lean)#L(\d+)-L(\d+)",
         source_link,
