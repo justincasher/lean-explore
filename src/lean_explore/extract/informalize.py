@@ -19,7 +19,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from lean_explore.models import Declaration
 from lean_explore.util import OpenRouterClient
@@ -281,27 +281,3 @@ async def informalize_declarations(
             f"Informalization complete. Processed {processed}/"
             f"{len(declarations)} declarations"
         )
-
-
-async def main():
-    """Main entry point for running informalization."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-    )
-
-    # Example usage - you'll want to make these configurable
-    db_url = "postgresql+asyncpg://user:pass@localhost/lean_explore"
-    engine = create_async_engine(db_url, echo=False)
-
-    await informalize_declarations(
-        engine=engine,
-        model="anthropic/claude-3.5-sonnet",
-        batch_size=50,
-        max_concurrent=10,
-        limit=None,  # Set to a number for testing
-    )
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
