@@ -146,7 +146,7 @@ def _extract_source_text(
     )
 
 
-async def extract_declarations(engine: AsyncEngine) -> None:
+async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> None:
     """Extract all declarations from doc-gen4 data and load into database.
 
     Automatically finds the lean/.lake directory from the root.
@@ -154,6 +154,7 @@ async def extract_declarations(engine: AsyncEngine) -> None:
 
     Args:
         engine: SQLAlchemy async engine for database connection.
+        batch_size: Number of declarations to insert per database transaction.
     """
     lean_root = Path("lean")
     doc_data_dir = lean_root / ".lake" / "build" / "doc-data"
@@ -193,8 +194,6 @@ async def extract_declarations(engine: AsyncEngine) -> None:
                     dependencies=dependencies if dependencies else None,
                 )
             )
-
-    batch_size = 1000
     inserted_count = 0
     async with AsyncSession(engine) as session:
         async with session.begin():
