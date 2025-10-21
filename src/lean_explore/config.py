@@ -28,32 +28,47 @@ class Config:
     TOOLCHAINS_DIRECTORY: pathlib.Path = DATA_DIRECTORY / "toolchains"
     """Directory containing versioned data toolchains.
 
-    Each toolchain version has its own subdirectory containing database,
-    FAISS index, and other data files.
+    Each toolchain version has its own subdirectory containing databases
+    and other version-specific data files.
     """
 
-    ACTIVE_TOOLCHAIN_VERSION: str = os.getenv(
-        "LEAN_EXPLORE_TOOLCHAIN_VERSION", "0.2.0"
-    )
-    """Version identifier for the currently active data toolchain.
-
-    Can be overridden with LEAN_EXPLORE_TOOLCHAIN_VERSION environment variable.
-    Default: 0.2.0
-    """
+    ACTIVE_TOOLCHAIN_VERSION: str = "1.0.0"
+    """Version identifier for the currently active data toolchain."""
 
     ACTIVE_TOOLCHAIN_DIRECTORY: pathlib.Path = (
         TOOLCHAINS_DIRECTORY / ACTIVE_TOOLCHAIN_VERSION
     )
     """Directory path for the active toolchain version's data files."""
 
-    DATABASE_URL: str = os.getenv(
-        "LEAN_EXPLORE_DATABASE_URL",
-        "postgresql+asyncpg://postgres:@localhost:5432/lean_explore",
+    DEFAULT_LEAN_VERSION: str = os.getenv("LEAN_EXPLORE_LEAN_VERSION", "4.23.0")
+    """Default Lean version for database naming.
+
+    Can be overridden with LEAN_EXPLORE_LEAN_VERSION environment variable.
+    Default: 4.23.0
+    """
+
+    DB_BASE_URL: str = os.getenv(
+        "LEAN_EXPLORE_DB_BASE_URL",
+        "postgresql+asyncpg://postgres:@localhost:5432",
     )
+    """Base PostgreSQL connection URL without database name.
+
+    Can be overridden with LEAN_EXPLORE_DB_BASE_URL environment variable.
+    Default: postgresql+asyncpg://postgres:@localhost:5432
+    """
+
+    DATABASE_NAME: str = f"lean_explore_{DEFAULT_LEAN_VERSION}"
+    """Database name constructed from Lean version.
+
+    Format: lean_explore_{lean_version}
+    Example: lean_explore_4.23.0
+    """
+
+    DATABASE_URL: str = f"{DB_BASE_URL}/{DATABASE_NAME}"
     """Async SQLAlchemy database URL for PostgreSQL.
 
-    Can be overridden with LEAN_EXPLORE_DATABASE_URL environment variable.
-    Default: postgresql+asyncpg://postgres:@localhost:5432/lean_explore
+    Constructed from DB_BASE_URL and DATABASE_NAME.
+    Default: postgresql+asyncpg://postgres:@localhost:5432/lean_explore_{version}
     """
 
     MANIFEST_URL: str = (
