@@ -19,14 +19,49 @@ logger = logging.getLogger(__name__)
 
 
 def _build_package_cache(lean_root: str | Path) -> dict[str, Path]:
-    """Build a cache of package names to their actual directories."""
+    """Build a cache of package names to their actual directories.
+
+    Includes both Lake packages from .lake/packages and the Lean 4 toolchain
+    from the elan installation.
+
+    Args:
+        lean_root: Root directory of the Lean project.
+
+    Returns:
+        Dictionary mapping lowercase package names to their directory paths.
+
+    Example:
+        >>> cache = _build_package_cache("lean")
+        >>> cache
+        {"mathlib4": Path("lean/.lake/packages/mathlib4"),
+         "qq": Path("lean/.lake/packages/Qq"),
+         "lean4": Path("~/.elan/toolchains/leanprover--lean4---v4.23.0/src/lean")}
+    """
     lean_root = Path(lean_root)
     cache = {}
-    packages_dir = lean_root / ".lake" / "packages"
-    if packages_dir.exists():
-        for pkg_dir in packages_dir.iterdir():
-            if pkg_dir.is_dir():
-                cache[pkg_dir.name.lower()] = pkg_dir
+
+    # Add Lake packages from .lake/packages
+    packages_directory = lean_root / ".lake" / "packages"
+    if packages_directory.exists():
+        for package_directory in packages_directory.iterdir():
+            if package_directory.is_dir():
+                cache[package_directory.name.lower()] = package_directory
+
+    # Add Lean 4 toolchain package from elan
+    toolchain_file = lean_root / "lean-toolchain"
+    if toolchain_file.exists():
+        version = toolchain_file.read_text().strip().split(":")[-1]
+        toolchain_path = (
+            Path.home()
+            / ".elan"
+            / "toolchains"
+            / f"leanprover--lean4---{version}"
+            / "src"
+            / "lean"
+        )
+        if toolchain_path.exists():
+            cache["lean4"] = toolchain_path
+
     return cache
 
 
@@ -71,44 +106,35 @@ def _extract_source_text(
     if not match:
         raise ValueError(f"Could not parse source link: {source_link}")
 
-    org_name, package_name, file_path_str, line_start_str, line_end_str = match.groups()
-    line_start = int(line_start_str)
-    line_end = int(line_end_str)
+    (
+        organization_name,
+        package_name,
+        file_path_string,
+        line_start_string,
+        line_end_string,
+    ) = match.groups()
+    line_start = int(line_start_string)
+    line_end = int(line_end_string)
 
     # Build list of candidate paths to try
     candidates = []
 
-    # 1. Lean 4 toolchain (for leanprover/lean4)
-    if org_name == "leanprover" and package_name == "lean4":
-        toolchain_file = lean_root / "lean-toolchain"
-        if toolchain_file.exists():
-            version = toolchain_file.read_text().strip().split(":")[-1]
-            if file_path_str.startswith("src/"):
-                lean4_path = file_path_str[4:]
-            else:
-                lean4_path = file_path_str
-            toolchain_path = (
-                Path.home()
-                / ".elan"
-                / "toolchains"
-                / f"leanprover--lean4---{version}"
-                / "src"
-                / "lean"
-                / lean4_path
-            )
-            candidates.append(toolchain_path)
-
-    # 2. Package variations
+    # 1. Try package name variations in cache
     for variant in [
         package_name.lower(),
         package_name.rstrip("0123456789").lower(),
         package_name.replace("-", "").lower(),
     ]:
         if variant in package_cache:
-            candidates.append(package_cache[variant] / file_path_str)
+            # For lean4, strip "src/" prefix if present (already handled in cache path)
+            if variant == "lean4" and file_path_string.startswith("src/"):
+                adjusted_path = file_path_string[4:]
+            else:
+                adjusted_path = file_path_string
+            candidates.append(package_cache[variant] / adjusted_path)
 
-    # 3. Main source
-    candidates.append(lean_root / file_path_str)
+    # 2. Main source
+    candidates.append(lean_root / file_path_string)
 
     # Try each candidate
     for candidate in candidates:
@@ -116,37 +142,29 @@ def _extract_source_text(
             return _read_source_lines(candidate, line_start, line_end)
 
     # Last resort: search all packages
-    for pkg_dir in package_cache.values():
-        candidate = pkg_dir / file_path_str
+    for package_directory in package_cache.values():
+        candidate = package_directory / file_path_string
         if candidate.exists():
             return _read_source_lines(candidate, line_start, line_end)
 
     raise FileNotFoundError(
-        f"Could not find {file_path_str} for package {package_name}"
+        f"Could not find {file_path_string} for package {package_name}"
     )
 
 
-async def extract_declarations(engine: AsyncEngine) -> None:
-    """Extract all declarations from doc-gen4 data and load into database.
-
-    Automatically finds the lean/.lake directory from the root.
-    Extracts all declarations, then inserts them into the database.
+def _parse_declarations_from_files(
+    bmp_files: list[Path], lean_root: Path, package_cache: dict[str, Path]
+) -> list[Declaration]:
+    """Parse declarations from doc-gen4 BMP files.
 
     Args:
-        engine: SQLAlchemy async engine for database connection.
+        bmp_files: List of paths to BMP files containing declaration data.
+        lean_root: Root directory of the Lean project.
+        package_cache: Dictionary mapping package names to their directories.
+
+    Returns:
+        List of parsed Declaration objects.
     """
-    lean_root = Path("lean")
-    doc_data_dir = lean_root / ".lake" / "build" / "doc-data"
-
-    if not doc_data_dir.exists():
-        raise FileNotFoundError(f"Doc-data directory not found: {doc_data_dir}")
-
-    bmp_files = sorted(doc_data_dir.glob("**/*.bmp"))
-
-    # Build package cache once
-    package_cache = _build_package_cache(lean_root)
-    logger.info(f"Found {len(package_cache)} packages: {list(package_cache.keys())}")
-
     declarations = []
     for file_path in bmp_files:
         with open(file_path, encoding="utf-8") as f:
@@ -154,53 +172,104 @@ async def extract_declarations(engine: AsyncEngine) -> None:
 
         module_name = data["name"]
 
-        for decl_data in data.get("declarations", []):
-            info = decl_data["info"]
+        for declaration_data in data.get("declarations", []):
+            information = declaration_data["info"]
             source_text = _extract_source_text(
-                info["sourceLink"], lean_root, package_cache
+                information["sourceLink"], lean_root, package_cache
             )
 
-            header_html = decl_data.get("header", "")
+            header_html = declaration_data.get("header", "")
             dependencies = _extract_dependencies_from_html(header_html)
 
             declarations.append(
                 Declaration(
-                    name=info["name"],
+                    name=information["name"],
                     module=module_name,
-                    docstring=info.get("doc"),
+                    docstring=information.get("doc"),
                     source_text=source_text,
-                    source_link=info["sourceLink"],
+                    source_link=information["sourceLink"],
                     dependencies=dependencies if dependencies else None,
                 )
             )
+    return declarations
 
-    batch_size = 1000
+
+async def _insert_declarations_batch(
+    session: AsyncSession, declarations: list[Declaration], batch_size: int = 1000
+) -> int:
+    """Insert declarations into database in batches.
+
+    Args:
+        session: Active database session.
+        declarations: List of declarations to insert.
+        batch_size: Number of declarations to insert per batch.
+
+    Returns:
+        Number of declarations successfully inserted.
+    """
     inserted_count = 0
+    async with session.begin():
+        for i in range(0, len(declarations), batch_size):
+            batch = declarations[i : i + batch_size]
+
+            for declaration in batch:
+                dependencies_json = (
+                    json.dumps(declaration.dependencies)
+                    if declaration.dependencies
+                    else None
+                )
+                statement = (
+                    insert(DBDeclaration)
+                    .values(
+                        name=declaration.name,
+                        module=declaration.module,
+                        docstring=declaration.docstring,
+                        source_text=declaration.source_text,
+                        source_link=declaration.source_link,
+                        dependencies=dependencies_json,
+                    )
+                    .on_conflict_do_nothing(index_elements=["name"])
+                )
+
+                result = await session.execute(statement)
+                inserted_count += result.rowcount
+
+    return inserted_count
+
+
+async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> None:
+    """Extract all declarations from doc-gen4 data and load into database.
+
+    Automatically finds the lean/.lake directory from the root.
+    Extracts all declarations, then inserts them into the database.
+
+    Args:
+        engine: SQLAlchemy async engine for database connection.
+        batch_size: Number of declarations to insert per database transaction.
+    """
+    lean_root = Path("lean")
+    documentation_data_directory = lean_root / ".lake" / "build" / "doc-data"
+
+    if not documentation_data_directory.exists():
+        raise FileNotFoundError(
+            f"Doc-data directory not found: {documentation_data_directory}"
+        )
+
+    # Find all .bmp files (doc-gen4's JSON format, despite the extension)
+    bmp_files = sorted(documentation_data_directory.glob("**/*.bmp"))
+
+    # Build package cache once
+    package_cache = _build_package_cache(lean_root)
+    logger.info(f"Found {len(package_cache)} packages: {list(package_cache.keys())}")
+
+    # Parse all declarations from files
+    declarations = _parse_declarations_from_files(bmp_files, lean_root, package_cache)
+
+    # Insert declarations into database
     async with AsyncSession(engine) as session:
-        async with session.begin():
-            for i in range(0, len(declarations), batch_size):
-                batch = declarations[i : i + batch_size]
-
-                # Use INSERT ON CONFLICT to skip duplicates
-                for decl in batch:
-                    dependencies_json = (
-                        json.dumps(decl.dependencies) if decl.dependencies else None
-                    )
-                    stmt = (
-                        insert(DBDeclaration)
-                        .values(
-                            name=decl.name,
-                            module=decl.module,
-                            docstring=decl.docstring,
-                            source_text=decl.source_text,
-                            source_link=decl.source_link,
-                            dependencies=dependencies_json,
-                        )
-                        .on_conflict_do_nothing(index_elements=["name"])
-                    )
-
-                    result = await session.execute(stmt)
-                    inserted_count += result.rowcount
+        inserted_count = await _insert_declarations_batch(
+            session, declarations, batch_size
+        )
 
     skipped = len(declarations) - inserted_count
     logger.info(
