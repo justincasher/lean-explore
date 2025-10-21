@@ -4,11 +4,10 @@ This module provides the core search functionality using PostgreSQL with pgvecto
 for semantic search, combined with BM25 lexical matching and PageRank scoring.
 """
 
-import asyncio
 import logging
 
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from lean_explore.config import Config
 from lean_explore.models import Declaration, SearchResult
@@ -38,13 +37,12 @@ class SearchEngine:
             embedding_model_name: Name of the embedding model to use.
         """
         self.db_url = db_url or Config.DATABASE_URL
-        self.engine = create_engine(self.db_url)
-        self.SessionLocal = sessionmaker(bind=self.engine)
+        self.engine: AsyncEngine = create_async_engine(self.db_url)
         self.embedding_client = embedding_client or EmbeddingClient(
             model_name=embedding_model_name
         )
 
-    def search(
+    async def search(
         self,
         query: str,
         limit: int = 20,
@@ -64,9 +62,9 @@ class SearchEngine:
         Returns:
             List of SearchResult objects, ranked by combined score.
         """
-        with self.SessionLocal() as session:
-            # Generate query embedding (async)
-            embedding_response = asyncio.run(self.embedding_client.embed([query]))
+        async with AsyncSession(self.engine) as session:
+            # Generate query embedding
+            embedding_response = await self.embedding_client.embed([query])
             query_embedding = embedding_response.embeddings[0]
 
             # Perform vector similarity search
@@ -81,7 +79,8 @@ class SearchEngine:
                 .limit(limit * 3)
             )  # Get more candidates for reranking
 
-            candidates = session.execute(stmt).scalars().all()
+            result = await session.execute(stmt)
+            candidates = result.scalars().all()
 
             # Score and rank candidates
             scored_results = []
@@ -110,7 +109,7 @@ class SearchEngine:
             scored_results.sort(key=lambda x: x[1], reverse=True)
             return [self._to_search_result(decl) for decl, _ in scored_results[:limit]]
 
-    def get_by_id(self, declaration_id: int) -> SearchResult | None:
+    async def get_by_id(self, declaration_id: int) -> SearchResult | None:
         """Retrieve a declaration by ID.
 
         Args:
@@ -119,8 +118,8 @@ class SearchEngine:
         Returns:
             SearchResult if found, None otherwise.
         """
-        with self.SessionLocal() as session:
-            decl = session.get(Declaration, declaration_id)
+        async with AsyncSession(self.engine) as session:
+            decl = await session.get(Declaration, declaration_id)
             return self._to_search_result(decl) if decl else None
 
     def _compute_semantic_similarity(
