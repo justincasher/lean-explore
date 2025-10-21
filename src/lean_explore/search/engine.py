@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 
 from lean_explore.config import Config
 from lean_explore.models import Declaration, SearchResult
-from lean_explore.util.embedding_client import EmbeddingClient
+from lean_explore.util import EmbeddingClient
 
 logger = logging.getLogger(__name__)
 
