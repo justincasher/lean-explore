@@ -212,7 +212,6 @@ async def _insert_declarations_batch(
         for i in range(0, len(declarations), batch_size):
             batch = declarations[i : i + batch_size]
 
-            # Use INSERT ON CONFLICT to skip duplicates
             for declaration in batch:
                 dependencies_json = (
                     json.dumps(declaration.dependencies)
@@ -234,6 +233,7 @@ async def _insert_declarations_batch(
 
                 result = await session.execute(statement)
                 inserted_count += result.rowcount
+
     return inserted_count
 
 
@@ -255,6 +255,7 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
             f"Doc-data directory not found: {documentation_data_directory}"
         )
 
+    # Find all .bmp files (doc-gen4's JSON format, despite the extension)
     bmp_files = sorted(documentation_data_directory.glob("**/*.bmp"))
 
     # Build package cache once

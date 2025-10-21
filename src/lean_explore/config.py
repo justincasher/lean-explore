@@ -64,9 +64,7 @@ class Config:
     )
     """Remote URL for the data toolchain manifest."""
 
-    R2_ASSETS_BASE_URL: str = (
-        "https://pub-48b75babc4664808b15520033423c765.r2.dev"
-    )
+    R2_ASSETS_BASE_URL: str = "https://pub-48b75babc4664808b15520033423c765.r2.dev"
     """Base URL for Cloudflare R2 asset storage."""
 
     API_BASE_URL: str = "https://www.leanexplore.com/api/v1"
