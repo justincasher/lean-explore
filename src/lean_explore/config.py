@@ -48,21 +48,11 @@ class Config:
 
     DATABASE_URL: str = os.getenv(
         "LEAN_EXPLORE_DATABASE_URL",
-        "postgresql+psycopg2://postgres:@localhost:5432/lean_explore",
-    )
-    """SQLAlchemy database URL for the active toolchain database.
-
-    Can be overridden with LEAN_EXPLORE_DATABASE_URL environment variable.
-    Default: postgresql+psycopg2://postgres:@localhost:5432/lean_explore
-    """
-
-    DATABASE_URL_ASYNC: str = os.getenv(
-        "LEAN_EXPLORE_DATABASE_URL_ASYNC",
         "postgresql+asyncpg://postgres:@localhost:5432/lean_explore",
     )
-    """Async SQLAlchemy database URL for the extract pipeline.
+    """Async SQLAlchemy database URL for PostgreSQL.
 
-    Can be overridden with LEAN_EXPLORE_DATABASE_URL_ASYNC environment variable.
+    Can be overridden with LEAN_EXPLORE_DATABASE_URL environment variable.
     Default: postgresql+asyncpg://postgres:@localhost:5432/lean_explore
     """
 

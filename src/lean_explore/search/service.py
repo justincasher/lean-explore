@@ -20,7 +20,7 @@ class Service:
         """
         self.engine = engine or SearchEngine()
 
-    def search(
+    async def search(
         self,
         query: str,
         limit: int = 20,
@@ -42,7 +42,7 @@ class Service:
         """
         start_time = time.time()
 
-        results = self.engine.search(
+        results = await self.engine.search(
             query=query,
             limit=limit,
             semantic_weight=semantic_weight,
@@ -59,7 +59,7 @@ class Service:
             processing_time_ms=processing_time_ms,
         )
 
-    def get_by_id(self, declaration_id: int) -> SearchResult | None:
+    async def get_by_id(self, declaration_id: int) -> SearchResult | None:
         """Retrieve a declaration by ID.
 
         Args:
@@ -68,4 +68,4 @@ class Service:
         Returns:
             SearchResult if found, None otherwise.
         """
-        return self.engine.get_by_id(declaration_id)
+        return await self.engine.get_by_id(declaration_id)
