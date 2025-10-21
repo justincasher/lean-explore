@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.progress import (
@@ -25,6 +26,14 @@ from lean_explore.models import Declaration
 from lean_explore.util import OpenRouterClient
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class InformalizedDeclaration:
+    """A declaration with its informalization."""
+
+    name: str
+    informalization: str
 
 
 def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declaration]:
@@ -79,18 +88,23 @@ def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declar
     return result
 
 
-async def _load_existing_informalizations(session: AsyncSession) -> dict[str, str]:
+async def _load_existing_informalizations(
+    session: AsyncSession,
+) -> list[InformalizedDeclaration]:
     """Load all existing informalizations from the database."""
     logger.info("Loading existing informalizations...")
     stmt = select(Declaration).where(Declaration.informalization.isnot(None))
     result = await session.execute(stmt)
     declarations = result.scalars().all()
-    informalizations_map = {
-        declaration.name: declaration.informalization
+    informalizations = [
+        InformalizedDeclaration(
+            name=declaration.name,
+            informalization=declaration.informalization,
+        )
         for declaration in declarations
-    }
-    logger.info(f"Loaded {len(informalizations_map)} existing informalizations")
-    return informalizations_map
+    ]
+    logger.info(f"Loaded {len(informalizations)} existing informalizations")
+    return informalizations
 
 
 async def _get_declarations_to_process(
@@ -110,7 +124,7 @@ async def _process_one_declaration(
     client: OpenRouterClient,
     model: str,
     prompt_template: str,
-    informalizations_map: dict[str, str],
+    existing_informalizations: list[InformalizedDeclaration],
     semaphore: asyncio.Semaphore,
 ) -> tuple[int, str, str | None]:
     """Process a single declaration and generate its informalization.
@@ -120,7 +134,7 @@ async def _process_one_declaration(
         client: OpenRouter client
         model: Model name to use
         prompt_template: Prompt template string
-        informalizations_map: Map of existing informalizations
+        existing_informalizations: List of existing informalizations
         semaphore: Concurrency control semaphore
 
     Returns:
@@ -131,6 +145,11 @@ async def _process_one_declaration(
 
     async with semaphore:
         try:
+            # Build lookup map from list
+            informalizations_by_name = {
+                inf.name: inf.informalization for inf in existing_informalizations
+            }
+
             dependencies_text = ""
             if declaration.dependencies:
                 if isinstance(declaration.dependencies, str):
@@ -139,8 +158,8 @@ async def _process_one_declaration(
                     dependencies = declaration.dependencies
                 dependency_informalizations = []
                 for dependency_name in dependencies:
-                    if dependency_name in informalizations_map:
-                        informal_description = informalizations_map[dependency_name]
+                    if dependency_name in informalizations_by_name:
+                        informal_description = informalizations_by_name[dependency_name]
                         dependency_informalizations.append(
                             f"- {dependency_name}: {informal_description}"
                         )
@@ -183,7 +202,7 @@ async def _process_declarations_in_batches(
     client: OpenRouterClient,
     model: str,
     prompt_template: str,
-    informalizations_map: dict[str, str],
+    existing_informalizations: list[InformalizedDeclaration],
     semaphore: asyncio.Semaphore,
     batch_size: int,
 ) -> int:
@@ -213,7 +232,7 @@ async def _process_declarations_in_batches(
                     client=client,
                     model=model,
                     prompt_template=prompt_template,
-                    informalizations_map=informalizations_map,
+                    existing_informalizations=existing_informalizations,
                     semaphore=semaphore,
                 )
                 for declaration in chunk
@@ -225,7 +244,13 @@ async def _process_declarations_in_batches(
                     pending_updates.append(
                         {"id": declaration_id, "informalization": informalization}
                     )
-                    informalizations_map[declaration_name] = informalization
+                    # Add to existing informalizations list
+                    existing_informalizations.append(
+                        InformalizedDeclaration(
+                            name=declaration_name,
+                            informalization=informalization,
+                        )
+                    )
                 processed += 1
                 progress.update(task, advance=1)
 
@@ -241,7 +266,7 @@ async def _process_declarations_in_batches(
 async def informalize_declarations(
     engine: AsyncEngine,
     *,
-    model: str = "anthropic/claude-3.5-sonnet",
+    model: str = "google/gemini-2.5-flash",
     batch_size: int = 50,
     max_concurrent: int = 10,
     limit: int | None = None,
@@ -257,7 +282,7 @@ async def informalize_declarations(
     semaphore = asyncio.Semaphore(max_concurrent)
 
     async with AsyncSession(engine) as session:
-        informalizations_map = await _load_existing_informalizations(session)
+        existing_informalizations = await _load_existing_informalizations(session)
         declarations = await _get_declarations_to_process(session, limit)
 
         logger.info(f"Found {len(declarations)} declarations needing informalization")
@@ -275,7 +300,7 @@ async def informalize_declarations(
             client=client,
             model=model,
             prompt_template=prompt_template,
-            informalizations_map=informalizations_map,
+            existing_informalizations=existing_informalizations,
             semaphore=semaphore,
             batch_size=batch_size,
         )
