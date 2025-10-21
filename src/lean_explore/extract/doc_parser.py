@@ -152,30 +152,19 @@ def _extract_source_text(
     )
 
 
-async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> None:
-    """Extract all declarations from doc-gen4 data and load into database.
-
-    Automatically finds the lean/.lake directory from the root.
-    Extracts all declarations, then inserts them into the database.
+def _parse_declarations_from_files(
+    bmp_files: list[Path], lean_root: Path, package_cache: dict[str, Path]
+) -> list[Declaration]:
+    """Parse declarations from doc-gen4 BMP files.
 
     Args:
-        engine: SQLAlchemy async engine for database connection.
-        batch_size: Number of declarations to insert per database transaction.
+        bmp_files: List of paths to BMP files containing declaration data.
+        lean_root: Root directory of the Lean project.
+        package_cache: Dictionary mapping package names to their directories.
+
+    Returns:
+        List of parsed Declaration objects.
     """
-    lean_root = Path("lean")
-    documentation_data_directory = lean_root / ".lake" / "build" / "doc-data"
-
-    if not documentation_data_directory.exists():
-        raise FileNotFoundError(
-            f"Doc-data directory not found: {documentation_data_directory}"
-        )
-
-    bmp_files = sorted(documentation_data_directory.glob("**/*.bmp"))
-
-    # Build package cache once
-    package_cache = _build_package_cache(lean_root)
-    logger.info(f"Found {len(package_cache)} packages: {list(package_cache.keys())}")
-
     declarations = []
     for file_path in bmp_files:
         with open(file_path, encoding="utf-8") as f:
@@ -202,34 +191,84 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
                     dependencies=dependencies if dependencies else None,
                 )
             )
+    return declarations
+
+
+async def _insert_declarations_batch(
+    session: AsyncSession, declarations: list[Declaration], batch_size: int
+) -> int:
+    """Insert declarations into database in batches.
+
+    Args:
+        session: Active database session.
+        declarations: List of declarations to insert.
+        batch_size: Number of declarations to insert per batch.
+
+    Returns:
+        Number of declarations successfully inserted.
+    """
     inserted_count = 0
+    async with session.begin():
+        for i in range(0, len(declarations), batch_size):
+            batch = declarations[i : i + batch_size]
+
+            # Use INSERT ON CONFLICT to skip duplicates
+            for declaration in batch:
+                dependencies_json = (
+                    json.dumps(declaration.dependencies)
+                    if declaration.dependencies
+                    else None
+                )
+                statement = (
+                    insert(DBDeclaration)
+                    .values(
+                        name=declaration.name,
+                        module=declaration.module,
+                        docstring=declaration.docstring,
+                        source_text=declaration.source_text,
+                        source_link=declaration.source_link,
+                        dependencies=dependencies_json,
+                    )
+                    .on_conflict_do_nothing(index_elements=["name"])
+                )
+
+                result = await session.execute(statement)
+                inserted_count += result.rowcount
+    return inserted_count
+
+
+async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> None:
+    """Extract all declarations from doc-gen4 data and load into database.
+
+    Automatically finds the lean/.lake directory from the root.
+    Extracts all declarations, then inserts them into the database.
+
+    Args:
+        engine: SQLAlchemy async engine for database connection.
+        batch_size: Number of declarations to insert per database transaction.
+    """
+    lean_root = Path("lean")
+    documentation_data_directory = lean_root / ".lake" / "build" / "doc-data"
+
+    if not documentation_data_directory.exists():
+        raise FileNotFoundError(
+            f"Doc-data directory not found: {documentation_data_directory}"
+        )
+
+    bmp_files = sorted(documentation_data_directory.glob("**/*.bmp"))
+
+    # Build package cache once
+    package_cache = _build_package_cache(lean_root)
+    logger.info(f"Found {len(package_cache)} packages: {list(package_cache.keys())}")
+
+    # Parse all declarations from files
+    declarations = _parse_declarations_from_files(bmp_files, lean_root, package_cache)
+
+    # Insert declarations into database
     async with AsyncSession(engine) as session:
-        async with session.begin():
-            for i in range(0, len(declarations), batch_size):
-                batch = declarations[i : i + batch_size]
-
-                # Use INSERT ON CONFLICT to skip duplicates
-                for declaration in batch:
-                    dependencies_json = (
-                        json.dumps(declaration.dependencies)
-                        if declaration.dependencies
-                        else None
-                    )
-                    statement = (
-                        insert(DBDeclaration)
-                        .values(
-                            name=declaration.name,
-                            module=declaration.module,
-                            docstring=declaration.docstring,
-                            source_text=declaration.source_text,
-                            source_link=declaration.source_link,
-                            dependencies=dependencies_json,
-                        )
-                        .on_conflict_do_nothing(index_elements=["name"])
-                    )
-
-                    result = await session.execute(statement)
-                    inserted_count += result.rowcount
+        inserted_count = await _insert_declarations_batch(
+            session, declarations, batch_size
+        )
 
     skipped = len(declarations) - inserted_count
     logger.info(
