@@ -32,25 +32,27 @@ def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declar
 
     Returns declarations in topological order where dependencies come first.
     """
-    name_to_decl = {decl.name: decl for decl in declarations}
+    name_to_declaration = {
+        declaration.name: declaration for declaration in declarations
+    }
 
     graph = defaultdict(list)
     in_degree = defaultdict(int)
 
-    for decl in declarations:
-        in_degree[decl.name] = 0
+    for declaration in declarations:
+        in_degree[declaration.name] = 0
 
     # Build graph
-    for decl in declarations:
-        if decl.dependencies:
-            if isinstance(decl.dependencies, str):
-                deps = json.loads(decl.dependencies)
+    for declaration in declarations:
+        if declaration.dependencies:
+            if isinstance(declaration.dependencies, str):
+                dependencies = json.loads(declaration.dependencies)
             else:
-                deps = decl.dependencies
-            for dep_name in deps:
-                if dep_name in name_to_decl:
-                    graph[dep_name].append(decl.name)
-                    in_degree[decl.name] += 1
+                dependencies = declaration.dependencies
+            for dependency_name in dependencies:
+                if dependency_name in name_to_declaration:
+                    graph[dependency_name].append(declaration.name)
+                    in_degree[declaration.name] += 1
 
     # Kahn's algorithm for topological sort (automatically breaks cycles)
     queue = [name for name in in_degree if in_degree[name] == 0]
@@ -58,7 +60,7 @@ def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declar
 
     while queue:
         current = queue.pop(0)
-        result.append(name_to_decl[current])
+        result.append(name_to_declaration[current])
 
         for neighbor in graph[current]:
             in_degree[neighbor] -= 1
@@ -67,7 +69,7 @@ def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declar
 
     # If there are nodes with non-zero in-degree, we have cycles
     # Add them anyway (cycle is broken by arbitrary order)
-    remaining = [name_to_decl[name] for name in in_degree if in_degree[name] > 0]
+    remaining = [name_to_declaration[name] for name in in_degree if in_degree[name] > 0]
     if remaining:
         logger.warning(
             f"Found {len(remaining)} declarations in cycles, adding in arbitrary order"
@@ -82,8 +84,11 @@ async def _load_existing_informalizations(session: AsyncSession) -> dict[str, st
     logger.info("Loading existing informalizations...")
     stmt = select(Declaration).where(Declaration.informalization.isnot(None))
     result = await session.execute(stmt)
-    decls = result.scalars().all()
-    informalizations_map = {decl.name: decl.informalization for decl in decls}
+    declarations = result.scalars().all()
+    informalizations_map = {
+        declaration.name: declaration.informalization
+        for declaration in declarations
+    }
     logger.info(f"Loaded {len(informalizations_map)} existing informalizations")
     return informalizations_map
 
@@ -100,7 +105,7 @@ async def _get_declarations_to_process(
 
 
 async def _process_one_declaration(
-    decl: Declaration,
+    declaration: Declaration,
     client: OpenRouterClient,
     model: str,
     prompt_template: str,
@@ -110,7 +115,7 @@ async def _process_one_declaration(
     """Process a single declaration and generate its informalization.
 
     Args:
-        decl: Declaration to process
+        declaration: Declaration to process
         client: OpenRouter client
         model: Model name to use
         prompt_template: Prompt template string
@@ -120,30 +125,34 @@ async def _process_one_declaration(
     Returns:
         Tuple of (declaration_id, declaration_name, informalization)
     """
-    if decl.informalization is not None:
-        return decl.id, decl.name, None
+    if declaration.informalization is not None:
+        return declaration.id, declaration.name, None
 
     async with semaphore:
         try:
             dependencies_text = ""
-            if decl.dependencies:
-                if isinstance(decl.dependencies, str):
-                    deps = json.loads(decl.dependencies)
+            if declaration.dependencies:
+                if isinstance(declaration.dependencies, str):
+                    dependencies = json.loads(declaration.dependencies)
                 else:
-                    deps = decl.dependencies
-                dep_infos = []
-                for dep_name in deps:
-                    if dep_name in informalizations_map:
-                        informal_desc = informalizations_map[dep_name]
-                        dep_infos.append(f"- {dep_name}: {informal_desc}")
+                    dependencies = declaration.dependencies
+                dependency_informalizations = []
+                for dependency_name in dependencies:
+                    if dependency_name in informalizations_map:
+                        informal_description = informalizations_map[dependency_name]
+                        dependency_informalizations.append(
+                            f"- {dependency_name}: {informal_description}"
+                        )
 
-                if dep_infos:
-                    dependencies_text = "Dependencies:\n" + "\n".join(dep_infos)
+                if dependency_informalizations:
+                    dependencies_text = "Dependencies:\n" + "\n".join(
+                        dependency_informalizations
+                    )
 
             prompt = prompt_template.format(
-                name=decl.name,
-                source_text=decl.source_text,
-                docstring=decl.docstring or "No docstring available",
+                name=declaration.name,
+                source_text=declaration.source_text,
+                docstring=declaration.docstring or "No docstring available",
                 dependencies=dependencies_text,
             )
 
@@ -156,14 +165,14 @@ async def _process_one_declaration(
 
             if response.choices and response.choices[0].message.content:
                 result = response.choices[0].message.content.strip()
-                return decl.id, decl.name, result
+                return declaration.id, declaration.name, result
 
-            logger.warning(f"Empty response for declaration {decl.name}")
-            return decl.id, decl.name, None
+            logger.warning(f"Empty response for declaration {declaration.name}")
+            return declaration.id, declaration.name, None
 
         except Exception as e:
-            logger.error(f"Failed to informalize {decl.name}: {e}")
-            return decl.id, decl.name, None
+            logger.error(f"Failed to informalize {declaration.name}: {e}")
+            return declaration.id, declaration.name, None
 
 
 async def _process_declarations_in_batches(
@@ -198,23 +207,23 @@ async def _process_declarations_in_batches(
             chunk = declarations[i : i + batch_size]
             tasks = [
                 _process_one_declaration(
-                    decl,
+                    declaration,
                     client,
                     model,
                     prompt_template,
                     informalizations_map,
                     semaphore,
                 )
-                for decl in chunk
+                for declaration in chunk
             ]
             results = await asyncio.gather(*tasks)
 
-            for decl_id, decl_name, informalization in results:
+            for declaration_id, declaration_name, informalization in results:
                 if informalization:
                     pending_updates.append(
-                        {"id": decl_id, "informalization": informalization}
+                        {"id": declaration_id, "informalization": informalization}
                     )
-                    informalizations_map[decl_name] = informalization
+                    informalizations_map[declaration_name] = informalization
                 processed += 1
                 progress.update(task, advance=1)
 
