@@ -69,70 +69,89 @@ async def _process_batch(
 
     # Collect texts that need embeddings
     names = []
-    infos = []
+    informalizations = []
     sources = []
-    docs = []
+    docstrings = []
 
     name_indices = []
-    info_indices = []
+    informalization_indices = []
     source_indices = []
-    doc_indices = []
+    docstring_indices = []
 
-    for i, decl in enumerate(declarations):
-        if decl.name_embedding is None:
-            names.append(decl.name)
-            name_indices.append(i)
-        if decl.informalization and decl.informalization_embedding is None:
-            infos.append(decl.informalization)
-            info_indices.append(i)
-        if decl.source_text_embedding is None:
-            sources.append(decl.source_text)
-            source_indices.append(i)
-        if decl.docstring and decl.docstring_embedding is None:
-            docs.append(decl.docstring)
-            doc_indices.append(i)
+    for index, declaration in enumerate(declarations):
+        if declaration.name_embedding is None:
+            names.append(declaration.name)
+            name_indices.append(index)
+        if (
+            declaration.informalization
+            and declaration.informalization_embedding is None
+        ):
+            informalizations.append(declaration.informalization)
+            informalization_indices.append(index)
+        if declaration.source_text_embedding is None:
+            sources.append(declaration.source_text)
+            source_indices.append(index)
+        if declaration.docstring and declaration.docstring_embedding is None:
+            docstrings.append(declaration.docstring)
+            docstring_indices.append(index)
 
     # Generate embeddings
-    name_response = await client.embed(names) if names else None
-    info_response = await client.embed(infos) if infos else None
-    source_response = await client.embed(sources) if sources else None
-    doc_response = await client.embed(docs) if docs else None
+    name_response = (
+        await client.embed(names) if names else None
+    )
+    informalization_response = (
+        await client.embed(informalizations) if informalizations else None
+    )
+    source_response = (
+        await client.embed(sources) if sources else None
+    )
+    docstring_response = (
+        await client.embed(docstrings) if docstrings else None
+    )
 
     # Build updates
     if name_response:
-        for idx, emb in zip(name_indices, name_response.embeddings):
-            decl_id = declarations[idx].id
-            if decl_id not in updates:
-                updates[decl_id] = {"id": decl_id}
-            updates[decl_id]["name_embedding"] = emb
+        for index, embedding in zip(name_indices, name_response.embeddings):
+            declaration_id = declarations[index].id
+            if declaration_id not in updates:
+                updates[declaration_id] = {"id": declaration_id}
+            updates[declaration_id]["name_embedding"] = embedding
 
-    if info_response:
-        for idx, emb in zip(info_indices, info_response.embeddings):
-            decl_id = declarations[idx].id
-            if decl_id not in updates:
-                updates[decl_id] = {"id": decl_id}
-            updates[decl_id]["informalization_embedding"] = emb
+    if informalization_response:
+        for index, embedding in zip(
+            informalization_indices,
+            informalization_response.embeddings,
+        ):
+            declaration_id = declarations[index].id
+            if declaration_id not in updates:
+                updates[declaration_id] = {"id": declaration_id}
+            updates[declaration_id]["informalization_embedding"] = embedding
 
     if source_response:
-        for idx, emb in zip(source_indices, source_response.embeddings):
-            decl_id = declarations[idx].id
-            if decl_id not in updates:
-                updates[decl_id] = {"id": decl_id}
-            updates[decl_id]["source_text_embedding"] = emb
+        for index, embedding in zip(source_indices, source_response.embeddings):
+            declaration_id = declarations[index].id
+            if declaration_id not in updates:
+                updates[declaration_id] = {"id": declaration_id}
+            updates[declaration_id]["source_text_embedding"] = embedding
 
-    if doc_response:
-        for idx, emb in zip(doc_indices, doc_response.embeddings):
-            decl_id = declarations[idx].id
-            if decl_id not in updates:
-                updates[decl_id] = {"id": decl_id}
-            updates[decl_id]["docstring_embedding"] = emb
+    if docstring_response:
+        for index, embedding in zip(docstring_indices, docstring_response.embeddings):
+            declaration_id = declarations[index].id
+            if declaration_id not in updates:
+                updates[declaration_id] = {"id": declaration_id}
+            updates[declaration_id]["docstring_embedding"] = embedding
 
     # Apply updates
     if updates:
         await session.execute(update(Declaration), list(updates.values()))
         await session.commit()
 
-    responses = [name_response, info_response, source_response, doc_response]
+    responses = [
+        name_response,
+        informalization_response,
+        source_response,
+        docstring_response,
+    ]
     total = sum(len(response.embeddings) for response in responses if response)
     return total
 
