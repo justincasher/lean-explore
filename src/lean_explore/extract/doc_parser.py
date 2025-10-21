@@ -19,14 +19,49 @@ logger = logging.getLogger(__name__)
 
 
 def _build_package_cache(lean_root: str | Path) -> dict[str, Path]:
-    """Build a cache of package names to their actual directories."""
+    """Build a cache of package names to their actual directories.
+
+    Includes both Lake packages from .lake/packages and the Lean 4 toolchain
+    from the elan installation.
+
+    Args:
+        lean_root: Root directory of the Lean project.
+
+    Returns:
+        Dictionary mapping lowercase package names to their directory paths.
+
+    Example:
+        >>> cache = _build_package_cache("lean")
+        >>> cache
+        {"mathlib4": Path("lean/.lake/packages/mathlib4"),
+         "qq": Path("lean/.lake/packages/Qq"),
+         "lean4": Path("~/.elan/toolchains/leanprover--lean4---v4.23.0/src/lean")}
+    """
     lean_root = Path(lean_root)
     cache = {}
-    packages_dir = lean_root / ".lake" / "packages"
-    if packages_dir.exists():
-        for pkg_dir in packages_dir.iterdir():
-            if pkg_dir.is_dir():
-                cache[pkg_dir.name.lower()] = pkg_dir
+
+    # Add Lake packages from .lake/packages
+    packages_directory = lean_root / ".lake" / "packages"
+    if packages_directory.exists():
+        for package_directory in packages_directory.iterdir():
+            if package_directory.is_dir():
+                cache[package_directory.name.lower()] = package_directory
+
+    # Add Lean 4 toolchain package from elan
+    toolchain_file = lean_root / "lean-toolchain"
+    if toolchain_file.exists():
+        version = toolchain_file.read_text().strip().split(":")[-1]
+        toolchain_path = (
+            Path.home()
+            / ".elan"
+            / "toolchains"
+            / f"leanprover--lean4---{version}"
+            / "src"
+            / "lean"
+        )
+        if toolchain_path.exists():
+            cache["lean4"] = toolchain_path
+
     return cache
 
 
@@ -78,36 +113,21 @@ def _extract_source_text(
     # Build list of candidate paths to try
     candidates = []
 
-    # 1. Lean 4 toolchain (for leanprover/lean4)
-    if org_name == "leanprover" and package_name == "lean4":
-        toolchain_file = lean_root / "lean-toolchain"
-        if toolchain_file.exists():
-            version = toolchain_file.read_text().strip().split(":")[-1]
-            if file_path_str.startswith("src/"):
-                lean4_path = file_path_str[4:]
-            else:
-                lean4_path = file_path_str
-            toolchain_path = (
-                Path.home()
-                / ".elan"
-                / "toolchains"
-                / f"leanprover--lean4---{version}"
-                / "src"
-                / "lean"
-                / lean4_path
-            )
-            candidates.append(toolchain_path)
-
-    # 2. Package variations
+    # 1. Try package name variations in cache
     for variant in [
         package_name.lower(),
         package_name.rstrip("0123456789").lower(),
         package_name.replace("-", "").lower(),
     ]:
         if variant in package_cache:
-            candidates.append(package_cache[variant] / file_path_str)
+            # For lean4, strip "src/" prefix if present (already handled in cache path)
+            if variant == "lean4" and file_path_str.startswith("src/"):
+                adjusted_path = file_path_str[4:]
+            else:
+                adjusted_path = file_path_str
+            candidates.append(package_cache[variant] / adjusted_path)
 
-    # 3. Main source
+    # 2. Main source
     candidates.append(lean_root / file_path_str)
 
     # Try each candidate
@@ -116,8 +136,8 @@ def _extract_source_text(
             return _read_source_lines(candidate, line_start, line_end)
 
     # Last resort: search all packages
-    for pkg_dir in package_cache.values():
-        candidate = pkg_dir / file_path_str
+    for package_directory in package_cache.values():
+        candidate = package_directory / file_path_str
         if candidate.exists():
             return _read_source_lines(candidate, line_start, line_end)
 
