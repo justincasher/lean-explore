@@ -106,9 +106,15 @@ def _extract_source_text(
     if not match:
         raise ValueError(f"Could not parse source link: {source_link}")
 
-    org_name, package_name, file_path_str, line_start_str, line_end_str = match.groups()
-    line_start = int(line_start_str)
-    line_end = int(line_end_str)
+    (
+        organization_name,
+        package_name,
+        file_path_string,
+        line_start_string,
+        line_end_string,
+    ) = match.groups()
+    line_start = int(line_start_string)
+    line_end = int(line_end_string)
 
     # Build list of candidate paths to try
     candidates = []
@@ -121,14 +127,14 @@ def _extract_source_text(
     ]:
         if variant in package_cache:
             # For lean4, strip "src/" prefix if present (already handled in cache path)
-            if variant == "lean4" and file_path_str.startswith("src/"):
-                adjusted_path = file_path_str[4:]
+            if variant == "lean4" and file_path_string.startswith("src/"):
+                adjusted_path = file_path_string[4:]
             else:
-                adjusted_path = file_path_str
+                adjusted_path = file_path_string
             candidates.append(package_cache[variant] / adjusted_path)
 
     # 2. Main source
-    candidates.append(lean_root / file_path_str)
+    candidates.append(lean_root / file_path_string)
 
     # Try each candidate
     for candidate in candidates:
@@ -137,12 +143,12 @@ def _extract_source_text(
 
     # Last resort: search all packages
     for package_directory in package_cache.values():
-        candidate = package_directory / file_path_str
+        candidate = package_directory / file_path_string
         if candidate.exists():
             return _read_source_lines(candidate, line_start, line_end)
 
     raise FileNotFoundError(
-        f"Could not find {file_path_str} for package {package_name}"
+        f"Could not find {file_path_string} for package {package_name}"
     )
 
 
@@ -157,12 +163,14 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
         batch_size: Number of declarations to insert per database transaction.
     """
     lean_root = Path("lean")
-    doc_data_dir = lean_root / ".lake" / "build" / "doc-data"
+    documentation_data_directory = lean_root / ".lake" / "build" / "doc-data"
 
-    if not doc_data_dir.exists():
-        raise FileNotFoundError(f"Doc-data directory not found: {doc_data_dir}")
+    if not documentation_data_directory.exists():
+        raise FileNotFoundError(
+            f"Doc-data directory not found: {documentation_data_directory}"
+        )
 
-    bmp_files = sorted(doc_data_dir.glob("**/*.bmp"))
+    bmp_files = sorted(documentation_data_directory.glob("**/*.bmp"))
 
     # Build package cache once
     package_cache = _build_package_cache(lean_root)
@@ -175,22 +183,22 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
 
         module_name = data["name"]
 
-        for decl_data in data.get("declarations", []):
-            info = decl_data["info"]
+        for declaration_data in data.get("declarations", []):
+            information = declaration_data["info"]
             source_text = _extract_source_text(
-                info["sourceLink"], lean_root, package_cache
+                information["sourceLink"], lean_root, package_cache
             )
 
-            header_html = decl_data.get("header", "")
+            header_html = declaration_data.get("header", "")
             dependencies = _extract_dependencies_from_html(header_html)
 
             declarations.append(
                 Declaration(
-                    name=info["name"],
+                    name=information["name"],
                     module=module_name,
-                    docstring=info.get("doc"),
+                    docstring=information.get("doc"),
                     source_text=source_text,
-                    source_link=info["sourceLink"],
+                    source_link=information["sourceLink"],
                     dependencies=dependencies if dependencies else None,
                 )
             )
@@ -201,24 +209,26 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
                 batch = declarations[i : i + batch_size]
 
                 # Use INSERT ON CONFLICT to skip duplicates
-                for decl in batch:
+                for declaration in batch:
                     dependencies_json = (
-                        json.dumps(decl.dependencies) if decl.dependencies else None
+                        json.dumps(declaration.dependencies)
+                        if declaration.dependencies
+                        else None
                     )
-                    stmt = (
+                    statement = (
                         insert(DBDeclaration)
                         .values(
-                            name=decl.name,
-                            module=decl.module,
-                            docstring=decl.docstring,
-                            source_text=decl.source_text,
-                            source_link=decl.source_link,
+                            name=declaration.name,
+                            module=declaration.module,
+                            docstring=declaration.docstring,
+                            source_text=declaration.source_text,
+                            source_link=declaration.source_link,
                             dependencies=dependencies_json,
                         )
                         .on_conflict_do_nothing(index_elements=["name"])
                     )
 
-                    result = await session.execute(stmt)
+                    result = await session.execute(statement)
                     inserted_count += result.rowcount
 
     skipped = len(declarations) - inserted_count
