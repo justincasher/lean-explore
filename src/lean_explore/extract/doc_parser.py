@@ -195,7 +195,7 @@ def _parse_declarations_from_files(
 
 
 async def _insert_declarations_batch(
-    session: AsyncSession, declarations: list[Declaration], batch_size: int
+    session: AsyncSession, declarations: list[Declaration], batch_size: int = 1000
 ) -> int:
     """Insert declarations into database in batches.
 
