@@ -105,6 +105,7 @@ async def _get_declarations_to_process(
 
 
 async def _process_one_declaration(
+    *,
     declaration: Declaration,
     client: OpenRouterClient,
     model: str,
@@ -176,6 +177,7 @@ async def _process_one_declaration(
 
 
 async def _process_declarations_in_batches(
+    *,
     session: AsyncSession,
     declarations: list[Declaration],
     client: OpenRouterClient,
@@ -207,12 +209,12 @@ async def _process_declarations_in_batches(
             chunk = declarations[i : i + batch_size]
             tasks = [
                 _process_one_declaration(
-                    declaration,
-                    client,
-                    model,
-                    prompt_template,
-                    informalizations_map,
-                    semaphore,
+                    declaration=declaration,
+                    client=client,
+                    model=model,
+                    prompt_template=prompt_template,
+                    informalizations_map=informalizations_map,
+                    semaphore=semaphore,
                 )
                 for declaration in chunk
             ]
@@ -238,6 +240,7 @@ async def _process_declarations_in_batches(
 
 async def informalize_declarations(
     engine: AsyncEngine,
+    *,
     model: str = "anthropic/claude-3.5-sonnet",
     batch_size: int = 50,
     max_concurrent: int = 10,
@@ -267,14 +270,14 @@ async def informalize_declarations(
         logger.info("Dependency order established")
 
         processed = await _process_declarations_in_batches(
-            session,
-            declarations,
-            client,
-            model,
-            prompt_template,
-            informalizations_map,
-            semaphore,
-            batch_size,
+            session=session,
+            declarations=declarations,
+            client=client,
+            model=model,
+            prompt_template=prompt_template,
+            informalizations_map=informalizations_map,
+            semaphore=semaphore,
+            batch_size=batch_size,
         )
 
         logger.info(
