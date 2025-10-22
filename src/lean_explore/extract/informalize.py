@@ -7,7 +7,7 @@ an LLM via OpenRouter, and updates the informalization field.
 import asyncio
 import json
 import logging
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,11 +64,11 @@ def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declar
                     in_degree[declaration.name] += 1
 
     # Kahn's algorithm for topological sort (automatically breaks cycles)
-    queue = [name for name in in_degree if in_degree[name] == 0]
+    queue = deque(name for name in in_degree if in_degree[name] == 0)
     result = []
 
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         result.append(name_to_declaration[current])
 
         for neighbor in graph[current]:
