@@ -29,14 +29,6 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class InformalizedDeclaration:
-    """A declaration with its informalization."""
-
-    name: str
-    informalization: str
-
-
-@dataclass
 class InformalizationResult:
     """Result of processing a single declaration."""
 
@@ -111,15 +103,16 @@ def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declar
 
 async def _load_existing_informalizations(
     session: AsyncSession,
-) -> list[InformalizedDeclaration]:
+) -> list[InformalizationResult]:
     """Load all existing informalizations from the database."""
     logger.info("Loading existing informalizations...")
     stmt = select(Declaration).where(Declaration.informalization.isnot(None))
     result = await session.execute(stmt)
     declarations = result.scalars().all()
     informalizations = [
-        InformalizedDeclaration(
-            name=declaration.name,
+        InformalizationResult(
+            declaration_id=declaration.id,
+            declaration_name=declaration.name,
             informalization=declaration.informalization,
         )
         for declaration in declarations
@@ -230,7 +223,7 @@ async def _process_declarations_in_batches(
     client: OpenRouterClient,
     model: str,
     prompt_template: str,
-    existing_informalizations: list[InformalizedDeclaration],
+    existing_informalizations: list[InformalizationResult],
     semaphore: asyncio.Semaphore,
     batch_size: int,
 ) -> int:
@@ -245,7 +238,9 @@ async def _process_declarations_in_batches(
 
     # Build lookup map once
     informalizations_by_name = {
-        inf.name: inf.informalization for inf in existing_informalizations
+        inf.declaration_name: inf.informalization
+        for inf in existing_informalizations
+        if inf.informalization is not None
     }
 
     with Progress(
