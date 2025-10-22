@@ -197,7 +197,6 @@ async def _process_one_declaration(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=500,
             )
 
             if response.choices and response.choices[0].message.content:
