@@ -32,17 +32,14 @@ async def _build_dependency_graph(session: AsyncSession) -> nx.DiGraph:
     result = await session.execute(stmt)
     declarations = list(result.all())
 
-    # Build name to ID mapping
     name_to_id = {
         declaration.name: declaration.id for declaration in declarations
     }
 
-    # Build graph
     graph = nx.DiGraph()
     for declaration in declarations:
         graph.add_node(declaration.id)
 
-    # Add edges
     for declaration in declarations:
         if declaration.dependencies:
             if isinstance(declaration.dependencies, str):
@@ -51,7 +48,6 @@ async def _build_dependency_graph(session: AsyncSession) -> nx.DiGraph:
                 dependencies = declaration.dependencies
             for dependency_name in dependencies:
                 if dependency_name in name_to_id:
-                    # Edge from dependent to dependency
                     graph.add_edge(declaration.id, name_to_id[dependency_name])
 
     logger.info(
@@ -77,18 +73,15 @@ async def calculate_pagerank(
     logger.info(f"Starting PageRank calculation with alpha={alpha}")
 
     async with AsyncSession(engine) as session:
-        # Build dependency graph
         graph = await _build_dependency_graph(session)
 
         if graph.number_of_nodes() == 0:
             logger.warning("No declarations found, skipping PageRank")
             return
 
-        # Calculate PageRank scores
         logger.info("Calculating PageRank scores...")
         scores = nx.pagerank(graph, alpha=alpha, max_iter=1000, tol=1e-8)
 
-        # Update database in batches
         logger.info(f"Updating {len(scores)} PageRank scores in database...")
         updates = []
 
@@ -109,7 +102,6 @@ async def calculate_pagerank(
                     progress.update(task, advance=len(updates))
                     updates.clear()
 
-            # Commit remaining updates
             if updates:
                 await session.execute(update(Declaration), updates)
                 await session.commit()
