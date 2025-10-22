@@ -36,6 +36,22 @@ class InformalizedDeclaration:
     informalization: str
 
 
+def _parse_dependencies(dependencies: str | list[str] | None) -> list[str]:
+    """Parse dependencies field which may be JSON string or list.
+
+    Args:
+        dependencies: Dependencies as JSON string, list, or None
+
+    Returns:
+        List of dependency names
+    """
+    if not dependencies:
+        return []
+    if isinstance(dependencies, str):
+        return json.loads(dependencies)
+    return dependencies
+
+
 def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declaration]:
     """Build processing order, breaking cycles by removing edges.
 
@@ -53,15 +69,11 @@ def _find_cycles_and_build_order(declarations: list[Declaration]) -> list[Declar
 
     # Build graph
     for declaration in declarations:
-        if declaration.dependencies:
-            if isinstance(declaration.dependencies, str):
-                dependencies = json.loads(declaration.dependencies)
-            else:
-                dependencies = declaration.dependencies
-            for dependency_name in dependencies:
-                if dependency_name in name_to_declaration:
-                    graph[dependency_name].append(declaration.name)
-                    in_degree[declaration.name] += 1
+        dependencies = _parse_dependencies(declaration.dependencies)
+        for dependency_name in dependencies:
+            if dependency_name in name_to_declaration:
+                graph[dependency_name].append(declaration.name)
+                in_degree[declaration.name] += 1
 
     # Kahn's algorithm for topological sort (automatically breaks cycles)
     queue = deque(name for name in in_degree if in_degree[name] == 0)
@@ -146,11 +158,8 @@ async def _process_one_declaration(
     async with semaphore:
         try:
             dependencies_text = ""
-            if declaration.dependencies:
-                if isinstance(declaration.dependencies, str):
-                    dependencies = json.loads(declaration.dependencies)
-                else:
-                    dependencies = declaration.dependencies
+            dependencies = _parse_dependencies(declaration.dependencies)
+            if dependencies:
                 dependency_informalizations = []
                 for dependency_name in dependencies:
                     if dependency_name in informalizations_by_name:
