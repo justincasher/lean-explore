@@ -255,7 +255,7 @@ async def _process_declarations_in_batches(
                     )
                     # Add to lookup map for subsequent declarations
                     informalizations_by_name[declaration_name] = informalization
-                processed += 1
+                    processed += 1
                 progress.update(task, advance=1)
 
             if pending_updates:
