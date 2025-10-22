@@ -124,7 +124,7 @@ async def _process_one_declaration(
     client: OpenRouterClient,
     model: str,
     prompt_template: str,
-    existing_informalizations: list[InformalizedDeclaration],
+    informalizations_by_name: dict[str, str],
     semaphore: asyncio.Semaphore,
 ) -> tuple[int, str, str | None]:
     """Process a single declaration and generate its informalization.
@@ -134,7 +134,7 @@ async def _process_one_declaration(
         client: OpenRouter client
         model: Model name to use
         prompt_template: Prompt template string
-        existing_informalizations: List of existing informalizations
+        informalizations_by_name: Map of declaration names to informalizations
         semaphore: Concurrency control semaphore
 
     Returns:
@@ -145,11 +145,6 @@ async def _process_one_declaration(
 
     async with semaphore:
         try:
-            # Build lookup map from list
-            informalizations_by_name = {
-                inf.name: inf.informalization for inf in existing_informalizations
-            }
-
             dependencies_text = ""
             if declaration.dependencies:
                 if isinstance(declaration.dependencies, str):
@@ -215,6 +210,11 @@ async def _process_declarations_in_batches(
     processed = 0
     pending_updates = []
 
+    # Build lookup map once
+    informalizations_by_name = {
+        inf.name: inf.informalization for inf in existing_informalizations
+    }
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -232,7 +232,7 @@ async def _process_declarations_in_batches(
                     client=client,
                     model=model,
                     prompt_template=prompt_template,
-                    existing_informalizations=existing_informalizations,
+                    informalizations_by_name=informalizations_by_name,
                     semaphore=semaphore,
                 )
                 for declaration in chunk
@@ -244,13 +244,8 @@ async def _process_declarations_in_batches(
                     pending_updates.append(
                         {"id": declaration_id, "informalization": informalization}
                     )
-                    # Add to existing informalizations list
-                    existing_informalizations.append(
-                        InformalizedDeclaration(
-                            name=declaration_name,
-                            informalization=informalization,
-                        )
-                    )
+                    # Add to lookup map for subsequent declarations
+                    informalizations_by_name[declaration_name] = informalization
                 processed += 1
                 progress.update(task, advance=1)
 
