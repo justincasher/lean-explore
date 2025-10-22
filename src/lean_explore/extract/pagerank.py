@@ -63,6 +63,7 @@ async def _build_dependency_graph(session: AsyncSession) -> nx.DiGraph:
 
 async def calculate_pagerank(
     engine: AsyncEngine,
+    *,
     alpha: float = 0.85,
     batch_size: int = 1000,
 ) -> None:
