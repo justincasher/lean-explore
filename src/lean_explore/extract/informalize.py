@@ -36,6 +36,15 @@ class InformalizedDeclaration:
     informalization: str
 
 
+@dataclass
+class InformalizationResult:
+    """Result of processing a single declaration."""
+
+    declaration_id: int
+    declaration_name: str
+    informalization: str | None
+
+
 def _parse_dependencies(dependencies: str | list[str] | None) -> list[str]:
     """Parse dependencies field which may be JSON string or list.
 
@@ -138,7 +147,7 @@ async def _process_one_declaration(
     prompt_template: str,
     informalizations_by_name: dict[str, str],
     semaphore: asyncio.Semaphore,
-) -> tuple[int, str, str | None]:
+) -> InformalizationResult:
     """Process a single declaration and generate its informalization.
 
     Args:
@@ -150,10 +159,14 @@ async def _process_one_declaration(
         semaphore: Concurrency control semaphore
 
     Returns:
-        Tuple of (declaration_id, declaration_name, informalization)
+        InformalizationResult with declaration info and generated informalization
     """
     if declaration.informalization is not None:
-        return declaration.id, declaration.name, None
+        return InformalizationResult(
+            declaration_id=declaration.id,
+            declaration_name=declaration.name,
+            informalization=None,
+        )
 
     async with semaphore:
         try:
@@ -189,14 +202,26 @@ async def _process_one_declaration(
 
             if response.choices and response.choices[0].message.content:
                 result = response.choices[0].message.content.strip()
-                return declaration.id, declaration.name, result
+                return InformalizationResult(
+                    declaration_id=declaration.id,
+                    declaration_name=declaration.name,
+                    informalization=result,
+                )
 
             logger.warning(f"Empty response for declaration {declaration.name}")
-            return declaration.id, declaration.name, None
+            return InformalizationResult(
+                declaration_id=declaration.id,
+                declaration_name=declaration.name,
+                informalization=None,
+            )
 
         except Exception as e:
             logger.error(f"Failed to informalize {declaration.name}: {e}")
-            return declaration.id, declaration.name, None
+            return InformalizationResult(
+                declaration_id=declaration.id,
+                declaration_name=declaration.name,
+                informalization=None,
+            )
 
 
 async def _process_declarations_in_batches(
@@ -248,13 +273,18 @@ async def _process_declarations_in_batches(
             ]
             results = await asyncio.gather(*tasks)
 
-            for declaration_id, declaration_name, informalization in results:
-                if informalization:
+            for result in results:
+                if result.informalization:
                     pending_updates.append(
-                        {"id": declaration_id, "informalization": informalization}
+                        {
+                            "id": result.declaration_id,
+                            "informalization": result.informalization,
+                        }
                     )
                     # Add to lookup map for subsequent declarations
-                    informalizations_by_name[declaration_name] = informalization
+                    informalizations_by_name[result.declaration_name] = (
+                        result.informalization
+                    )
                     processed += 1
                 progress.update(task, advance=1)
 
