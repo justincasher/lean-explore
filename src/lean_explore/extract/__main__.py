@@ -11,6 +11,7 @@ import asyncio
 import importlib
 import logging
 import os
+import subprocess
 
 import click
 from sqlalchemy import text
@@ -80,21 +81,24 @@ async def create_database_schema(engine: AsyncEngine) -> None:
 async def run_doc_gen4_step() -> None:
     """Run doc-gen4 to generate documentation data."""
     logger.info("Running doc-gen4 to generate documentation...")
-    import subprocess
 
-    result = subprocess.run(
-        ["lake", "build", "extractor:docs"],
+    process = subprocess.Popen(
+        ["lake", "build", "Mathlib:docs"],
         cwd="lean",
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
+        bufsize=1,
     )
 
-    if result.returncode != 0:
-        logger.error(f"doc-gen4 failed with return code {result.returncode}")
-        if result.stdout:
-            logger.error(f"STDOUT:\n{result.stdout}")
-        if result.stderr:
-            logger.error(f"STDERR:\n{result.stderr}")
+    if process.stdout:
+        for line in process.stdout:
+            print(line, end="", flush=True)
+
+    returncode = process.wait()
+
+    if returncode != 0:
+        logger.error(f"doc-gen4 failed with return code {returncode}")
         raise RuntimeError("doc-gen4 generation failed")
 
     logger.info("doc-gen4 generation complete")
