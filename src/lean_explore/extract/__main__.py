@@ -88,14 +88,13 @@ async def run_pipeline(
     steps: str = "all",
     pagerank_alpha: float = 0.85,
     pagerank_batch_size: int = 1000,
-    informalize_model: str = "anthropic/claude-3.5-sonnet",
-    informalize_batch_size: int = 50,
+    informalize_model: str = "google/gemini-2.5-flash",
+    informalize_batch_size: int = 1000,
     informalize_max_concurrent: int = 10,
     informalize_limit: int | None = None,
     embedding_model: str = "BAAI/bge-base-en-v1.5",
-    embedding_batch_size: int = 50,
+    embedding_batch_size: int = 250,
     embedding_limit: int | None = None,
-    skip_schema_creation: bool = False,
     verbose: bool = False,
 ) -> None:
     """Run the Lean declaration extraction and enrichment pipeline.
@@ -107,13 +106,12 @@ async def run_pipeline(
         pagerank_alpha: PageRank damping parameter
         pagerank_batch_size: Batch size for PageRank updates
         informalize_model: LLM model for generating informalizations
-        informalize_batch_size: Batch size for informalization
+        informalize_batch_size: Commit batch size for informalization
         informalize_max_concurrent: Maximum concurrent informalization requests
         informalize_limit: Limit number of declarations to informalize
         embedding_model: Sentence transformer model for embeddings
         embedding_batch_size: Batch size for embedding generation
         embedding_limit: Limit number of declarations for embeddings
-        skip_schema_creation: Skip database schema creation
         verbose: Enable verbose logging
     """
     setup_logging(verbose)
@@ -136,9 +134,8 @@ async def run_pipeline(
     engine = create_async_engine(database_url, echo=verbose)
 
     try:
-        # Create schema if needed
-        if not skip_schema_creation:
-            await create_database_schema(engine)
+        # Create schema (idempotent - only creates if doesn't exist)
+        await create_database_schema(engine)
 
         # Determine which steps to run
         run_all = "all" in step_list
@@ -208,18 +205,12 @@ async def run_pipeline(
     default=None,
     help="Limit number of declarations for embeddings (for testing)",
 )
-@click.option(
-    "--skip-schema-creation",
-    is_flag=True,
-    help="Skip database schema creation",
-)
 @click.option("--verbose", is_flag=True, help="Enable verbose logging")
 def main(
     database_url: str,
     steps: str,
     informalize_limit: int | None,
     embedding_limit: int | None,
-    skip_schema_creation: bool,
     verbose: bool,
 ) -> None:
     """Run the Lean declaration extraction and enrichment pipeline."""
@@ -229,7 +220,6 @@ def main(
             steps=steps,
             informalize_limit=informalize_limit,
             embedding_limit=embedding_limit,
-            skip_schema_creation=skip_schema_creation,
             verbose=verbose,
         )
     )
