@@ -239,31 +239,44 @@ async def _insert_declarations_batch(
         Number of declarations successfully inserted.
     """
     inserted_count = 0
-    async with session.begin():
-        for i in range(0, len(declarations), batch_size):
-            batch = declarations[i : i + batch_size]
 
-            for declaration in batch:
-                dependencies_json = (
-                    json.dumps(declaration.dependencies)
-                    if declaration.dependencies
-                    else None
-                )
-                statement = (
-                    insert(DBDeclaration)
-                    .values(
-                        name=declaration.name,
-                        module=declaration.module,
-                        docstring=declaration.docstring,
-                        source_text=declaration.source_text,
-                        source_link=declaration.source_link,
-                        dependencies=dependencies_json,
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+    ) as progress:
+        task = progress.add_task(
+            "[green]Inserting declarations into database...",
+            total=len(declarations),
+        )
+
+        async with session.begin():
+            for i in range(0, len(declarations), batch_size):
+                batch = declarations[i : i + batch_size]
+
+                for declaration in batch:
+                    dependencies_json = (
+                        json.dumps(declaration.dependencies)
+                        if declaration.dependencies
+                        else None
                     )
-                    .on_conflict_do_nothing(index_elements=["name"])
-                )
+                    statement = (
+                        insert(DBDeclaration)
+                        .values(
+                            name=declaration.name,
+                            module=declaration.module,
+                            docstring=declaration.docstring,
+                            source_text=declaration.source_text,
+                            source_link=declaration.source_link,
+                            dependencies=dependencies_json,
+                        )
+                        .on_conflict_do_nothing(index_elements=["name"])
+                    )
 
-                result = await session.execute(statement)
-                inserted_count += result.rowcount
+                    result = await session.execute(statement)
+                    inserted_count += result.rowcount
+                    progress.update(task, advance=1)
 
     return inserted_count
 
