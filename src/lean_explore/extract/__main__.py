@@ -11,7 +11,9 @@ import asyncio
 import importlib
 import logging
 import os
+import shutil
 import subprocess
+from pathlib import Path
 
 import click
 from sqlalchemy import text
@@ -81,6 +83,14 @@ async def create_database_schema(engine: AsyncEngine) -> None:
 async def run_doc_gen4_step() -> None:
     """Run doc-gen4 to generate documentation data."""
     logger.info("Running doc-gen4 to generate documentation...")
+
+    # Clean up old build artifacts to prevent version conflicts
+    build_directory = Path("lean") / ".lake" / "build"
+    for artifact_directory in ["doc", "doc-data"]:
+        artifact_path = build_directory / artifact_directory
+        if artifact_path.exists():
+            logger.info(f"Removing old build artifacts from {artifact_path}")
+            shutil.rmtree(artifact_path)
 
     process = subprocess.Popen(
         ["lake", "build", "LeanExtract:docs"],
