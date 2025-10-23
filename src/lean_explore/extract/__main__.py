@@ -196,46 +196,17 @@ async def run_pipeline(
         "'embeddings', or comma-separated list"
     ),
 )
-@click.option("--pagerank-alpha", default=0.85, help="PageRank damping parameter")
-@click.option(
-    "--pagerank-batch-size", default=1000, help="Batch size for PageRank updates"
-)
-@click.option(
-    "--informalize-model",
-    default="google/gemini-2.5-flash",
-    help="LLM model for generating informalizations",
-)
-@click.option(
-    "--informalize-commit-batch-size",
-    default=1000,
-    help="Commit batch size for informalization",
-)
-@click.option(
-    "--informalize-max-concurrent",
-    default=10,
-    help="Maximum concurrent informalization requests",
-)
 @click.option(
     "--informalize-limit",
     type=int,
     default=None,
-    help="Limit number of declarations to informalize",
-)
-@click.option(
-    "--embedding-model",
-    default="BAAI/bge-base-en-v1.5",
-    help="Sentence transformer model for embeddings",
-)
-@click.option(
-    "--embedding-batch-size",
-    default=250,
-    help="Batch size for embedding generation",
+    help="Limit number of declarations to informalize (for testing)",
 )
 @click.option(
     "--embedding-limit",
     type=int,
     default=None,
-    help="Limit number of declarations for embeddings",
+    help="Limit number of declarations for embeddings (for testing)",
 )
 @click.option(
     "--skip-schema-creation",
@@ -246,14 +217,7 @@ async def run_pipeline(
 def main(
     database_url: str,
     steps: str,
-    pagerank_alpha: float,
-    pagerank_batch_size: int,
-    informalize_model: str,
-    informalize_commit_batch_size: int,
-    informalize_max_concurrent: int,
     informalize_limit: int | None,
-    embedding_model: str,
-    embedding_batch_size: int,
     embedding_limit: int | None,
     skip_schema_creation: bool,
     verbose: bool,
@@ -263,14 +227,7 @@ def main(
         run_pipeline(
             database_url=database_url,
             steps=steps,
-            pagerank_alpha=pagerank_alpha,
-            pagerank_batch_size=pagerank_batch_size,
-            informalize_model=informalize_model,
-            informalize_batch_size=informalize_commit_batch_size,
-            informalize_max_concurrent=informalize_max_concurrent,
             informalize_limit=informalize_limit,
-            embedding_model=embedding_model,
-            embedding_batch_size=embedding_batch_size,
             embedding_limit=embedding_limit,
             skip_schema_creation=skip_schema_creation,
             verbose=verbose,
