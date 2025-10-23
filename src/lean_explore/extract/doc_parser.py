@@ -15,6 +15,7 @@ from rich.progress import (
     SpinnerColumn,
     TaskProgressColumn,
     TextColumn,
+    TimeRemainingColumn,
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -180,6 +181,7 @@ def _parse_declarations_from_files(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TaskProgressColumn(),
+        TimeRemainingColumn(),
     ) as progress:
         task = progress.add_task("[cyan]Parsing BMP files...", total=len(bmp_files))
 
@@ -245,6 +247,7 @@ async def _insert_declarations_batch(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TaskProgressColumn(),
+        TimeRemainingColumn(),
     ) as progress:
         task = progress.add_task(
             "[green]Inserting declarations into database...",
