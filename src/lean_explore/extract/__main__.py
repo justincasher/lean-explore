@@ -8,12 +8,15 @@ This module provides functions to coordinate the complete data extraction pipeli
 """
 
 import asyncio
+import importlib
 import logging
 import os
 
 import click
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+import lean_explore.config
+from lean_explore.config import Config
 from lean_explore.extract.doc_parser import extract_declarations
 from lean_explore.extract.embeddings import generate_embeddings
 from lean_explore.extract.informalize import informalize_declarations
@@ -180,10 +183,12 @@ async def run_pipeline(
 
 @click.command()
 @click.option(
-    "--database-url",
-    required=True,
-    envvar="DATABASE_URL",
-    help="PostgreSQL database URL (e.g., postgresql+asyncpg://user:pass@host/db)",
+    "--lean-version",
+    envvar="LEAN_EXPLORE_LEAN_VERSION",
+    help=(
+        "Lean version for database (e.g., 4.23.0). "
+        "Uses config default if not specified."
+    ),
 )
 @click.option(
     "--steps",
@@ -207,13 +212,24 @@ async def run_pipeline(
 )
 @click.option("--verbose", is_flag=True, help="Enable verbose logging")
 def main(
-    database_url: str,
+    lean_version: str | None,
     steps: str,
     informalize_limit: int | None,
     embedding_limit: int | None,
     verbose: bool,
 ) -> None:
     """Run the Lean declaration extraction and enrichment pipeline."""
+    # Set the Lean version environment variable if provided
+    if lean_version:
+        os.environ["LEAN_EXPLORE_LEAN_VERSION"] = lean_version
+        # Reload config to pick up the new version
+        importlib.reload(lean_explore.config)
+        from lean_explore.config import Config as ReloadedConfig
+
+        database_url = ReloadedConfig.DATABASE_URL
+    else:
+        database_url = Config.DATABASE_URL
+
     asyncio.run(
         run_pipeline(
             database_url=database_url,
