@@ -36,12 +36,8 @@ class Config:
     )
     """Directory for the active toolchain version's data files."""
 
-    DEFAULT_LEAN_VERSION: str = os.getenv("LEAN_EXPLORE_LEAN_VERSION", "4.24.0")
-    """Default Lean version for database naming.
-
-    Can be overridden with LEAN_EXPLORE_LEAN_VERSION environment variable.
-    Default: 4.24.0
-    """
+    DEFAULT_LEAN_VERSION: str = "4.24.0"
+    """Lean version for database naming and dependency resolution."""
 
     DB_BASE_URL: str = os.getenv(
         "LEAN_EXPLORE_DB_BASE_URL",
