@@ -192,10 +192,26 @@ async def run_pipeline(
     ),
 )
 @click.option(
+    "--informalize-model",
+    default="google/gemini-2.5-flash",
+    help="LLM model for generating informalizations",
+)
+@click.option(
+    "--informalize-max-concurrent",
+    type=int,
+    default=10,
+    help="Maximum concurrent informalization requests",
+)
+@click.option(
     "--informalize-limit",
     type=int,
     default=None,
     help="Limit number of declarations to informalize (for testing)",
+)
+@click.option(
+    "--embedding-model",
+    default="BAAI/bge-base-en-v1.5",
+    help="Sentence transformer model for embeddings",
 )
 @click.option(
     "--embedding-limit",
@@ -207,7 +223,10 @@ async def run_pipeline(
 def main(
     lean_version: str | None,
     steps: str,
+    informalize_model: str,
+    informalize_max_concurrent: int,
     informalize_limit: int | None,
+    embedding_model: str,
     embedding_limit: int | None,
     verbose: bool,
 ) -> None:
@@ -225,7 +244,10 @@ def main(
         run_pipeline(
             database_url=database_url,
             steps=steps,
+            informalize_model=informalize_model,
+            informalize_max_concurrent=informalize_max_concurrent,
             informalize_limit=informalize_limit,
+            embedding_model=embedding_model,
             embedding_limit=embedding_limit,
             verbose=verbose,
         )
