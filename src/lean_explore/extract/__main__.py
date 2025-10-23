@@ -83,7 +83,7 @@ async def run_doc_gen4_step() -> None:
     logger.info("Running doc-gen4 to generate documentation...")
 
     process = subprocess.Popen(
-        ["lake", "build", "Mathlib:docs"],
+        ["lake", "build", "LeanExtract:docs"],
         cwd="lean",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
