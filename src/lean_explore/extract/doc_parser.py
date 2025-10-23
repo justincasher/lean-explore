@@ -9,6 +9,13 @@ import logging
 import re
 from pathlib import Path
 
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -167,39 +174,54 @@ def _parse_declarations_from_files(
         List of parsed Declaration objects.
     """
     declarations = []
-    for file_path in bmp_files:
-        with open(file_path, encoding="utf-8") as f:
-            data = json.load(f)
 
-        module_name = data["name"]
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+    ) as progress:
+        task = progress.add_task("[cyan]Parsing BMP files...", total=len(bmp_files))
 
-        # Extract top-level package name from module
-        # Module names look like "Mathlib.Data.List" or "Init.Core" or "Lean.Meta"
-        top_level_module = module_name.split(".")[0]
+        for file_path in bmp_files:
+            with open(file_path, encoding="utf-8") as f:
+                data = json.load(f)
 
-        # Skip if this module is not from an allowed package
-        if top_level_module.lower() not in {p.lower() for p in Config.EXTRACT_PACKAGES}:
-            continue
+            module_name = data["name"]
 
-        for declaration_data in data.get("declarations", []):
-            information = declaration_data["info"]
-            source_text = _extract_source_text(
-                information["sourceLink"], lean_root, package_cache
-            )
+            # Extract top-level package name from module
+            # Module names look like "Mathlib.Data.List" or "Init.Core" or "Lean.Meta"
+            top_level_module = module_name.split(".")[0]
 
-            header_html = declaration_data.get("header", "")
-            dependencies = _extract_dependencies_from_html(header_html)
+            # Skip if this module is not from an allowed package
+            if top_level_module.lower() not in {
+                p.lower() for p in Config.EXTRACT_PACKAGES
+            }:
+                progress.update(task, advance=1)
+                continue
 
-            declarations.append(
-                Declaration(
-                    name=information["name"],
-                    module=module_name,
-                    docstring=information.get("doc"),
-                    source_text=source_text,
-                    source_link=information["sourceLink"],
-                    dependencies=dependencies if dependencies else None,
+            for declaration_data in data.get("declarations", []):
+                information = declaration_data["info"]
+                source_text = _extract_source_text(
+                    information["sourceLink"], lean_root, package_cache
                 )
-            )
+
+                header_html = declaration_data.get("header", "")
+                dependencies = _extract_dependencies_from_html(header_html)
+
+                declarations.append(
+                    Declaration(
+                        name=information["name"],
+                        module=module_name,
+                        docstring=information.get("doc"),
+                        source_text=source_text,
+                        source_link=information["sourceLink"],
+                        dependencies=dependencies if dependencies else None,
+                    )
+                )
+
+            progress.update(task, advance=1)
+
     return declarations
 
 
@@ -273,6 +295,7 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
 
     # Parse all declarations from files
     declarations = _parse_declarations_from_files(bmp_files, lean_root, package_cache)
+    logger.info(f"Found {len(declarations)} declarations from allowed packages")
 
     # Insert declarations into database
     async with AsyncSession(engine) as session:

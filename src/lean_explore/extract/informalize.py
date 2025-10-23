@@ -99,9 +99,7 @@ def _build_dependency_layers(
 
     # If there are nodes with non-zero in-degree, we have cycles
     # Add them as a final layer (cycle is broken by arbitrary order)
-    remaining = [
-        name_to_declaration[name] for name in in_degree if in_degree[name] > 0
-    ]
+    remaining = [name_to_declaration[name] for name in in_degree if in_degree[name] > 0]
     if remaining:
         logger.warning(
             f"Found {len(remaining)} declarations in cycles, adding as final layer"
@@ -283,9 +281,7 @@ async def _process_layer(
                 }
             )
             # Add to lookup map immediately for use in next layer
-            informalizations_by_name[result.declaration_name] = (
-                result.informalization
-            )
+            informalizations_by_name[result.declaration_name] = result.informalization
             processed += 1
 
         progress.update(task, advance=1)
