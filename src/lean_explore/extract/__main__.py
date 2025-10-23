@@ -13,6 +13,7 @@ import logging
 import os
 
 import click
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 import lean_explore.config
@@ -35,6 +36,8 @@ async def create_database_schema(engine: AsyncEngine) -> None:
     """
     logger.info("Creating database schema...")
     async with engine.begin() as connection:
+        # Enable pgvector extension for vector similarity search
+        await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await connection.run_sync(Base.metadata.create_all)
     logger.info("Database schema created successfully")
 
@@ -88,7 +91,10 @@ async def run_embeddings_step(
 
 async def run_pipeline(
     database_url: str,
-    steps: str = "all",
+    parse_docs: bool = True,
+    pagerank: bool = True,
+    informalize: bool = True,
+    embeddings: bool = True,
     pagerank_alpha: float = 0.85,
     pagerank_batch_size: int = 1000,
     informalize_model: str = "google/gemini-2.5-flash",
@@ -104,8 +110,10 @@ async def run_pipeline(
 
     Args:
         database_url: PostgreSQL database URL (e.g., postgresql+asyncpg://user:pass@host/db)
-        steps: Steps to run - 'all', 'extract', 'pagerank', 'informalize', 'embeddings',
-            or comma-separated list
+        parse_docs: Run doc-gen4 parsing step
+        pagerank: Run PageRank calculation step
+        informalize: Run informalization step
+        embeddings: Run embeddings generation step
         pagerank_alpha: PageRank damping parameter
         pagerank_batch_size: Batch size for PageRank updates
         informalize_model: LLM model for generating informalizations
@@ -120,8 +128,7 @@ async def run_pipeline(
     setup_logging(verbose)
 
     # Validate OpenRouter API key if informalization is needed
-    step_list = [s.strip().lower() for s in steps.split(",")]
-    if "all" in step_list or "informalize" in step_list:
+    if informalize:
         if not os.getenv("OPENROUTER_API_KEY"):
             logger.error(
                 "OPENROUTER_API_KEY environment variable is required for "
@@ -129,28 +136,32 @@ async def run_pipeline(
             )
             raise RuntimeError("OPENROUTER_API_KEY not set")
 
+    steps_enabled = []
+    if parse_docs:
+        steps_enabled.append("parse-docs")
+    if pagerank:
+        steps_enabled.append("pagerank")
+    if informalize:
+        steps_enabled.append("informalize")
+    if embeddings:
+        steps_enabled.append("embeddings")
+
     logger.info("Starting Lean Explore extraction pipeline")
     logger.info(f"Database URL: {database_url}")
-    logger.info(f"Steps to run: {steps}")
+    logger.info(f"Steps to run: {', '.join(steps_enabled)}")
 
     engine = create_async_engine(database_url, echo=verbose)
 
     try:
         await create_database_schema(engine)
 
-        run_all = "all" in step_list
-        run_extract = run_all or "extract" in step_list
-        run_pagerank = run_all or "pagerank" in step_list
-        run_informalize = run_all or "informalize" in step_list
-        run_embeddings = run_all or "embeddings" in step_list
-
-        if run_extract:
+        if parse_docs:
             await run_extract_step(engine)
 
-        if run_pagerank:
+        if pagerank:
             await run_pagerank_step(engine, pagerank_alpha, pagerank_batch_size)
 
-        if run_informalize:
+        if informalize:
             await run_informalize_step(
                 engine,
                 informalize_model,
@@ -159,7 +170,7 @@ async def run_pipeline(
                 informalize_limit,
             )
 
-        if run_embeddings:
+        if embeddings:
             await run_embeddings_step(
                 engine, embedding_model, embedding_batch_size, embedding_limit
             )
@@ -184,12 +195,24 @@ async def run_pipeline(
     ),
 )
 @click.option(
-    "--steps",
-    default="all",
-    help=(
-        "Steps to run: 'all', 'extract', 'pagerank', 'informalize', "
-        "'embeddings', or comma-separated list"
-    ),
+    "--parse-docs/--no-parse-docs",
+    default=None,
+    help="Run doc-gen4 parsing step",
+)
+@click.option(
+    "--pagerank/--no-pagerank",
+    default=None,
+    help="Run PageRank calculation step",
+)
+@click.option(
+    "--informalize/--no-informalize",
+    default=None,
+    help="Run informalization step",
+)
+@click.option(
+    "--embeddings/--no-embeddings",
+    default=None,
+    help="Run embeddings generation step",
 )
 @click.option(
     "--informalize-model",
@@ -222,7 +245,10 @@ async def run_pipeline(
 @click.option("--verbose", is_flag=True, help="Enable verbose logging")
 def main(
     lean_version: str | None,
-    steps: str,
+    parse_docs: bool | None,
+    pagerank: bool | None,
+    informalize: bool | None,
+    embeddings: bool | None,
     informalize_model: str,
     informalize_max_concurrent: int,
     informalize_limit: int | None,
@@ -231,6 +257,20 @@ def main(
     verbose: bool,
 ) -> None:
     """Run the Lean declaration extraction and enrichment pipeline."""
+    # Determine if any step flags were explicitly set
+    step_flags = [parse_docs, pagerank, informalize, embeddings]
+    any_step_explicitly_set = any(flag is not None for flag in step_flags)
+
+    # If no steps were explicitly set, run all by default
+    # Otherwise, only run explicitly enabled steps (default unset to False)
+    if not any_step_explicitly_set:
+        parse_docs = pagerank = informalize = embeddings = True
+    else:
+        parse_docs = parse_docs if parse_docs is not None else False
+        pagerank = pagerank if pagerank is not None else False
+        informalize = informalize if informalize is not None else False
+        embeddings = embeddings if embeddings is not None else False
+
     if lean_version:
         os.environ["LEAN_EXPLORE_LEAN_VERSION"] = lean_version
         importlib.reload(lean_explore.config)
@@ -243,7 +283,10 @@ def main(
     asyncio.run(
         run_pipeline(
             database_url=database_url,
-            steps=steps,
+            parse_docs=parse_docs,
+            pagerank=pagerank,
+            informalize=informalize,
+            embeddings=embeddings,
             informalize_model=informalize_model,
             informalize_max_concurrent=informalize_max_concurrent,
             informalize_limit=informalize_limit,

@@ -45,12 +45,13 @@ class Config:
 
     DB_BASE_URL: str = os.getenv(
         "LEAN_EXPLORE_DB_BASE_URL",
-        "postgresql+asyncpg://postgres:@localhost:5432",
+        "postgresql+asyncpg://localhost:5432",
     )
     """Base PostgreSQL connection URL without database name.
 
     Can be overridden with LEAN_EXPLORE_DB_BASE_URL environment variable.
-    Default: postgresql+asyncpg://postgres:@localhost:5432
+    Default: postgresql+asyncpg://localhost:5432
+    PostgreSQL will use the current system user when no username is specified.
     """
 
     DATABASE_NAME: str = f"lean_explore_{DEFAULT_LEAN_VERSION}"
@@ -58,6 +59,16 @@ class Config:
 
     DATABASE_URL: str = f"{DB_BASE_URL}/{DATABASE_NAME}"
     """Async SQLAlchemy database URL constructed from DB_BASE_URL and DATABASE_NAME."""
+
+    EXTRACT_PACKAGES: set[str] = {
+        "batteries",
+        "init",
+        "lean4",
+        "mathlib",
+        "physlean",
+        "std",
+    }
+    """Set of package names to extract from doc-gen4 output."""
 
     MANIFEST_URL: str = (
         "https://pub-48b75babc4664808b15520033423c765.r2.dev/manifest.json"

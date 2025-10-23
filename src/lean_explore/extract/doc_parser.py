@@ -12,6 +12,7 @@ from pathlib import Path
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from lean_explore.config import Config
 from lean_explore.extract.types import Declaration
 from lean_explore.models import Declaration as DBDeclaration
 
@@ -171,6 +172,14 @@ def _parse_declarations_from_files(
             data = json.load(f)
 
         module_name = data["name"]
+
+        # Extract top-level package name from module
+        # Module names look like "Mathlib.Data.List" or "Init.Core" or "Lean.Meta"
+        top_level_module = module_name.split(".")[0]
+
+        # Skip if this module is not from an allowed package
+        if top_level_module.lower() not in {p.lower() for p in Config.EXTRACT_PACKAGES}:
+            continue
 
         for declaration_data in data.get("declarations", []):
             information = declaration_data["info"]
