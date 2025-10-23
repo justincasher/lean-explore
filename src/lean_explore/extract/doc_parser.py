@@ -9,9 +9,18 @@ import logging
 import re
 from pathlib import Path
 
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from lean_explore.config import Config
 from lean_explore.extract.types import Declaration
 from lean_explore.models import Declaration as DBDeclaration
 
@@ -166,31 +175,55 @@ def _parse_declarations_from_files(
         List of parsed Declaration objects.
     """
     declarations = []
-    for file_path in bmp_files:
-        with open(file_path, encoding="utf-8") as f:
-            data = json.load(f)
 
-        module_name = data["name"]
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+    ) as progress:
+        task = progress.add_task("[cyan]Parsing BMP files...", total=len(bmp_files))
 
-        for declaration_data in data.get("declarations", []):
-            information = declaration_data["info"]
-            source_text = _extract_source_text(
-                information["sourceLink"], lean_root, package_cache
-            )
+        for file_path in bmp_files:
+            with open(file_path, encoding="utf-8") as f:
+                data = json.load(f)
 
-            header_html = declaration_data.get("header", "")
-            dependencies = _extract_dependencies_from_html(header_html)
+            module_name = data["name"]
 
-            declarations.append(
-                Declaration(
-                    name=information["name"],
-                    module=module_name,
-                    docstring=information.get("doc"),
-                    source_text=source_text,
-                    source_link=information["sourceLink"],
-                    dependencies=dependencies if dependencies else None,
+            # Extract top-level package name from module
+            # Module names look like "Mathlib.Data.List" or "Init.Core" or "Lean.Meta"
+            top_level_module = module_name.split(".")[0]
+
+            # Skip if this module is not from an allowed package
+            if top_level_module.lower() not in {
+                p.lower() for p in Config.EXTRACT_PACKAGES
+            }:
+                progress.update(task, advance=1)
+                continue
+
+            for declaration_data in data.get("declarations", []):
+                information = declaration_data["info"]
+                source_text = _extract_source_text(
+                    information["sourceLink"], lean_root, package_cache
                 )
-            )
+
+                header_html = declaration_data.get("header", "")
+                dependencies = _extract_dependencies_from_html(header_html)
+
+                declarations.append(
+                    Declaration(
+                        name=information["name"],
+                        module=module_name,
+                        docstring=information.get("doc"),
+                        source_text=source_text,
+                        source_link=information["sourceLink"],
+                        dependencies=dependencies if dependencies else None,
+                    )
+                )
+
+            progress.update(task, advance=1)
+
     return declarations
 
 
@@ -208,31 +241,45 @@ async def _insert_declarations_batch(
         Number of declarations successfully inserted.
     """
     inserted_count = 0
-    async with session.begin():
-        for i in range(0, len(declarations), batch_size):
-            batch = declarations[i : i + batch_size]
 
-            for declaration in batch:
-                dependencies_json = (
-                    json.dumps(declaration.dependencies)
-                    if declaration.dependencies
-                    else None
-                )
-                statement = (
-                    insert(DBDeclaration)
-                    .values(
-                        name=declaration.name,
-                        module=declaration.module,
-                        docstring=declaration.docstring,
-                        source_text=declaration.source_text,
-                        source_link=declaration.source_link,
-                        dependencies=dependencies_json,
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+    ) as progress:
+        task = progress.add_task(
+            "[green]Inserting declarations into database...",
+            total=len(declarations),
+        )
+
+        async with session.begin():
+            for i in range(0, len(declarations), batch_size):
+                batch = declarations[i : i + batch_size]
+
+                for declaration in batch:
+                    dependencies_json = (
+                        json.dumps(declaration.dependencies)
+                        if declaration.dependencies
+                        else None
                     )
-                    .on_conflict_do_nothing(index_elements=["name"])
-                )
+                    statement = (
+                        insert(DBDeclaration)
+                        .values(
+                            name=declaration.name,
+                            module=declaration.module,
+                            docstring=declaration.docstring,
+                            source_text=declaration.source_text,
+                            source_link=declaration.source_link,
+                            dependencies=dependencies_json,
+                        )
+                        .on_conflict_do_nothing(index_elements=["name"])
+                    )
 
-                result = await session.execute(statement)
-                inserted_count += result.rowcount
+                    result = await session.execute(statement)
+                    inserted_count += result.rowcount
+                    progress.update(task, advance=1)
 
     return inserted_count
 
@@ -264,6 +311,7 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
 
     # Parse all declarations from files
     declarations = _parse_declarations_from_files(bmp_files, lean_root, package_cache)
+    logger.info(f"Found {len(declarations)} declarations from allowed packages")
 
     # Insert declarations into database
     async with AsyncSession(engine) as session:

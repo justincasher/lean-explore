@@ -157,6 +157,4 @@ async def generate_embeddings(
                 total_embeddings += count
                 progress.update(task, advance=len(batch))
 
-        logger.info(
-            f"Generated {total_embeddings} embeddings for {total} declarations"
-        )
+        logger.info(f"Generated {total_embeddings} embeddings for {total} declarations")

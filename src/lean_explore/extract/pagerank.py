@@ -32,9 +32,7 @@ async def _build_dependency_graph(session: AsyncSession) -> nx.DiGraph:
     result = await session.execute(stmt)
     declarations = list(result.all())
 
-    name_to_id = {
-        declaration.name: declaration.id for declaration in declarations
-    }
+    name_to_id = {declaration.name: declaration.id for declaration in declarations}
 
     graph = nx.DiGraph()
     for declaration in declarations:
