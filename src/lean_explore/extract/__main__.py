@@ -133,29 +133,23 @@ async def run_pipeline(
     logger.info(f"Database URL: {database_url}")
     logger.info(f"Steps to run: {steps}")
 
-    # Create database engine
     engine = create_async_engine(database_url, echo=verbose)
 
     try:
-        # Create schema (idempotent - only creates if doesn't exist)
         await create_database_schema(engine)
 
-        # Determine which steps to run
         run_all = "all" in step_list
         run_extract = run_all or "extract" in step_list
         run_pagerank = run_all or "pagerank" in step_list
         run_informalize = run_all or "informalize" in step_list
         run_embeddings = run_all or "embeddings" in step_list
 
-        # Run extraction step
         if run_extract:
             await run_extract_step(engine)
 
-        # Run PageRank step
         if run_pagerank:
             await run_pagerank_step(engine, pagerank_alpha, pagerank_batch_size)
 
-        # Run informalization step
         if run_informalize:
             await run_informalize_step(
                 engine,
@@ -165,7 +159,6 @@ async def run_pipeline(
                 informalize_limit,
             )
 
-        # Run embeddings step
         if run_embeddings:
             await run_embeddings_step(
                 engine, embedding_model, embedding_batch_size, embedding_limit
@@ -219,10 +212,8 @@ def main(
     verbose: bool,
 ) -> None:
     """Run the Lean declaration extraction and enrichment pipeline."""
-    # Set the Lean version environment variable if provided
     if lean_version:
         os.environ["LEAN_EXPLORE_LEAN_VERSION"] = lean_version
-        # Reload config to pick up the new version
         importlib.reload(lean_explore.config)
         from lean_explore.config import Config as ReloadedConfig
 
