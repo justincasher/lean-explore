@@ -83,7 +83,7 @@ async def run_doc_gen4_step() -> None:
     import subprocess
 
     result = subprocess.run(
-        ["lake", "build", ":docs"],
+        ["lake", "build", "extractor:docs"],
         cwd="lean",
         capture_output=True,
         text=True,
