@@ -77,6 +77,25 @@ async def create_database_schema(engine: AsyncEngine) -> None:
     logger.info("Database schema created successfully")
 
 
+async def run_doc_gen4_step() -> None:
+    """Run doc-gen4 to generate documentation data."""
+    logger.info("Running doc-gen4 to generate documentation...")
+    import subprocess
+
+    result = subprocess.run(
+        ["lake", "build", ":docs"],
+        cwd="lean",
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        logger.error(f"doc-gen4 failed with error:\n{result.stderr}")
+        raise RuntimeError("doc-gen4 generation failed")
+
+    logger.info("doc-gen4 generation complete")
+
+
 async def run_extract_step(engine: AsyncEngine) -> None:
     """Extract declarations from doc-gen4 output."""
     logger.info("Step 1: Extracting declarations from doc-gen4...")
@@ -126,6 +145,7 @@ async def run_embeddings_step(
 
 async def run_pipeline(
     database_url: str,
+    run_doc_gen4: bool = False,
     parse_docs: bool = True,
     pagerank: bool = True,
     informalize: bool = True,
@@ -145,6 +165,7 @@ async def run_pipeline(
 
     Args:
         database_url: PostgreSQL database URL (e.g., postgresql+asyncpg://user:pass@host/db)
+        run_doc_gen4: Run doc-gen4 to generate documentation before parsing
         parse_docs: Run doc-gen4 parsing step
         pagerank: Run PageRank calculation step
         informalize: Run informalization step
@@ -194,6 +215,9 @@ async def run_pipeline(
     try:
         await create_database_schema(engine)
 
+        if run_doc_gen4:
+            await run_doc_gen4_step()
+
         if parse_docs:
             await run_extract_step(engine)
 
@@ -232,6 +256,11 @@ async def run_pipeline(
         "Lean version for database (e.g., 4.23.0). "
         "Uses config default if not specified."
     ),
+)
+@click.option(
+    "--run-doc-gen4",
+    is_flag=True,
+    help="Run doc-gen4 to generate documentation before parsing",
 )
 @click.option(
     "--parse-docs/--no-parse-docs",
@@ -284,6 +313,7 @@ async def run_pipeline(
 @click.option("--verbose", is_flag=True, help="Enable verbose logging")
 def main(
     lean_version: str | None,
+    run_doc_gen4: bool,
     parse_docs: bool | None,
     pagerank: bool | None,
     informalize: bool | None,
@@ -322,6 +352,7 @@ def main(
     asyncio.run(
         run_pipeline(
             database_url=database_url,
+            run_doc_gen4=run_doc_gen4,
             parse_docs=parse_docs,
             pagerank=pagerank,
             informalize=informalize,
