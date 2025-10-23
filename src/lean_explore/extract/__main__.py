@@ -90,7 +90,11 @@ async def run_doc_gen4_step() -> None:
     )
 
     if result.returncode != 0:
-        logger.error(f"doc-gen4 failed with error:\n{result.stderr}")
+        logger.error(f"doc-gen4 failed with return code {result.returncode}")
+        if result.stdout:
+            logger.error(f"STDOUT:\n{result.stdout}")
+        if result.stderr:
+            logger.error(f"STDERR:\n{result.stderr}")
         raise RuntimeError("doc-gen4 generation failed")
 
     logger.info("doc-gen4 generation complete")
