@@ -65,9 +65,7 @@ async def _process_batch(
     Returns:
         Number of embeddings generated
     """
-    # Collect all texts that need embeddings
     all_texts = []
-    # Track which declaration and field each text belongs to
     text_metadata = []
 
     for declaration in declarations:
@@ -93,10 +91,8 @@ async def _process_batch(
     if not all_texts:
         return 0
 
-    # Generate all embeddings in one call
     response = await client.embed(all_texts)
 
-    # Assign embeddings back to declarations
     for (declaration, field_name), embedding in zip(text_metadata, response.embeddings):
         if field_name == "name":
             declaration.name_embedding = embedding
@@ -107,7 +103,6 @@ async def _process_batch(
         elif field_name == "docstring":
             declaration.docstring_embedding = embedding
 
-    # Save to database
     await session.commit()
 
     return len(all_texts)
