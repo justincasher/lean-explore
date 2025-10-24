@@ -204,58 +204,49 @@ async def _process_one_declaration(
         )
 
     async with semaphore:
-        try:
-            dependencies_text = ""
-            dependencies = _parse_dependencies(declaration.dependencies)
-            if dependencies:
-                dependency_informalizations = []
-                for dependency_name in dependencies:
-                    if dependency_name in informalizations_by_name:
-                        informal_description = informalizations_by_name[dependency_name]
-                        dependency_informalizations.append(
-                            f"- {dependency_name}: {informal_description}"
-                        )
-
-                if dependency_informalizations:
-                    dependencies_text = "Dependencies:\n" + "\n".join(
-                        dependency_informalizations
+        dependencies_text = ""
+        dependencies = _parse_dependencies(declaration.dependencies)
+        if dependencies:
+            dependency_informalizations = []
+            for dependency_name in dependencies:
+                if dependency_name in informalizations_by_name:
+                    informal_description = informalizations_by_name[dependency_name]
+                    dependency_informalizations.append(
+                        f"- {dependency_name}: {informal_description}"
                     )
 
-            prompt = prompt_template.format(
-                name=declaration.name,
-                source_text=declaration.source_text,
-                docstring=declaration.docstring or "No docstring available",
-                dependencies=dependencies_text,
-            )
-
-            response = await client.generate(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-            )
-
-            if response.choices and response.choices[0].message.content:
-                result = response.choices[0].message.content.strip()
-                return InformalizationResult(
-                    declaration_id=declaration.id,
-                    declaration_name=declaration.name,
-                    informalization=result,
+            if dependency_informalizations:
+                dependencies_text = "Dependencies:\n" + "\n".join(
+                    dependency_informalizations
                 )
 
-            logger.warning(f"Empty response for declaration {declaration.name}")
+        prompt = prompt_template.format(
+            name=declaration.name,
+            source_text=declaration.source_text,
+            docstring=declaration.docstring or "No docstring available",
+            dependencies=dependencies_text,
+        )
+
+        response = await client.generate(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+        )
+
+        if response.choices and response.choices[0].message.content:
+            result = response.choices[0].message.content.strip()
             return InformalizationResult(
                 declaration_id=declaration.id,
                 declaration_name=declaration.name,
-                informalization=None,
+                informalization=result,
             )
 
-        except Exception as e:
-            logger.error(f"Failed to informalize {declaration.name}: {e}")
-            return InformalizationResult(
-                declaration_id=declaration.id,
-                declaration_name=declaration.name,
-                informalization=None,
-            )
+        logger.warning(f"Empty response for declaration {declaration.name}")
+        return InformalizationResult(
+            declaration_id=declaration.id,
+            declaration_name=declaration.name,
+            informalization=None,
+        )
 
 
 async def _process_layer(
