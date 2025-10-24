@@ -49,14 +49,12 @@ def _build_package_cache(lean_root: str | Path) -> dict[str, Path]:
     lean_root = Path(lean_root)
     cache = {}
 
-    # Add Lake packages from .lake/packages
     packages_directory = lean_root / ".lake" / "packages"
     if packages_directory.exists():
         for package_directory in packages_directory.iterdir():
             if package_directory.is_dir():
                 cache[package_directory.name.lower()] = package_directory
 
-    # Add Lean 4 toolchain package from elan
     toolchain_file = lean_root / "lean-toolchain"
     if toolchain_file.exists():
         version = toolchain_file.read_text().strip().split(":")[-1]
@@ -76,11 +74,9 @@ def _build_package_cache(lean_root: str | Path) -> dict[str, Path]:
 
 def _extract_dependencies_from_html(html: str) -> list[str]:
     """Extract dependency names from HTML declaration header."""
-    # Find all href links in the HTML
     href_pattern = r'href="[^"]*#([^"]+)"'
     matches = re.findall(href_pattern, html)
 
-    # Filter out self-references and duplicates
     dependencies = []
     seen = set()
     for match in matches:
@@ -125,32 +121,26 @@ def _extract_source_text(
     line_start = int(line_start_string)
     line_end = int(line_end_string)
 
-    # Build list of candidate paths to try
     candidates = []
 
-    # 1. Try package name variations in cache
     for variant in [
         package_name.lower(),
         package_name.rstrip("0123456789").lower(),
         package_name.replace("-", "").lower(),
     ]:
         if variant in package_cache:
-            # For lean4, strip "src/" prefix if present (already handled in cache path)
             if variant == "lean4" and file_path_string.startswith("src/"):
                 adjusted_path = file_path_string[4:]
             else:
                 adjusted_path = file_path_string
             candidates.append(package_cache[variant] / adjusted_path)
 
-    # 2. Main source
     candidates.append(lean_root / file_path_string)
 
-    # Try each candidate
     for candidate in candidates:
         if candidate.exists():
             return _read_source_lines(candidate, line_start, line_end)
 
-    # Last resort: search all packages
     for package_directory in package_cache.values():
         candidate = package_directory / file_path_string
         if candidate.exists():
@@ -191,11 +181,8 @@ def _parse_declarations_from_files(
 
             module_name = data["name"]
 
-            # Extract top-level package name from module
-            # Module names look like "Mathlib.Data.List" or "Init.Core" or "Lean.Meta"
             top_level_module = module_name.split(".")[0]
 
-            # Skip if this module is not from an allowed package
             if top_level_module.lower() not in {
                 p.lower() for p in Config.EXTRACT_PACKAGES
             }:
@@ -302,18 +289,14 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
             f"Doc-data directory not found: {documentation_data_directory}"
         )
 
-    # Find all .bmp files (doc-gen4's JSON format, despite the extension)
     bmp_files = sorted(documentation_data_directory.glob("**/*.bmp"))
 
-    # Build package cache once
     package_cache = _build_package_cache(lean_root)
     logger.info(f"Found {len(package_cache)} packages: {list(package_cache.keys())}")
 
-    # Parse all declarations from files
     declarations = _parse_declarations_from_files(bmp_files, lean_root, package_cache)
     logger.info(f"Found {len(declarations)} declarations from allowed packages")
 
-    # Insert declarations into database
     async with AsyncSession(engine) as session:
         inserted_count = await _insert_declarations_batch(
             session, declarations, batch_size
