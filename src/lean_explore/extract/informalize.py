@@ -71,7 +71,6 @@ def _build_dependency_layers(
     for declaration in declarations:
         in_degree[declaration.name] = 0
 
-    # Build graph
     for declaration in declarations:
         dependencies = _parse_dependencies(declaration.dependencies)
         for dependency_name in dependencies:
@@ -194,7 +193,6 @@ async def _process_one_declaration(
             informalization=None,
         )
 
-    # Check cache before making LLM call
     source_hash = InformalizationCache.compute_hash(declaration.source_text)
     if source_hash in cache_by_hash:
         return InformalizationResult(
@@ -302,7 +300,6 @@ async def _process_layer(
     ]
     results = await asyncio.gather(*tasks)
 
-    # Collect results and commit in batches
     for declaration, result in zip(layer, results):
         if result.informalization:
             pending_updates.append(
@@ -311,10 +308,8 @@ async def _process_layer(
                     "informalization": result.informalization,
                 }
             )
-            # Add to lookup map immediately for use in next layer
             informalizations_by_name[result.declaration_name] = result.informalization
 
-            # Create cache entry for this informalization
             cache_entry = InformalizationCache.create(
                 source_text=declaration.source_text,
                 informalization=result.informalization,
@@ -326,14 +321,12 @@ async def _process_layer(
 
         progress.update(task, advance=1)
 
-        # Commit in batches to avoid huge transactions
         if len(pending_updates) >= commit_batch_size:
             await session.execute(update(Declaration), pending_updates)
             await session.commit()
             logger.info(f"Committed batch of {len(pending_updates)} updates")
             pending_updates.clear()
 
-            # Commit cache inserts
             informal_session.add_all(pending_cache_inserts)
             await informal_session.commit()
             logger.info(
@@ -341,7 +334,6 @@ async def _process_layer(
             )
             pending_cache_inserts.clear()
 
-    # Commit any remaining updates from this layer
     if pending_updates:
         await session.execute(update(Declaration), pending_updates)
         await session.commit()
@@ -390,7 +382,6 @@ async def _process_layers(
     total = sum(len(layer) for layer in layers)
     processed = 0
 
-    # Build lookup map once
     informalizations_by_name = {
         inf.declaration_name: inf.informalization
         for inf in existing_informalizations
