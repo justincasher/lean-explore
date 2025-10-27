@@ -63,7 +63,7 @@ Homepage = "https://www.leanexplore.com/"
 Repository = "https://github.com/justincasher/lean-explore"
 
 [project.scripts]
-leanexplore = "lean_explore.cli.main:app"
+lean-explore = "lean_explore.cli.main:app"
 
 [project.optional-dependencies]
 extract = [

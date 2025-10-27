@@ -138,7 +138,7 @@ def main():
         if missing_files_messages:
             error_summary = (
                 "Error: Essential data files for the local backend are missing.\n"
-                "Please run `leanexplore data fetch` to download the required data"
+                "Please run `lean-explore data fetch` to download the required data"
                 " toolchain.\n"
                 f"Expected data directory for active toolchain "
                 f"('{Config.ACTIVE_TOOLCHAIN_VERSION}'):"

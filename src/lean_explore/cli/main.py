@@ -17,7 +17,7 @@ from lean_explore.cli.display import display_search_results
 
 # Initialize Typer app and Rich console
 app = typer.Typer(
-    name="leanexplore",
+    name="lean-explore",
     help="A CLI tool to explore and search Lean mathematical libraries.",
     add_completion=False,
     rich_markup_mode="markdown",
