@@ -52,10 +52,12 @@ class Config:
     DATABASE_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "lean_explore.db"
     """Path to SQLite database file in cache (used by search engine)."""
 
-    FAISS_INDEX_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "faiss.index"
-    """Path to FAISS index file in cache."""
+    FAISS_INDEX_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "informalization_faiss.index"
+    """Path to FAISS index file in cache (using informalization embeddings)."""
 
-    FAISS_IDS_MAP_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "faiss_ids_map.json"
+    FAISS_IDS_MAP_PATH: pathlib.Path = (
+        ACTIVE_CACHE_PATH / "informalization_faiss_ids_map.json"
+    )
     """Path to FAISS ID mapping file in cache."""
 
     DATABASE_URL: str = f"sqlite+aiosqlite:///{DATABASE_PATH}"
