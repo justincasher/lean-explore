@@ -17,7 +17,6 @@ import subprocess
 from pathlib import Path
 
 import click
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 import lean_explore.config
@@ -33,41 +32,6 @@ from lean_explore.util import setup_logging
 logger = logging.getLogger(__name__)
 
 
-async def ensure_database_exists(database_url: str, database_name: str) -> None:
-    """Ensure the database exists, creating it if necessary.
-
-    Args:
-        database_url: Full database URL.
-        database_name: Name of the database to create.
-    """
-    # Try to connect to check if database exists
-    test_engine = create_async_engine(database_url, echo=False)
-    try:
-        async with test_engine.connect():
-            logger.info(f"Database {database_name} already exists")
-    except Exception as e:
-        # Database doesn't exist, create it
-        if "does not exist" in str(e):
-            logger.info(f"Database {database_name} does not exist, creating it...")
-
-            # Connect to default postgres database to create our database
-            base_url = database_url.rsplit("/", 1)[0]
-            maintenance_url = f"{base_url}/postgres"
-            maintenance_engine = create_async_engine(
-                maintenance_url, isolation_level="AUTOCOMMIT", echo=False
-            )
-
-            async with maintenance_engine.connect() as connection:
-                await connection.execute(text(f'CREATE DATABASE "{database_name}"'))
-
-            await maintenance_engine.dispose()
-            logger.info(f"Database {database_name} created successfully")
-        else:
-            raise
-    finally:
-        await test_engine.dispose()
-
-
 async def create_database_schema(engine: AsyncEngine) -> None:
     """Create database tables if they don't exist.
 
@@ -76,8 +40,6 @@ async def create_database_schema(engine: AsyncEngine) -> None:
     """
     logger.info("Creating database schema...")
     async with engine.begin() as connection:
-        # Enable pgvector extension for vector similarity search
-        await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await connection.run_sync(Base.metadata.create_all)
     logger.info("Database schema created successfully")
 
@@ -237,10 +199,6 @@ async def run_pipeline(
     logger.info(f"Database URL: {database_url}")
     logger.info(f"Steps to run: {', '.join(steps_enabled)}")
 
-    # Ensure database exists before trying to connect
-    database_name = database_url.rsplit("/", 1)[1]
-    await ensure_database_exists(database_url, database_name)
-
     engine = create_async_engine(database_url, echo=verbose)
 
     try:
@@ -382,9 +340,14 @@ def main(
         importlib.reload(lean_explore.config)
         from lean_explore.config import Config as ReloadedConfig
 
-        database_url = ReloadedConfig.DATABASE_URL
+        database_url = ReloadedConfig.EXTRACTION_DATABASE_URL
+        data_directory = ReloadedConfig.ACTIVE_DATA_PATH
     else:
-        database_url = Config.DATABASE_URL
+        database_url = Config.EXTRACTION_DATABASE_URL
+        data_directory = Config.ACTIVE_DATA_PATH
+
+    data_directory.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Extraction output directory: {data_directory}")
 
     asyncio.run(
         run_pipeline(

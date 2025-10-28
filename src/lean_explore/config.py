@@ -50,7 +50,7 @@ class Config:
     """Directory for the active version's local data files."""
 
     DATABASE_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "lean_explore.db"
-    """Path to SQLite database file in cache."""
+    """Path to SQLite database file in cache (used by search engine)."""
 
     FAISS_INDEX_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "faiss.index"
     """Path to FAISS index file in cache."""
@@ -59,7 +59,13 @@ class Config:
     """Path to FAISS ID mapping file in cache."""
 
     DATABASE_URL: str = f"sqlite+aiosqlite:///{DATABASE_PATH}"
-    """Async SQLAlchemy database URL for SQLite."""
+    """Async SQLAlchemy database URL for SQLite (used by search engine)."""
+
+    EXTRACTION_DATABASE_PATH: pathlib.Path = ACTIVE_DATA_PATH / "lean_explore.db"
+    """Path to SQLite database file in data directory (used by extraction)."""
+
+    EXTRACTION_DATABASE_URL: str = f"sqlite+aiosqlite:///{EXTRACTION_DATABASE_PATH}"
+    """Async SQLAlchemy database URL for extraction pipeline."""
 
     EXTRACT_PACKAGES: set[str] = {
         "batteries",
