@@ -5,6 +5,7 @@ Uses SQLAlchemy 2.0 syntax with SQLite for storage and FAISS for vector search.
 """
 
 from sqlalchemy import Float, Integer, Text
+from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -42,6 +43,24 @@ class Declaration(Base):
 
     informalization: Mapped[str | None] = mapped_column(Text, nullable=True)
     """Natural language description of the declaration."""
+
+    name_embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    """768-dimensional embedding of the declaration name."""
+
+    informalization_embedding: Mapped[list[float] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    """768-dimensional embedding of the informalization text."""
+
+    source_text_embedding: Mapped[list[float] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    """768-dimensional embedding of the source text."""
+
+    docstring_embedding: Mapped[list[float] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    """768-dimensional embedding of the docstring."""
 
     pagerank: Mapped[float | None] = mapped_column(Float, nullable=True)
     """PageRank score based on dependency graph."""
