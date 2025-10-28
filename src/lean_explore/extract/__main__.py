@@ -274,10 +274,6 @@ async def run_pipeline(
 
         logger.info("Pipeline completed successfully!")
 
-    except Exception:
-        logger.exception("Pipeline failed with error")
-        raise
-
     finally:
         await engine.dispose()
 
