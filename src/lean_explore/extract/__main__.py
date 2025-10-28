@@ -5,6 +5,7 @@ This module provides functions to coordinate the complete data extraction pipeli
 2. Calculate PageRank scores based on dependencies
 3. Generate informal natural language descriptions
 4. Generate vector embeddings for semantic search
+5. Build FAISS indices for vector similarity search
 """
 
 import asyncio
@@ -23,6 +24,7 @@ import lean_explore.config
 from lean_explore.config import Config
 from lean_explore.extract.doc_parser import extract_declarations
 from lean_explore.extract.embeddings import generate_embeddings
+from lean_explore.extract.index import build_faiss_indices
 from lean_explore.extract.informalize import informalize_declarations
 from lean_explore.extract.pagerank import calculate_pagerank
 from lean_explore.models import Base
@@ -161,6 +163,13 @@ async def run_embeddings_step(
     logger.info("Embedding generation complete")
 
 
+async def run_index_step(engine: AsyncEngine) -> None:
+    """Build FAISS indices from embeddings."""
+    logger.info("Step 5: Building FAISS indices...")
+    await build_faiss_indices(engine)
+    logger.info("FAISS index building complete")
+
+
 async def run_pipeline(
     database_url: str,
     run_doc_gen4: bool = False,
@@ -168,6 +177,7 @@ async def run_pipeline(
     pagerank: bool = True,
     informalize: bool = True,
     embeddings: bool = True,
+    index: bool = True,
     pagerank_alpha: float = 0.85,
     pagerank_batch_size: int = 1000,
     informalize_model: str = "google/gemini-2.5-flash",
@@ -182,12 +192,13 @@ async def run_pipeline(
     """Run the Lean declaration extraction and enrichment pipeline.
 
     Args:
-        database_url: PostgreSQL database URL (e.g., postgresql+asyncpg://user:pass@host/db)
+        database_url: SQLite database URL (e.g., sqlite+aiosqlite:///path/to/db)
         run_doc_gen4: Run doc-gen4 to generate documentation before parsing
         parse_docs: Run doc-gen4 parsing step
         pagerank: Run PageRank calculation step
         informalize: Run informalization step
         embeddings: Run embeddings generation step
+        index: Run FAISS index building step
         pagerank_alpha: PageRank damping parameter
         pagerank_batch_size: Batch size for PageRank updates
         informalize_model: LLM model for generating informalizations
@@ -219,6 +230,8 @@ async def run_pipeline(
         steps_enabled.append("informalize")
     if embeddings:
         steps_enabled.append("embeddings")
+    if index:
+        steps_enabled.append("index")
 
     logger.info("Starting Lean Explore extraction pipeline")
     logger.info(f"Database URL: {database_url}")
@@ -255,6 +268,9 @@ async def run_pipeline(
             await run_embeddings_step(
                 engine, embedding_model, embedding_batch_size, embedding_limit
             )
+
+        if index:
+            await run_index_step(engine)
 
         logger.info("Pipeline completed successfully!")
 
@@ -301,6 +317,11 @@ async def run_pipeline(
     help="Run embeddings generation step",
 )
 @click.option(
+    "--index/--no-index",
+    default=None,
+    help="Run FAISS index building step",
+)
+@click.option(
     "--informalize-model",
     default="google/gemini-2.5-flash",
     help="LLM model for generating informalizations",
@@ -336,6 +357,7 @@ def main(
     pagerank: bool | None,
     informalize: bool | None,
     embeddings: bool | None,
+    index: bool | None,
     informalize_model: str,
     informalize_max_concurrent: int,
     informalize_limit: int | None,
@@ -345,18 +367,19 @@ def main(
 ) -> None:
     """Run the Lean declaration extraction and enrichment pipeline."""
     # Determine if any step flags were explicitly set
-    step_flags = [parse_docs, pagerank, informalize, embeddings]
+    step_flags = [parse_docs, pagerank, informalize, embeddings, index]
     any_step_explicitly_set = any(flag is not None for flag in step_flags)
 
     # If no steps were explicitly set, run all by default
     # Otherwise, only run explicitly enabled steps (default unset to False)
     if not any_step_explicitly_set:
-        parse_docs = pagerank = informalize = embeddings = True
+        parse_docs = pagerank = informalize = embeddings = index = True
     else:
         parse_docs = parse_docs if parse_docs is not None else False
         pagerank = pagerank if pagerank is not None else False
         informalize = informalize if informalize is not None else False
         embeddings = embeddings if embeddings is not None else False
+        index = index if index is not None else False
 
     if lean_version:
         os.environ["LEAN_EXPLORE_LEAN_VERSION"] = lean_version
@@ -375,6 +398,7 @@ def main(
             pagerank=pagerank,
             informalize=informalize,
             embeddings=embeddings,
+            index=index,
             informalize_model=informalize_model,
             informalize_max_concurrent=informalize_max_concurrent,
             informalize_limit=informalize_limit,
