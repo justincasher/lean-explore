@@ -48,7 +48,7 @@ dependencies = [
     "openai-agents>=0.0.16",
 
     # MCP Server Components
-    "mcp>=1.9.0",
+    "mcp>=1.9.0,<1.12.3",
 
     # Utilities
     "tqdm>=4.60",
