@@ -69,6 +69,12 @@ class Config:
     EXTRACTION_DATABASE_URL: str = f"sqlite+aiosqlite:///{EXTRACTION_DATABASE_PATH}"
     """Async SQLAlchemy database URL for extraction pipeline."""
 
+    INFORMAL_CACHE_PATH: pathlib.Path = DATA_DIRECTORY / "informal_cache.db"
+    """Path to shared informalization cache database (version-independent)."""
+
+    INFORMAL_CACHE_URL: str = f"sqlite+aiosqlite:///{INFORMAL_CACHE_PATH}"
+    """Async SQLAlchemy database URL for informalization cache."""
+
     EXTRACT_PACKAGES: set[str] = {
         "batteries",
         "init",

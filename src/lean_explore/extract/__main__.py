@@ -101,13 +101,26 @@ async def run_informalize_step(
 ) -> None:
     """Generate informal descriptions for declarations."""
     logger.info("Step 3: Generating informal descriptions...")
-    await informalize_declarations(
-        engine,
-        model=model,
-        batch_size=batch_size,
-        max_concurrent=max_concurrent,
-        limit=limit,
-    )
+
+    # Create informal cache engine (separate, shared database)
+    informal_cache_engine = create_async_engine(Config.INFORMAL_CACHE_URL)
+
+    # Ensure informal cache schema exists
+    async with informal_cache_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    try:
+        await informalize_declarations(
+            engine,
+            informal_cache_engine,
+            model=model,
+            commit_batch_size=batch_size,
+            max_concurrent=max_concurrent,
+            limit=limit,
+        )
+    finally:
+        await informal_cache_engine.dispose()
+
     logger.info("Informalization complete")
 
 
