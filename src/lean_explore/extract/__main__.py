@@ -32,7 +32,7 @@ from lean_explore.util import setup_logging
 logger = logging.getLogger(__name__)
 
 
-async def create_database_schema(engine: AsyncEngine) -> None:
+async def _create_database_schema(engine: AsyncEngine) -> None:
     """Create database tables if they don't exist.
 
     Args:
@@ -44,7 +44,7 @@ async def create_database_schema(engine: AsyncEngine) -> None:
     logger.info("Database schema created successfully")
 
 
-async def run_doc_gen4_step() -> None:
+async def _run_doc_gen4_step() -> None:
     """Run doc-gen4 to generate documentation data."""
     logger.info("Running doc-gen4 to generate documentation...")
 
@@ -78,21 +78,23 @@ async def run_doc_gen4_step() -> None:
     logger.info("doc-gen4 generation complete")
 
 
-async def run_extract_step(engine: AsyncEngine) -> None:
+async def _run_extract_step(engine: AsyncEngine) -> None:
     """Extract declarations from doc-gen4 output."""
     logger.info("Step 1: Extracting declarations from doc-gen4...")
     await extract_declarations(engine)
     logger.info("Declaration extraction complete")
 
 
-async def run_pagerank_step(engine: AsyncEngine, alpha: float, batch_size: int) -> None:
+async def _run_pagerank_step(
+    engine: AsyncEngine, alpha: float, batch_size: int
+) -> None:
     """Calculate PageRank scores for declarations."""
     logger.info("Step 2: Calculating PageRank scores...")
     await calculate_pagerank(engine, alpha=alpha, batch_size=batch_size)
     logger.info("PageRank calculation complete")
 
 
-async def run_informalize_step(
+async def _run_informalize_step(
     engine: AsyncEngine,
     model: str,
     batch_size: int,
@@ -111,7 +113,7 @@ async def run_informalize_step(
     logger.info("Informalization complete")
 
 
-async def run_embeddings_step(
+async def _run_embeddings_step(
     engine: AsyncEngine,
     model_name: str,
     batch_size: int,
@@ -125,7 +127,7 @@ async def run_embeddings_step(
     logger.info("Embedding generation complete")
 
 
-async def run_index_step(engine: AsyncEngine) -> None:
+async def _run_index_step(engine: AsyncEngine) -> None:
     """Build FAISS indices from embeddings."""
     logger.info("Step 5: Building FAISS indices...")
     await build_faiss_indices(engine)
@@ -202,19 +204,19 @@ async def run_pipeline(
     engine = create_async_engine(database_url, echo=verbose)
 
     try:
-        await create_database_schema(engine)
+        await _create_database_schema(engine)
 
         if run_doc_gen4:
-            await run_doc_gen4_step()
+            await _run_doc_gen4_step()
 
         if parse_docs:
-            await run_extract_step(engine)
+            await _run_extract_step(engine)
 
         if pagerank:
-            await run_pagerank_step(engine, pagerank_alpha, pagerank_batch_size)
+            await _run_pagerank_step(engine, pagerank_alpha, pagerank_batch_size)
 
         if informalize:
-            await run_informalize_step(
+            await _run_informalize_step(
                 engine,
                 informalize_model,
                 informalize_batch_size,
@@ -223,12 +225,12 @@ async def run_pipeline(
             )
 
         if embeddings:
-            await run_embeddings_step(
+            await _run_embeddings_step(
                 engine, embedding_model, embedding_batch_size, embedding_limit
             )
 
         if index:
-            await run_index_step(engine)
+            await _run_index_step(engine)
 
         logger.info("Pipeline completed successfully!")
 

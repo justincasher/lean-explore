@@ -12,7 +12,7 @@ from lean_explore.models import SearchResponse
 console = Console()
 
 
-def format_text_for_panel(text_content: str | None, width: int = 80) -> str:
+def _format_text_for_panel(text_content: str | None, width: int = 80) -> str:
     """Wraps text and pads lines to ensure fixed content width for a Panel.
 
     Args:
@@ -115,7 +115,7 @@ def display_search_results(response: SearchResponse, display_limit: int = 5) -> 
         console.print(source_formatted)
 
         if item.source_text:
-            formatted_code = format_text_for_panel(item.source_text)
+            formatted_code = _format_text_for_panel(item.source_text)
             console.print(
                 Panel(
                     formatted_code,
@@ -127,7 +127,7 @@ def display_search_results(response: SearchResponse, display_limit: int = 5) -> 
             )
 
         if item.docstring:
-            formatted_doc = format_text_for_panel(item.docstring)
+            formatted_doc = _format_text_for_panel(item.docstring)
             console.print(
                 Panel(
                     formatted_doc,
@@ -139,7 +139,7 @@ def display_search_results(response: SearchResponse, display_limit: int = 5) -> 
             )
 
         if item.informalization:
-            formatted_informal = format_text_for_panel(item.informalization)
+            formatted_informal = _format_text_for_panel(item.informalization)
             console.print(
                 Panel(
                     formatted_informal,
