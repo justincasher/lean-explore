@@ -67,7 +67,7 @@ def _emit_critical_logrecord(message: str) -> None:
     logging.basicConfig(record)
 
 
-def parse_arguments() -> argparse.Namespace:
+def _parse_arguments() -> argparse.Namespace:
     """Parses command-line arguments for the MCP server.
 
     Returns:
@@ -104,7 +104,7 @@ def parse_arguments() -> argparse.Namespace:
 
 def main():
     """Main function to initialize and run the MCP server."""
-    args = parse_arguments()
+    args = _parse_arguments()
 
     log_level_name = args.log_level.upper()
     numeric_level = getattr(logging, log_level_name, logging.ERROR)

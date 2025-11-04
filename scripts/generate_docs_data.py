@@ -1,22 +1,14 @@
-# scripts/generate_docs_data.py
-
 """Generates structured documentation data from Python source files.
 
-This script utilizes the 'griffe' library to parse a specified Python package.
-It extracts comprehensive information about all modules, classes, functions,
-and their docstrings, assuming compatibility with Google style. This information
-is then serialized into a JSON file. The JSON file can be consumed by a
-frontend application, such as a Vue.js website, to display interactive API
-documentation.
-
-The script recursively traverses the package structure to ensure all nested
-modules are processed and included in the output.
+This script uses griffe to parse a Python package and extract comprehensive
+information about modules, classes, functions, and their docstrings. The output
+is serialized to JSON for consumption by frontend applications.
 """
 
 import json
 import logging
 import pathlib
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import NotRequired, TypedDict
 
 from griffe import (
     Alias,
@@ -48,241 +40,382 @@ from griffe import (
     get_logger,
 )
 
-# Configure logging for griffe and this script.
 get_logger().setLevel(logging.WARNING)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
+
 # --- Configuration ---
+
 PACKAGE_PATH = pathlib.Path("src/lean_explore")
-"""Path to the root of the Python package to document."""
-
 OUTPUT_PATH = pathlib.Path("data/module_data.json")
-"""Output file path for the generated JSON data."""
-# --- End Configuration ---
 
 
-def _resolve_annotation(annotation: Union[str, Expr, None]) -> str:
-    """Resolves a griffe annotation object to its string representation.
+# --- Types ---
 
-    Args:
-        annotation (Union[str, Expr, None]): The annotation, which can be a
-            string, a griffe Expr object, or None.
 
-    Returns:
-        str: The string representation of the annotation, or an empty string if
-        the annotation is None.
-    """
-    if isinstance(annotation, Expr):
+class ParameterDict(TypedDict):
+    """Parameter information from function signature and docstring."""
+
+    name: str
+    annotation: str
+    kind: str
+    default: str | None
+    description: NotRequired[str]
+
+
+class ReturnDict(TypedDict):
+    """Return value information from function signature and docstring."""
+
+    name: NotRequired[str]
+    annotation: str
+    description: str
+
+
+class DocstringAttributeDict(TypedDict):
+    """Attribute information from docstring only."""
+
+    name: str
+    annotation: str
+    description: str
+    value: NotRequired[str | None]
+
+
+class AttributeDict(TypedDict):
+    """Attribute information from class code definition."""
+
+    name: str
+    value: str | None
+    annotation: str
+    docstring: str
+    path: str
+    filepath: str | None
+    lineno: int | None
+
+
+class ExceptionDict(TypedDict):
+    """Exception information from docstring raises section."""
+
+    type: str
+    description: str
+
+
+class ExampleDict(TypedDict):
+    """Example code from docstring examples section."""
+
+    title: str | None
+    code: str
+
+
+class AdmonitionDict(TypedDict):
+    """Admonition (note, warning, etc.) from docstring."""
+
+    title: str
+    text: str
+
+
+class DecoratorDict(TypedDict):
+    """Decorator information from function or class definition."""
+
+    text: str
+    path: str
+    lineno: int | None
+    endlineno: int | None
+
+
+class DocstringSections(TypedDict, total=False):
+    """All possible sections parsed from a docstring."""
+
+    summary: str
+    text: str
+    parameters: list[ParameterDict]
+    returns: ReturnDict | list[ReturnDict]
+    attributes: list[DocstringAttributeDict]
+    raises: list[ExceptionDict]
+    examples: list[ExampleDict]
+    note: list[AdmonitionDict]
+    warning: list[AdmonitionDict]
+    deprecated: list[str] | str
+    warns: list[str] | str
+    yields: list[str] | str
+    receives: list[str] | str
+
+
+class FunctionDict(TypedDict):
+    """Serialized function with full documentation."""
+
+    name: str
+    path: str
+    docstring: str
+    docstring_sections: DocstringSections
+    parameters: list[ParameterDict]
+    returns: ReturnDict
+    decorators: list[DecoratorDict]
+    is_async: bool
+    filepath: str | None
+    lineno: int | None
+    lines: list[int]
+
+
+class ClassDict(TypedDict):
+    """Serialized class with full documentation."""
+
+    name: str
+    path: str
+    docstring: str
+    docstring_sections: DocstringSections
+    methods: list[FunctionDict]
+    attributes: list[AttributeDict]
+    bases: list[str]
+    filepath: str | None
+    lineno: int | None
+    lines: list[int]
+
+
+class ModuleDict(TypedDict):
+    """Serialized module with full documentation."""
+
+    name: str
+    path: str
+    filepath: str | None
+    docstring: str
+    docstring_sections: DocstringSections
+    functions: list[FunctionDict]
+    classes: list[ClassDict]
+    lineno: int | None
+
+
+ReturnsSectionData = ReturnDict | list[ReturnDict] | None
+"""Return type for docstring returns section: single return, multiple, or none."""
+
+
+# --- Utility Functions ---
+
+
+def resolve_annotation(annotation: str | Expr | None) -> str:
+    """Converts a griffe annotation to its string representation."""
+    if isinstance(annotation, (Expr, str)):
         return str(annotation)
-    if isinstance(annotation, str):
-        return annotation
     return ""
 
 
-def _parse_docstring_sections(
-    docstring_obj: Optional[Any],
-) -> Dict[str, Any]:
-    """Parses standard sections from a griffe Docstring object.
+# --- Docstring Parsing ---
 
-    This function processes common docstring sections like summary, parameters,
-    returns, attributes, raises, examples, and various admonitions (notes,
-    warnings, etc.), transforming them into a structured dictionary.
+
+def extract_summary_and_text(
+    sections: list, summary_holder: list[str], text_parts: list[str]
+) -> None:
+    """Extracts summary and full text from docstring text sections.
 
     Args:
-        docstring_obj (Optional[Any]): A griffe Docstring object, which
-            contains a 'parsed' attribute with a list of DocstringSection
-            instances, or None.
-
-    Returns:
-        Dict[str, Any]: A dictionary where keys are section kinds (e.g.,
-        'summary', 'parameters', 'raises', 'note') and values are the
-        structured content of these sections.
+        sections: List of docstring sections to process.
+        summary_holder: Single-element list to store the summary (first text block).
+        text_parts: List to accumulate all text parts.
     """
-    if not docstring_obj or not hasattr(docstring_obj, "parsed"):
-        return {}
+    for section in sections:
+        if isinstance(section, DocstringSectionText):
+            if not summary_holder[0]:
+                summary_holder[0] = section.value.strip()
+            text_parts.append(section.value.strip())
 
-    sections_data: Dict[str, Any] = {}
-    summary = ""
-    full_text_parts = []
 
-    for section in docstring_obj.parsed:
-        section_kind_str = section.kind.value  # e.g., "text", "parameters", "returns"
+def parse_parameters_section(
+    section: DocstringSectionParameters,
+) -> list[ParameterDict]:
+    """Parses a parameters section from a docstring."""
+    return [
+        {
+            "name": parameter.name,
+            "annotation": resolve_annotation(parameter.annotation),
+            "description": parameter.description.strip()
+            if parameter.description
+            else "",
+            "value": str(parameter.value) if parameter.value is not None else None,
+        }
+        for parameter in section.value
+    ]
+
+
+def parse_returns_section(section: DocstringSectionReturns) -> ReturnsSectionData:
+    """Parses a returns section from a docstring.
+
+    Returns a single dict for one return value, a list for multiple, or None for empty.
+    """
+    returns_data = [
+        {
+            "name": item.name if hasattr(item, "name") else "",
+            "annotation": resolve_annotation(item.annotation),
+            "description": item.description.strip() if item.description else "",
+        }
+        for item in section.value
+    ]
+
+    if len(returns_data) == 1:
+        return returns_data[0]
+    elif len(returns_data) > 1:
+        return returns_data
+    return None
+
+
+def parse_attributes_section(
+    section: DocstringSectionAttributes,
+) -> list[DocstringAttributeDict]:
+    """Parses an attributes section from a docstring."""
+    return [
+        {
+            "name": attribute.name,
+            "annotation": resolve_annotation(attribute.annotation),
+            "description": attribute.description.strip()
+            if attribute.description
+            else "",
+        }
+        for attribute in section.value
+    ]
+
+
+def parse_raises_section(section: DocstringSectionRaises) -> list[ExceptionDict]:
+    """Parses a raises section from a docstring."""
+    return [
+        {
+            "type": resolve_annotation(exception.annotation),
+            "description": exception.description.strip()
+            if exception.description
+            else "",
+        }
+        for exception in section.value
+    ]
+
+
+def parse_examples_section(section: DocstringSectionExamples) -> list[ExampleDict]:
+    """Parses an examples section from a docstring."""
+    return [
+        {
+            "title": example.title.strip() if example.title else None,
+            "code": example.value.strip(),
+        }
+        for example in section.value
+    ]
+
+
+def parse_admonition_section(
+    section: DocstringSectionAdmonition, sections_data: DocstringSections
+) -> None:
+    """Parses an admonition section (note, warning, etc.).
+
+    Adds the admonition to sections_data.
+    """
+    payload = section.value
+
+    # Validate payload structure before accessing attributes
+    if not (hasattr(payload, "kind") and isinstance(payload.kind, str)):
+        return
+    if not (hasattr(payload, "text") and isinstance(payload.text, str)):
+        return
+
+    kind = payload.kind
+    admonition_item = {
+        "title": section.title.strip() if section.title else kind,
+        "text": payload.text.strip(),
+    }
+
+    if kind not in sections_data:
+        sections_data[kind] = []
+    sections_data[kind].append(admonition_item)
+
+
+def parse_generic_section(section) -> list | str:
+    """Parses generic docstring sections like warns, yields, etc."""
+    if not hasattr(section, "value") or not isinstance(section.value, list):
+        return (
+            str(section.value)
+            if hasattr(section, "value")
+            else "Unsupported section structure"
+        )
+
+    values = []
+    for item in section.value:
+        if isinstance(item, DocstringNamedElement):
+            values.append(
+                {
+                    "name": item.name,
+                    "annotation": resolve_annotation(item.annotation)
+                    if hasattr(item, "annotation")
+                    else "",
+                    "description": item.description.strip() if item.description else "",
+                }
+            )
+        elif hasattr(item, "name") and hasattr(item, "description"):
+            values.append(
+                {
+                    "name": item.name,
+                    "description": item.description.strip() if item.description else "",
+                }
+            )
+        elif hasattr(item, "text"):
+            values.append(item.text.strip())
+        else:
+            values.append(str(item))
+    return values
+
+
+def parse_docstring(docstring_object: object | None) -> DocstringSections:
+    """Parses all sections from a griffe docstring object into structured data."""
+    if not docstring_object or not hasattr(docstring_object, "parsed"):
+        return DocstringSections()
+
+    sections_data: DocstringSections = DocstringSections()
+    summary = [""]
+    text_parts = []
+
+    # First pass: extract summary and text
+    extract_summary_and_text(docstring_object.parsed, summary, text_parts)
+
+    # Second pass: parse all section types
+    for section in docstring_object.parsed:
+        kind = section.kind.value
 
         if isinstance(section, DocstringSectionText):
-            if not summary:
-                summary = section.value.strip()
-            full_text_parts.append(section.value.strip())
+            continue  # Already handled in first pass
         elif isinstance(section, DocstringSectionParameters):
-            params = [
-                {
-                    "name": item.name,
-                    "annotation": _resolve_annotation(item.annotation),
-                    "description": item.description.strip() if item.description else "",
-                    "value": str(item.value) if item.value is not None else None,
-                }
-                for item in section.value  # item is DocstringParameter
-            ]
-            sections_data[section_kind_str] = params
+            sections_data[kind] = parse_parameters_section(section)
         elif isinstance(section, DocstringSectionReturns):
-            returns_data = [
-                {
-                    "name": item.name
-                    if hasattr(item, "name")
-                    else "",  # DocstringReturn items may not have a name
-                    "annotation": _resolve_annotation(item.annotation),
-                    "description": item.description.strip() if item.description else "",
-                }
-                for item in section.value  # item is DocstringReturn
-            ]
-            # If only one return entry, store as object, else as list.
-            if len(returns_data) == 1:
-                sections_data[section_kind_str] = returns_data[0]
-            elif len(returns_data) > 1:
-                sections_data[section_kind_str] = returns_data
+            result = parse_returns_section(section)
+            if result:
+                sections_data[kind] = result
         elif isinstance(section, DocstringSectionAttributes):
-            attrs = [
-                {
-                    "name": item.name,
-                    "annotation": _resolve_annotation(item.annotation),
-                    "description": item.description.strip() if item.description else "",
-                }
-                for item in section.value  # item is DocstringAttribute
-            ]
-            sections_data[section_kind_str] = attrs
-        elif isinstance(
-            section, DocstringSectionRaises
-        ):  # Specific handling for "Raises"
-            raises_data = []
-            for item in section.value:  # item is DocstringRaise
-                # DocstringRaise has 'annotation' (for exception type) and
-                # 'description'
-                if hasattr(item, "annotation") and hasattr(item, "description"):
-                    raises_data.append(
-                        {
-                            "type": _resolve_annotation(item.annotation),
-                            "description": item.description.strip()
-                            if item.description
-                            else "",
-                        }
-                    )
-                else:  # Fallback if item is not structured as an expected
-                    # DocstringRaise
-                    logging.warning(
-                        "Unexpected item structure in DocstringSectionRaises: "
-                        f"{str(item)[:100]}"
-                    )
-                    raises_data.append(
-                        {"type": "UnknownException", "description": str(item)}
-                    )
-            sections_data[section_kind_str] = raises_data
+            sections_data[kind] = parse_attributes_section(section)
+        elif isinstance(section, DocstringSectionRaises):
+            sections_data[kind] = parse_raises_section(section)
         elif isinstance(section, DocstringSectionExamples):
-            examples = [
-                {
-                    "title": item.title.strip() if item.title else None,
-                    "code": item.value.strip(),
-                }
-                for item in section.value
-            ]
-            sections_data[section_kind_str] = examples
+            sections_data[kind] = parse_examples_section(section)
         elif isinstance(section, DocstringSectionAdmonition):
-            admonition_payload = section.value
-
-            if (
-                hasattr(admonition_payload, "kind")
-                and isinstance(admonition_payload.kind, str)
-                and hasattr(admonition_payload, "text")
-                and isinstance(admonition_payload.text, str)
-            ):
-                parsed_admonition_kind_str = admonition_payload.kind
-                admonition_text_content = admonition_payload.text
-
-                admonition_data_item = {
-                    "title": section.title.strip()
-                    if section.title
-                    else parsed_admonition_kind_str,
-                    "text": admonition_text_content.strip(),
-                }
-
-                if parsed_admonition_kind_str not in sections_data:
-                    sections_data[parsed_admonition_kind_str] = []
-                sections_data[parsed_admonition_kind_str].append(admonition_data_item)
-            else:
-                logging.warning(
-                    "Unexpected payload structure for DocstringSectionAdmonition "
-                    f"(title: '{section.title}', section kind from parser: "
-                    f"'{section_kind_str}'). Payload type: "
-                    f"{type(admonition_payload)}. Skipping this admonition section."
-                )
+            parse_admonition_section(section, sections_data)
         elif isinstance(
             section,
             (
                 DocstringSectionDeprecated,
                 DocstringSectionWarns,
                 DocstringSectionYields,
-                DocstringSectionReceives,  # DocstringSectionRaises handled above
+                DocstringSectionReceives,
                 DocstringSectionOtherParameters,
                 DocstringSectionClasses,
                 DocstringSectionFunctions,
                 DocstringSectionModules,
             ),
         ):
-            # Generic handling for other structured list-based sections
-            if hasattr(section, "value") and isinstance(section.value, list):
-                values = []
-                for item in section.value:
-                    if isinstance(
-                        item, DocstringNamedElement
-                    ):  # For sections listing named elements
-                        values.append(
-                            {
-                                "name": item.name,
-                                "annotation": _resolve_annotation(item.annotation)
-                                if hasattr(item, "annotation")
-                                else "",
-                                "description": item.description.strip()
-                                if item.description
-                                else "",
-                            }
-                        )
-                    # DocstringWarn, DocstringYield, DocstringReceive
-                    # might have name/description
-                    elif hasattr(item, "name") and hasattr(item, "description"):
-                        values.append(
-                            {
-                                "name": item.name,
-                                "description": item.description.strip()
-                                if item.description
-                                else "",
-                            }
-                        )
-                    elif hasattr(
-                        item, "text"
-                    ):  # For simpler text items in a list section
-                        values.append(item.text.strip())
-                    else:  # Fallback if item structure is unknown within the list
-                        values.append(str(item))
-                sections_data[section_kind_str] = values
-            elif hasattr(section, "value"):  # For sections with a single non-list value
-                sections_data[section_kind_str] = str(section.value)
-        else:  # Fallback for any completely unrecognized section types
-            if hasattr(section, "value"):
-                sections_data[section_kind_str] = str(section.value)
-            else:
-                sections_data[section_kind_str] = "Unsupported section structure"
+            sections_data[kind] = parse_generic_section(section)
+        else:
+            sections_data[kind] = parse_generic_section(section)
 
-    if summary:
-        sections_data["summary"] = summary
+    # Add summary and consolidated text
+    if summary[0]:
+        sections_data["summary"] = summary[0]
 
-    # Consolidate all text parts into a main "text" field.
-    # If summary is already the start of combined text, don't prepend.
-    text_content = "\n\n".join(part for part in full_text_parts if part)
-    if summary and text_content.strip().startswith(
-        summary.strip()
-    ):  # More robust check
+    text_content = "\n\n".join(part for part in text_parts if part)
+    if summary[0] and text_content.strip().startswith(summary[0].strip()):
         sections_data["text"] = text_content
-    elif summary:  # Prepend summary if it's distinct or text_content is empty
+    elif summary[0]:
         sections_data["text"] = (
-            f"{summary}\n\n{text_content}".strip() if text_content else summary
+            f"{summary[0]}\n\n{text_content}".strip() if text_content else summary[0]
         )
     else:
         sections_data["text"] = text_content
@@ -290,724 +423,423 @@ def _parse_docstring_sections(
     return sections_data
 
 
-# Note: The original code had two definitions of _serialize_function.
-# The second one would effectively overwrite the first in Python.
-# I am providing the docstrings updated for both, as per the instruction
-# not to change the code structure.
+# --- Code Serialization ---
 
 
-def _serialize_function(func_obj: Function, module_path: str) -> Dict[str, Any]:
-    """Serializes a griffe Function object, representing a function or method.
+def serialize_typer_option(function_call: ExprCall) -> str:
+    """Formats a typer.Option call as a multi-line string."""
+    function_name = str(function_call.function)
+    arguments: list[str] = []
 
-    This function combines information extracted from the code (such as the
-    signature) with details parsed from its docstring. For the 'returns'
-    section, if multiple return descriptions are found in the docstring,
-    they are concatenated.
+    if hasattr(function_call, "arguments"):
+        arguments = [str(argument) for argument in function_call.arguments]
 
-    Args:
-        func_obj (Function): The griffe Function object to serialize.
-        module_path (str): The canonical path of the parent module or class.
-            This is used for context, though `func_obj.canonical_path`
-            is generally preferred for the function's own path.
+    if not arguments:
+        return f"{function_name}()"
 
-    Returns:
-        Dict[str, Any]: A dictionary representing the function or method.
-        This includes its name, canonical path, parsed docstring sections,
-        parameters (from code, enhanced with docstring descriptions), return
-        information (annotation from code, description from docstring),
-        decorators, asynchronous status, and source file location.
-    """
-    docstring_sections = _parse_docstring_sections(func_obj.docstring)
-    code_signature_params = _serialize_parameters(func_obj.parameters)
-
-    docstring_params_map = {
-        p["name"]: p for p in docstring_sections.get("parameters", [])
-    }
-    for param_info in code_signature_params:
-        if param_info["name"] in docstring_params_map:
-            param_info["description"] = docstring_params_map[param_info["name"]].get(
-                "description", ""
-            )
-
-    # Initialize returns_info with annotation from code signature
-    returns_info = {
-        "annotation": _resolve_annotation(func_obj.returns),
-        "description": "",  # To be populated from docstring
-    }
-
-    # Populate description from parsed docstring "returns" section
-    docstring_returns_section = docstring_sections.get("returns")
-    if isinstance(docstring_returns_section, dict):  # Single return item in docstring
-        returns_info["description"] = docstring_returns_section.get(
-            "description", ""
-        ).strip()
-        # The main 'annotation' in returns_info prioritizes the code signature.
-        # The docstring_sections["returns"] (if it's a dict) will also have an
-        # 'annotation' field parsed from the docstring, which can be used by
-        # the frontend if needed.
-    elif isinstance(docstring_returns_section, list) and docstring_returns_section:
-        # Concatenate all descriptions from the list of return items in the
-        # docstring
-        all_descriptions = [
-            item.get("description", "").strip()
-            for item in docstring_returns_section
-            if item.get(
-                "description", ""
-            ).strip()  # Ensure item and description exist and are not empty
-        ]
-        if all_descriptions:
-            returns_info["description"] = " ".join(all_descriptions)
-        # Similar to the single item case, the main 'annotation' prioritizes
-        # code signature. The list in docstring_sections["returns"] contains
-        # individual annotations and descriptions.
-
-    return {
-        "name": func_obj.name,
-        "path": func_obj.canonical_path,
-        "docstring": func_obj.docstring.value if func_obj.docstring else "",
-        "docstring_sections": docstring_sections,
-        "parameters": code_signature_params,
-        "returns": returns_info,
-        "decorators": _serialize_decorators(func_obj.decorators),
-        "is_async": getattr(func_obj, "is_async", False),
-        "filepath": str(func_obj.filepath.relative_to(pathlib.Path.cwd()))
-        if func_obj.filepath
-        else None,
-        "lineno": func_obj.lineno,
-        "lines": [func_obj.lineno, func_obj.endlineno]
-        if func_obj.lineno and func_obj.endlineno
-        else [],
-    }
+    indent = "    "
+    formatted_arguments = f",\n{indent}".join(arguments)
+    return f"{function_name}(\n{indent}{formatted_arguments}\n)"
 
 
-def _serialize_parameters(parameters: Parameters) -> List[Dict[str, Any]]:
-    """Serializes a griffe Parameters object from a code signature.
-
-    Args:
-        parameters (Parameters): A griffe Parameters object representing the
-            parameters of a function or method as extracted from the source
-            code.
-
-    Returns:
-        List[Dict[str, Any]]: A list of dictionaries, where each dictionary
-        represents a parameter. Each parameter dictionary includes its name,
-        type annotation string, kind (e.g., positional, keyword), and
-        default value string. For 'typer.Option' calls, it attempts to
-        format the default value string as multi-line.
-    """
+def serialize_parameters(parameters: Parameters) -> list[ParameterDict]:
+    """Converts griffe Parameters into serializable dictionaries."""
     if not parameters:
         return []
 
-    serialized_params: List[Dict[str, Any]] = []
-    for param in parameters:
-        default_value_repr: Optional[str] = None
-        if param.default is not None:
+    result: list[ParameterDict] = []
+    for parameter in parameters:
+        default_representation: str | None = None
+
+        if parameter.default is not None:
+            # Special formatting for typer.Option calls
             if (
-                isinstance(param.default, ExprCall)
-                and hasattr(param.default, "function")
-                and str(param.default.function) == "typer.Option"
+                isinstance(parameter.default, ExprCall)
+                and hasattr(parameter.default, "function")
+                and str(parameter.default.function) == "typer.Option"
             ):
-                func_name_str = str(param.default.function)
-
-                args_str_list: List[str] = []
-                if hasattr(param.default, "arguments"):
-                    for arg_expr in param.default.arguments:
-                        args_str_list.append(str(arg_expr))
-
-                if not args_str_list:
-                    default_value_repr = f"{func_name_str}()"
-                else:
-                    arg_indent = "    "
-                    formatted_args = f",\n{arg_indent}".join(args_str_list)
-                    default_value_repr = (
-                        f"{func_name_str}(\n{arg_indent}{formatted_args}\n)"
-                    )
-
+                default_representation = serialize_typer_option(parameter.default)
             else:
-                default_value_repr = str(param.default)
+                default_representation = str(parameter.default)
 
-        serialized_params.append(
+        result.append(
             {
-                "name": param.name,
-                "annotation": _resolve_annotation(param.annotation),
-                "kind": param.kind.value,
-                "default": default_value_repr,
+                "name": parameter.name,
+                "annotation": resolve_annotation(parameter.annotation),
+                "kind": parameter.kind.value,
+                "default": default_representation,
             }
         )
-    return serialized_params
+
+    return result
 
 
-def _serialize_decorators(decorators: List[Decorator]) -> List[Dict[str, Any]]:
-    """Serializes a list of griffe Decorator objects.
-
-    Includes detailed error logging for cases where decorator information
-    might be partially irretrievable.
-
-    Args:
-        decorators (List[Decorator]): A list of griffe Decorator objects.
-
-    Returns:
-        List[Dict[str, Any]]: A list of dictionaries, each representing a
-        decorator. Includes textual representation, callable path, and line
-        numbers. Returns an empty list if the input list is empty.
-    """
-    if not decorators:
-        return []
-
-    serialized_decorators = []
-    for i, dec in enumerate(decorators):
-        decorator_textual_representation = "ERROR_RETRIEVING_TEXT"
-        decorator_callable_path_str = "ERROR_RETRIEVING_PATH"
-        dec_lineno = getattr(dec, "lineno", None)
-        dec_endlineno = getattr(dec, "endlineno", None)
-
-        try:
-            decorator_textual_representation = str(dec.value)
-        except AttributeError as e_val_attr:
-            logging.error(
-                "DECORATOR_SERIALIZATION_DEBUG: AttributeError while processing "
-                f"str(dec.value) for decorator #{i}. Error: {e_val_attr}"
-            )
-        except Exception as e_val_other:
-            logging.error(
-                "DECORATOR_SERIALIZATION_DEBUG: Other exception while processing "
-                f"str(dec.value) for decorator #{i}. Error: {e_val_other}"
-            )
-
-        try:
-            decorator_callable_path_str = dec.callable_path
-        except AttributeError as e_path_attr:
-            logging.error(
-                "DECORATOR_SERIALIZATION_DEBUG: AttributeError while processing "
-                f"dec.callable_path for decorator #{i} (text was: "
-                f"'{decorator_textual_representation}'). Error: {e_path_attr}"
-            )
-            if "'Decorator' object has no attribute 'name'" in str(e_path_attr):
-                logging.error(
-                    "--> Confirmed: dec.callable_path triggered the 'Decorator... "
-                    "no attribute name' error."
-                )
-        except Exception as e_path_other:
-            logging.error(
-                "DECORATOR_SERIALIZATION_DEBUG: Other exception while processing "
-                f"dec.callable_path for decorator #{i} (text was: "
-                f"'{decorator_textual_representation}'). Error: {e_path_other}"
-            )
-
-        serialized_decorators.append(
-            {
-                "text": decorator_textual_representation,
-                "path": decorator_callable_path_str,
-                "lineno": dec_lineno,
-                "endlineno": dec_endlineno,
-            }
-        )
-    return serialized_decorators
+def serialize_decorators(decorators: list[Decorator]) -> list[DecoratorDict]:
+    """Converts griffe Decorator objects into serializable dictionaries."""
+    return [
+        {
+            "text": str(decorator.value),
+            "path": decorator.callable_path,
+            "lineno": getattr(decorator, "lineno", None),
+            "endlineno": getattr(decorator, "endlineno", None),
+        }
+        for decorator in decorators
+    ]
 
 
-def _serialize_function(func_obj: Function, module_path: str) -> Dict[str, Any]:
-    """Serializes a griffe Function object, representing a function or method.
+def merge_parameter_descriptions(
+    code_parameters: list[ParameterDict], docstring_parameters: list[ParameterDict]
+) -> None:
+    """Merges docstring descriptions into code parameters in-place."""
+    docstring_map = {parameter["name"]: parameter for parameter in docstring_parameters}
 
-    This function combines information extracted from the code (such as the
-    signature) with details parsed from its docstring.
-
-    Args:
-        func_obj (Function): The griffe Function object to serialize.
-        module_path (str): The canonical path of the parent module or class.
-            This is used for context, though `func_obj.canonical_path`
-            is generally preferred for the function's own path.
-
-    Returns:
-        Dict[str, Any]: A dictionary representing the function or method.
-        This includes its name, canonical path, parsed docstring sections,
-        parameters (from code, enhanced with docstring descriptions), return
-        information (from code and docstring), decorators, asynchronous
-        status, and source file location.
-    """
-    docstring_sections = _parse_docstring_sections(func_obj.docstring)
-    code_signature_params = _serialize_parameters(func_obj.parameters)
-
-    docstring_params_map = {
-        p["name"]: p for p in docstring_sections.get("parameters", [])
-    }
-    for param_info in code_signature_params:
-        if param_info["name"] in docstring_params_map:
-            param_info["description"] = docstring_params_map[param_info["name"]].get(
+    for code_parameter in code_parameters:
+        if code_parameter["name"] in docstring_map:
+            code_parameter["description"] = docstring_map[code_parameter["name"]].get(
                 "description", ""
             )
 
+
+def build_returns_info(
+    function: Function, docstring_sections: DocstringSections
+) -> ReturnDict:
+    """Builds return information combining code annotation and docstring description."""
     returns_info = {
-        "annotation": _resolve_annotation(func_obj.returns),
+        "annotation": resolve_annotation(function.returns),
         "description": "",
     }
-    docstring_returns_section = docstring_sections.get("returns")
-    if isinstance(docstring_returns_section, dict):
-        returns_info["description"] = docstring_returns_section.get("description", "")
-        if docstring_returns_section.get("annotation"):
-            returns_info["annotation"] = docstring_returns_section.get("annotation")
-    elif isinstance(docstring_returns_section, list) and docstring_returns_section:
-        first_return_item = docstring_returns_section[0]
-        returns_info["description"] = first_return_item.get("description", "")
-        if first_return_item.get("annotation"):
-            returns_info["annotation"] = first_return_item.get("annotation")
-        if len(docstring_returns_section) > 1:
+
+    docstring_returns = docstring_sections.get("returns")
+    if isinstance(docstring_returns, dict):
+        returns_info["description"] = docstring_returns.get("description", "")
+        if docstring_returns.get("annotation"):
+            returns_info["annotation"] = docstring_returns.get("annotation")
+    elif isinstance(docstring_returns, list) and docstring_returns:
+        first_return = docstring_returns[0]
+        returns_info["description"] = first_return.get("description", "")
+        if first_return.get("annotation"):
+            returns_info["annotation"] = first_return.get("annotation")
+        if len(docstring_returns) > 1:
             returns_info["description"] += " (Multiple return paths documented)"
 
+    return returns_info
+
+
+# --- Function/Class/Module Serialization ---
+
+
+def serialize_function(function: Function, module_path: str) -> FunctionDict:
+    """Converts a griffe Function into a serializable dictionary.
+
+    Includes full documentation from both code and docstrings.
+    """
+    docstring_sections = parse_docstring(function.docstring)
+    code_parameters = serialize_parameters(function.parameters)
+
+    # Merge docstring parameter descriptions into code parameters
+    merge_parameter_descriptions(
+        code_parameters, docstring_sections.get("parameters", [])
+    )
+
     return {
-        "name": func_obj.name,
-        "path": func_obj.canonical_path,
-        "docstring": func_obj.docstring.value if func_obj.docstring else "",
+        "name": function.name,
+        "path": function.canonical_path,
+        "docstring": function.docstring.value if function.docstring else "",
         "docstring_sections": docstring_sections,
-        "parameters": code_signature_params,
-        "returns": returns_info,
-        "decorators": _serialize_decorators(func_obj.decorators),
-        "is_async": getattr(func_obj, "is_async", False),
-        "filepath": str(func_obj.filepath.relative_to(pathlib.Path.cwd()))
-        if func_obj.filepath
+        "parameters": code_parameters,
+        "returns": build_returns_info(function, docstring_sections),
+        "decorators": serialize_decorators(function.decorators),
+        "is_async": getattr(function, "is_async", False),
+        "filepath": str(function.filepath.relative_to(pathlib.Path.cwd()))
+        if function.filepath
         else None,
-        "lineno": func_obj.lineno,
-        "lines": [func_obj.lineno, func_obj.endlineno]
-        if func_obj.lineno and func_obj.endlineno
+        "lineno": function.lineno,
+        "lines": [function.lineno, function.endlineno]
+        if function.lineno and function.endlineno
         else [],
     }
 
 
-def _serialize_module(module_obj: Module) -> Dict[str, Any]:
-    """Serializes the immediate contents of a griffe Module object.
+def get_definition_module_path(object: Function | Class | Module) -> str:
+    """Determines the canonical module path where an object is defined."""
+    if (
+        hasattr(object, "parent")
+        and object.parent
+        and hasattr(object.parent, "canonical_path")
+    ):
+        return object.parent.canonical_path
+    elif "." in object.canonical_path:
+        return object.canonical_path.rsplit(".", 1)[0]
+    else:
+        return object.canonical_path
 
-    This function processes the direct members of the given module, such as
-    its top-level functions and classes that are *defined* within this module.
-    It extracts their documentation details and structures them into a dictionary.
-    Imported items (aliases) are not included in the lists of functions/classes
-    for this specific module, as they are defined elsewhere.
 
-    Note:
-        Traversal of submodules and their serialization into the main list
-        are handled by the calling logic in the `main` function.
+def serialize_module(module: Module) -> ModuleDict:
+    """Converts a griffe Module into a serializable dictionary.
 
-    Args:
-        module_obj (Module): The griffe Module object to serialize.
-
-    Returns:
-        Dict[str, Any]: A dictionary representing the module, including its
-        name, canonical path, filepath, parsed docstring, lists of
-        serialized functions and classes (defined in this module), and line number.
+    Only includes functions and classes defined directly in this module,
+    not imported ones.
     """
-    functions_data = []
-    classes_data = []
-    current_module_canonical_path = module_obj.canonical_path
+    functions = []
+    classes = []
+    current_path = module.canonical_path
 
-    for member_name, member_obj_inner in module_obj.members.items():
+    for member_name, member in module.members.items():
         try:
-            target_object: Optional[Union[Function, Class, Module, Alias]] = None
-            if member_obj_inner.is_alias:
-                # Resolve the alias to its final target
-                target_object = member_obj_inner.final_target
-            else:
-                target_object = member_obj_inner
+            # Resolve aliases to their targets
+            target = member.final_target if member.is_alias else member
 
-            if not target_object:
+            if not target or not isinstance(target.canonical_path, str):
                 continue
 
-            # Determine the canonical path of the module where the target object is
-            # defined
-            if not isinstance(target_object.canonical_path, str):
-                logging.debug(
-                    f"Skipping member '{member_name}' in module "
-                    f"'{current_module_canonical_path}' because its target's "
-                    f"canonical path is not a string: {target_object.canonical_path}"
-                )
+            definition_path = get_definition_module_path(target)
+
+            # Skip private members (single underscore) but keep dunder methods
+            if target.name.startswith("_") and not target.name.startswith("__"):
                 continue
 
-            # Use the parent's canonical path for a more direct check of definition
-            # scope
-            defined_in_module_path = ""
-            if (
-                hasattr(target_object, "parent")
-                and target_object.parent
-                and hasattr(target_object.parent, "canonical_path")
-            ):
-                defined_in_module_path = target_object.parent.canonical_path
-            elif (  # Fallback for items that might not have parent set as expected
-                "." in target_object.canonical_path
-            ):
-                defined_in_module_path = target_object.canonical_path.rsplit(".", 1)[0]
-            else:  # Likely a top-level module itself, not a function/class defined
-                # in another module
-                defined_in_module_path = target_object.canonical_path
-
-            if target_object.is_function and isinstance(target_object, Function):
-                # Only include if defined in the current module
-                if defined_in_module_path == current_module_canonical_path:
-                    functions_data.append(
-                        _serialize_function(
-                            target_object, current_module_canonical_path
-                        )
-                    )
-                else:
-                    logging.debug(
-                        f"Function '{target_object.name}' (from "
-                        f"{defined_in_module_path}) is imported into "
-                        f"'{current_module_canonical_path}' and will not be listed "
-                        "directly under it."
-                    )
-            elif target_object.is_class and isinstance(target_object, Class):
-                # Only include if defined in the current module
-                if defined_in_module_path == current_module_canonical_path:
-                    classes_data.append(
-                        _serialize_class(target_object, current_module_canonical_path)
-                    )
-                else:
-                    logging.debug(
-                        f"Class '{target_object.name}' (from "
-                        f"{defined_in_module_path}) is imported into "
-                        f"'{current_module_canonical_path}' and will not be listed "
-                        "directly under it."
-                    )
+            # Only include items defined in this module
+            if target.is_function and isinstance(target, Function):
+                if definition_path == current_path:
+                    functions.append(serialize_function(target, current_path))
+            elif target.is_class and isinstance(target, Class):
+                if definition_path == current_path:
+                    classes.append(serialize_class(target, current_path))
 
         except AliasResolutionError:
-            a = member_obj_inner.target_path if member_obj_inner.is_alias else "self"
-            logging.warning(
-                f"Skipping member '{member_obj_inner.name}' in module "
-                f"'{current_module_canonical_path}' due to AliasResolutionError. "
-                f"Target: '{a}'."
-            )
-            continue
-        except AttributeError as e_attr:
-            logging.error(
-                f"Caught AttributeError for member '{member_obj_inner.name}' in module "
-                f"'{current_module_canonical_path}'. "
-                f"Message: '{e_attr}'. Skipping this member."
-            )
+            # External imports cannot be resolved, skip them
             continue
 
     return {
-        "name": module_obj.name,
-        "path": module_obj.canonical_path,
-        "filepath": str(module_obj.filepath.relative_to(pathlib.Path.cwd()))
-        if module_obj.filepath
+        "name": module.name,
+        "path": module.canonical_path,
+        "filepath": str(module.filepath.relative_to(pathlib.Path.cwd()))
+        if module.filepath
         else None,
-        "docstring": module_obj.docstring.value if module_obj.docstring else "",
-        "docstring_sections": _parse_docstring_sections(module_obj.docstring),
-        "functions": sorted(functions_data, key=lambda x: x["name"]),
-        "classes": sorted(classes_data, key=lambda x: x["name"]),
-        "lineno": module_obj.lineno,
+        "docstring": module.docstring.value if module.docstring else "",
+        "docstring_sections": parse_docstring(module.docstring),
+        "functions": sorted(functions, key=lambda x: x["name"]),
+        "classes": sorted(classes, key=lambda x: x["name"]),
+        "lineno": module.lineno,
     }
 
 
-def _serialize_class(class_obj: Class, module_path: str) -> Dict[str, Any]:
-    """Serializes a griffe Class object.
+def merge_docstring_attributes(
+    code_attributes: list[AttributeDict],
+    docstring_attributes: list[DocstringAttributeDict],
+    class_path: str,
+) -> None:
+    """Merges docstring-only attributes with code attributes.
 
-    This function processes the members of the given class, such as its
-    methods and attributes (both from code and docstrings). Information
-    from code analysis and docstrings is combined. Aliases for methods
-    that cannot be resolved are logged and skipped.
-
-    Args:
-        class_obj (Class): The griffe Class object to serialize.
-        module_path (str): The canonical path of the module containing this
-            class. This is used for context, though `class_obj.canonical_path`
-            is primary for the class itself.
-
-    Returns:
-        Dict[str, Any]: A dictionary representing the class, including its name,
-        canonical path, parsed docstring, lists of serialized methods and
-        attributes, base classes, source file location, and line numbers.
+    Adds attributes that only appear in docstrings, and fills in
+    missing docstrings for code attributes.
     """
-    methods_data = []
-    attributes_data = []
+    existing_names = {attribute["name"] for attribute in code_attributes}
 
-    for member_name, member_obj in class_obj.members.items():
-        if member_obj.is_attribute:
-            attributes_data.append(
+    for docstring_attribute in docstring_attributes:
+        name = docstring_attribute["name"]
+
+        # Skip private attributes (single underscore) but keep dunder methods
+        if name.startswith("_") and not name.startswith("__"):
+            continue
+
+        if name not in existing_names:
+            # Add attribute that only exists in docstring
+            code_attributes.append(
                 {
-                    "name": member_obj.name,
-                    "value": str(member_obj.value)
-                    if member_obj.value is not None
-                    else None,
-                    "annotation": _resolve_annotation(member_obj.annotation),
-                    "docstring": member_obj.docstring.value
-                    if member_obj.docstring
-                    else "",
-                    "path": member_obj.canonical_path,
-                    "filepath": str(member_obj.filepath.relative_to(pathlib.Path.cwd()))
-                    if member_obj.filepath
-                    else None,
-                    "lineno": member_obj.lineno,
-                }
-            )
-        elif member_obj.is_function:
-            try:
-                actual_method_to_serialize: Optional[Function] = None
-                if member_obj.is_alias:
-                    actual_method_to_serialize = cast(Function, member_obj.final_target)
-                else:
-                    actual_method_to_serialize = cast(Function, member_obj)
-
-                if actual_method_to_serialize:
-                    methods_data.append(
-                        _serialize_function(
-                            actual_method_to_serialize, class_obj.canonical_path
-                        )
-                    )
-            except AliasResolutionError:
-                a = member_obj.target_path
-                b = member_obj.is_alias
-                logging.warning(
-                    f"Skipping method (member) '{member_obj.name}' in class "
-                    f"'{class_obj.canonical_path}' due to AliasResolutionError. "
-                    "It likely points to an external or unresolvable callable "
-                    f"(target: '{a if b else 'self'}')."
-                )
-
-    docstring_sections = _parse_docstring_sections(class_obj.docstring)
-
-    # Enhance attributes_data with attributes found only in docstrings,
-    # or add docstrings to attributes found in code.
-    docstring_attrs_list = docstring_sections.get("attributes", [])
-    existing_code_attr_names = {attr["name"] for attr in attributes_data}
-    for ds_attr_info in docstring_attrs_list:
-        if ds_attr_info["name"] not in existing_code_attr_names:
-            attributes_data.append(
-                {
-                    "name": ds_attr_info["name"],
+                    "name": name,
                     "value": None,
-                    "annotation": ds_attr_info.get("annotation", ""),
-                    "docstring": ds_attr_info.get("description", ""),
-                    "path": f"{class_obj.canonical_path}.{ds_attr_info['name']}",
+                    "annotation": docstring_attribute.get("annotation", ""),
+                    "docstring": docstring_attribute.get("description", ""),
+                    "path": f"{class_path}.{name}",
                     "filepath": None,
                     "lineno": None,
                 }
             )
         else:
-            # If attribute was found in code, try to add its docstring description.
-            for code_attr in attributes_data:
-                if (
-                    code_attr["name"] == ds_attr_info["name"]
-                    and not code_attr["docstring"]
-                ):
-                    code_attr["docstring"] = ds_attr_info.get("description", "")
+            # Fill in docstring for existing code attribute
+            for code_attribute in code_attributes:
+                if code_attribute["name"] == name and not code_attribute["docstring"]:
+                    code_attribute["docstring"] = docstring_attribute.get(
+                        "description", ""
+                    )
                     break
 
+
+def serialize_class(class_object: Class, module_path: str) -> ClassDict:
+    """Converts a griffe Class into a serializable dictionary.
+
+    Includes full documentation from both code and docstrings.
+    """
+    methods = []
+    attributes = []
+
+    for member_name, member in class_object.members.items():
+        # Skip private members (single underscore) but keep dunder methods
+        if member.name.startswith("_") and not member.name.startswith("__"):
+            continue
+
+        if member.is_attribute:
+            attributes.append(
+                {
+                    "name": member.name,
+                    "value": str(member.value) if member.value is not None else None,
+                    "annotation": resolve_annotation(member.annotation),
+                    "docstring": member.docstring.value if member.docstring else "",
+                    "path": member.canonical_path,
+                    "filepath": str(member.filepath.relative_to(pathlib.Path.cwd()))
+                    if member.filepath
+                    else None,
+                    "lineno": member.lineno,
+                }
+            )
+        elif member.is_function:
+            try:
+                actual_method = member.final_target if member.is_alias else member
+                if actual_method:
+                    methods.append(
+                        serialize_function(actual_method, class_object.canonical_path)
+                    )
+            except AliasResolutionError:
+                # External imports cannot be resolved, skip them
+                continue
+
+    docstring_sections = parse_docstring(class_object.docstring)
+    merge_docstring_attributes(
+        attributes,
+        docstring_sections.get("attributes", []),
+        class_object.canonical_path,
+    )
+
     return {
-        "name": class_obj.name,
-        "path": class_obj.canonical_path,
-        "docstring": class_obj.docstring.value if class_obj.docstring else "",
+        "name": class_object.name,
+        "path": class_object.canonical_path,
+        "docstring": class_object.docstring.value if class_object.docstring else "",
         "docstring_sections": docstring_sections,
-        "methods": sorted(
-            methods_data, key=lambda x: (x["name"] != "__init__", x["name"])
-        ),
-        "attributes": sorted(attributes_data, key=lambda x: x["name"]),
-        "bases": [_resolve_annotation(base) for base in class_obj.bases],
-        "filepath": str(class_obj.filepath.relative_to(pathlib.Path.cwd()))
-        if class_obj.filepath
+        "methods": sorted(methods, key=lambda x: (x["name"] != "__init__", x["name"])),
+        "attributes": sorted(attributes, key=lambda x: x["name"]),
+        "bases": [resolve_annotation(base) for base in class_object.bases],
+        "filepath": str(class_object.filepath.relative_to(pathlib.Path.cwd()))
+        if class_object.filepath
         else None,
-        "lineno": class_obj.lineno,
-        "lines": [class_obj.lineno, class_obj.endlineno]
-        if class_obj.lineno and class_obj.endlineno
+        "lineno": class_object.lineno,
+        "lines": [class_object.lineno, class_object.endlineno]
+        if class_object.lineno and class_object.endlineno
         else [],
     }
 
 
-def main() -> None:
-    """Loads Python package structure and docstrings, then serializes to JSON.
+# --- Module Collection ---
 
-    The script initializes a GriffeLoader to parse the Python package
-    defined by `PACKAGE_PATH`. It then recursively traverses the package
-    structure. For each module belonging to the target package, it
-    serializes its documentation details (docstring, functions, classes, etc.)
-    using helper functions.
 
-    The collected data for all relevant modules is compiled into a list,
-    sorted by module path, and then written to the JSON file specified
-    by `OUTPUT_PATH`.
+def is_target_package_module(module: Module, package_name: str) -> bool:
+    """Checks if a module belongs to the target package.
+
+    Uses both filepath and canonical name to determine membership.
     """
+    # Check by filepath
+    if module.filepath:
+        absolute_module_path = module.filepath.resolve()
+        absolute_package_path = PACKAGE_PATH.resolve()
+        if (
+            absolute_package_path == absolute_module_path
+            or absolute_package_path in absolute_module_path.parents
+        ):
+            return True
+
+    # Check by canonical name
+    canonical_name = module.canonical_path
+    if (
+        package_name
+        and isinstance(canonical_name, str)
+        and canonical_name.startswith(package_name)
+    ):
+        return True
+
+    return False
+
+
+def collect_modules_recursively(
+    module: Module, package_name: str, processed: set[str]
+) -> list[ModuleDict]:
+    """Recursively collects and serializes all modules in the package.
+
+    Args:
+        module: The current module to process.
+        package_name: Name of the root package.
+        processed: Set of already processed module paths to avoid duplicates.
+
+    Returns:
+        List of serialized module dictionaries.
+    """
+    if (
+        not module
+        or not hasattr(module, "canonical_path")
+        or module.canonical_path in processed
+    ):
+        return []
+
+    if not is_target_package_module(module, package_name):
+        return []
+
+    logging.info(f"Processing module: {module.canonical_path}")
+    processed.add(module.canonical_path)
+
+    modules = [serialize_module(module)]
+
+    # Recursively process submodules
+    for member in module.members.values():
+        try:
+            if member.is_module:
+                actual_member = member.final_target if member.is_alias else member
+                if actual_member:
+                    modules.extend(
+                        collect_modules_recursively(
+                            actual_member, package_name, processed
+                        )
+                    )
+        except AliasResolutionError:
+            # External module imports cannot be resolved, skip them
+            continue
+
+    return modules
+
+
+# --- Main Entry Point ---
+
+
+def main() -> None:
+    """Generates documentation data from Python package and writes to JSON file."""
     logging.info(f"Starting documentation generation for package: {PACKAGE_PATH}")
+
     loader = GriffeLoader(
         search_paths=[str(PACKAGE_PATH.parent)], docstring_parser="google"
     )
+    package_name = PACKAGE_PATH.name
+    root_package = loader.load(package_name)
+    loader.resolve_aliases(implicit=True, external=False)
 
-    package_name = ""
-    root_package_obj: Optional[Union[Module, Alias]] = None
-    try:
-        package_name = PACKAGE_PATH.name
-        root_package_obj = loader.load(package_name)
-        if root_package_obj:
-            # Resolve aliases within the loaded package, excluding external ones.
-            loader.resolve_aliases(implicit=True, external=False)
-        else:
-            logging.error(
-                f"Failed to load root package object for '{package_name}'."
-                "Griffe loader.load() returned None."
-            )
-            return
-    except Exception as e:
-        logging.error(
-            f"Failed to load package '{package_name or str(PACKAGE_PATH)}' "
-            f"with Griffe: {e}"
-        )
-        logging.exception("Griffe loading error details:")
-        return
-
-    all_modules_data: List[Dict[str, Any]] = []
-    processed_paths: set[str] = set()
-
-    def collect_all_modules_recursively(
-        current_module_obj: Module,
-    ) -> None:
-        """Recursively collects and serializes module data.
-
-        This function checks if a module has already been processed. If not,
-        it verifies if the module belongs to the target package (defined by
-        `PACKAGE_PATH`). If it does, the module is serialized and added to
-        `all_modules_data`. The function then iterates through the module's
-        members. If any member is a submodule (or an alias to a module
-        that can be resolved within the package context), it makes a
-        recursive call to process that submodule. Unresolvable aliases,
-        especially to external modules, are skipped.
-
-        Args:
-            current_module_obj (Module): The griffe Module object to process.
-        """
-        if (
-            not current_module_obj
-            or not hasattr(current_module_obj, "canonical_path")
-            or current_module_obj.canonical_path in processed_paths
-        ):
-            return
-
-        module_canonical_name = current_module_obj.canonical_path
-
-        # Determine if the current module is part of the target package.
-        is_target_module = False
-        if current_module_obj.filepath:
-            try:
-                # Compare resolved absolute filepaths.
-                abs_module_filepath = current_module_obj.filepath.resolve(strict=True)
-                abs_package_path = PACKAGE_PATH.resolve(strict=True)
-                if (
-                    abs_package_path == abs_module_filepath
-                    or abs_package_path in abs_module_filepath.parents
-                ):
-                    is_target_module = True
-            except FileNotFoundError:
-                logging.debug(
-                    "File not found for module path "
-                    f"{current_module_obj.filepath}, cannot confirm it's a "
-                    "target module by path during recursion."
-                )
-            except Exception as path_exc:  # Catch other path resolution errors.
-                logging.debug(
-                    f"Could not resolve/compare paths for {current_module_obj.filepath}"
-                    f" during recursion: {path_exc}"
-                )
-
-        # Fallback check based on canonical name if filepath check was inconclusive.
-        if (
-            not is_target_module
-            and package_name
-            and isinstance(module_canonical_name, str)
-            and module_canonical_name.startswith(package_name)
-        ):
-            is_target_module = True
-
-        if not is_target_module:
-            logging.debug(
-                "Skipping recursive processing for module (not in target package): "
-                f"{module_canonical_name}"
-            )
-            return
-
-        logging.info(
-            f"Processing module: {module_canonical_name} "
-            f"(File: {current_module_obj.filepath})"
-        )
-        processed_paths.add(module_canonical_name)
-
-        serialized_module = _serialize_module(current_module_obj)
-        all_modules_data.append(serialized_module)
-
-        # Recursively process member submodules.
-        for member_obj in current_module_obj.members.values():
-            actual_member_obj_to_recurse: Optional[Module] = None
-            try:
-                if member_obj.is_module:
-                    if member_obj.is_alias:
-                        actual_member_obj_to_recurse = cast(
-                            Module, member_obj.final_target
-                        )
-                    else:
-                        actual_member_obj_to_recurse = cast(Module, member_obj)
-
-            except AliasResolutionError:
-                a = member_obj.target_path
-                b = member_obj.is_alias
-                logging.warning(
-                    f"Skipping recursive check for member "
-                    f"'{member_obj.name}' in module "
-                    f"'{current_module_obj.canonical_path}' due to "
-                    "AliasResolutionError "
-                    "when determining if it's a module "
-                    f"(target: '{a if b else 'self'}')."
-                )
-            except AttributeError as e_attr:
-                logging.error(
-                    f"Caught AttributeError for member '{member_obj.name}' in module "
-                    f"'{current_module_obj.canonical_path}' "
-                    "during module check. Message: "
-                    f"'{e_attr}'"
-                )
-            except Exception as e_broad:
-                logging.error(
-                    "Caught a general exception of type "
-                    f"'{type(e_broad).__name__}' for member '{member_obj.name}' "
-                    f"in module '{current_module_obj.canonical_path}' during module "
-                    f"check. Message: '{e_broad}'"
-                )
-
-            if actual_member_obj_to_recurse:
-                collect_all_modules_recursively(actual_member_obj_to_recurse)
-
-    actual_root_module_to_process: Optional[Module] = None
-    if root_package_obj:
-        if isinstance(root_package_obj, Module):
-            actual_root_module_to_process = root_package_obj
-        elif (
-            isinstance(root_package_obj, Alias)
-            and hasattr(root_package_obj, "resolved_target")
-            and isinstance(root_package_obj.resolved_target, Module)
-        ):
-            actual_root_module_to_process = cast(
-                Module, root_package_obj.resolved_target
-            )
-
-    if actual_root_module_to_process:
-        logging.info(
-            "Starting recursive module collection from root: "
-            f"{actual_root_module_to_process.canonical_path}"
-        )
-        collect_all_modules_recursively(actual_root_module_to_process)
+    # Resolve root module from loaded package
+    if isinstance(root_package, Module):
+        root_module = root_package
+    elif isinstance(root_package, Alias) and isinstance(
+        root_package.resolved_target, Module
+    ):
+        root_module = root_package.resolved_target
     else:
-        logging.error(
-            "Root package object is not a Module or could not be resolved to "
-            "a Module. Cannot collect modules."
-        )
-        return
+        raise ValueError(f"Failed to resolve root module for package: {package_name}")
 
-    final_data = {"modules": sorted(all_modules_data, key=lambda x: x["path"])}
+    logging.info(f"Collecting modules from root: {root_module.canonical_path}")
+    processed_paths: set[str] = set()
+    modules = collect_modules_recursively(root_module, package_name, processed_paths)
 
-    # Ensure the output directory exists.
+    output_data = {"modules": sorted(modules, key=lambda x: x["path"])}
+
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as file:
+        json.dump(output_data, file, indent=2, ensure_ascii=False)
 
-    try:
-        with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-            json.dump(final_data, f, indent=2, ensure_ascii=False)
-        logging.info(f"Documentation data successfully written to: {OUTPUT_PATH}")
-    except OSError as e:
-        logging.error(f"Failed to write JSON output to {OUTPUT_PATH}: {e}")
-    except TypeError as e:
-        logging.error(f"JSON serialization error: {e}. Check data structures.")
-        logging.exception("Serialization error details:")
+    logging.info(f"Documentation data successfully written to: {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ console = Console()
 # --- Helper Functions ---
 
 
-def fetch_manifest() -> dict[str, Any] | None:
+def _fetch_manifest() -> dict[str, Any] | None:
     """Fetches the remote data manifest.
 
     Returns:
@@ -45,7 +45,7 @@ def fetch_manifest() -> dict[str, Any] | None:
         return None
 
 
-def install_toolchain(version: str | None = None) -> None:
+def _install_toolchain(version: str | None = None) -> None:
     """Installs the data toolchain for the specified version.
 
     Downloads and verifies all required data files (database, FAISS index, etc.)
@@ -54,7 +54,7 @@ def install_toolchain(version: str | None = None) -> None:
     Args:
         version: The version to install. If None, uses the default version.
     """
-    manifest = fetch_manifest()
+    manifest = _fetch_manifest()
     if not manifest:
         raise ValueError("Failed to fetch manifest")
 
@@ -122,7 +122,7 @@ def fetch(
     Downloads the database, FAISS index, and other required data files.
     Files are verified with SHA256 checksums and automatically decompressed.
     """
-    install_toolchain(version)
+    _install_toolchain(version)
 
 
 @app.command("clean")
