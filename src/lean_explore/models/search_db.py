@@ -52,6 +52,9 @@ class Declaration(Base):
     name: Mapped[str] = mapped_column(Text, unique=True, index=True, nullable=False)
     """Fully qualified Lean name (e.g., 'Nat.add')."""
 
+    kind: Mapped[str] = mapped_column(Text, index=True, nullable=False)
+    """Declaration kind (e.g., 'theorem', 'def', 'structure', 'class')."""
+
     module: Mapped[str] = mapped_column(Text, index=True, nullable=False)
     """Module name (e.g., 'Mathlib.Data.List.Basic')."""
 

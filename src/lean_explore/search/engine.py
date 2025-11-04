@@ -180,6 +180,7 @@ class SearchEngine:
         return SearchResult(
             id=decl.id,
             name=decl.name,
+            kind=decl.kind,
             module=decl.module,
             docstring=decl.docstring,
             source_text=decl.source_text,

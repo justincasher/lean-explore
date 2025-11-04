@@ -201,6 +201,7 @@ def _parse_declarations_from_files(
                 declarations.append(
                     Declaration(
                         name=information["name"],
+                        kind=information["kind"],
                         module=module_name,
                         docstring=information.get("doc"),
                         source_text=source_text,
@@ -255,6 +256,7 @@ async def _insert_declarations_batch(
                         insert(DBDeclaration)
                         .values(
                             name=declaration.name,
+                            kind=declaration.kind,
                             module=declaration.module,
                             docstring=declaration.docstring,
                             source_text=declaration.source_text,
