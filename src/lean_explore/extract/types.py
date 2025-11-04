@@ -9,6 +9,9 @@ class Declaration(BaseModel):
     name: str
     """Fully qualified Lean name."""
 
+    kind: str
+    """Declaration kind (e.g., 'theorem', 'def', 'structure', 'class')."""
+
     module: str
     """Module name."""
 

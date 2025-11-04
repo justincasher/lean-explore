@@ -16,6 +16,9 @@ class SearchResult(BaseModel):
     name: str
     """Fully qualified Lean name (e.g., 'Nat.add')."""
 
+    kind: str
+    """Declaration kind (e.g., 'theorem', 'def', 'structure', 'class')."""
+
     module: str
     """Module name (e.g., 'Mathlib.Data.List.Basic')."""
 
