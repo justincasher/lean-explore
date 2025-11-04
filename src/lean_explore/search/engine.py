@@ -1,11 +1,15 @@
 """Core search engine functionality for Lean declarations.
 
-This module provides the core search functionality using PostgreSQL with pgvector
-for semantic search, combined with BM25 lexical matching and PageRank scoring.
+This module provides the core search functionality using SQLite for storage,
+FAISS for semantic search, combined with BM25 lexical matching and PageRank scoring.
 """
 
+import json
 import logging
+from pathlib import Path
 
+import faiss
+import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
@@ -19,7 +23,7 @@ logger = logging.getLogger(__name__)
 class SearchEngine:
     """Core search engine for Lean declarations.
 
-    Combines semantic search (pgvector), lexical matching (BM25),
+    Combines semantic search (FAISS), lexical matching (BM25),
     and PageRank scoring to rank results.
     """
 
@@ -28,6 +32,8 @@ class SearchEngine:
         db_url: str | None = None,
         embedding_client: EmbeddingClient | None = None,
         embedding_model_name: str = "nomic-ai/nomic-embed-text-v1",
+        faiss_index_path: Path | None = None,
+        faiss_ids_map_path: Path | None = None,
     ):
         """Initialize the search engine.
 
@@ -35,12 +41,35 @@ class SearchEngine:
             db_url: Database URL. Defaults to configured URL.
             embedding_client: Client for generating embeddings. Defaults to new client.
             embedding_model_name: Name of the embedding model to use.
+            faiss_index_path: Path to FAISS index. Defaults to config path.
+            faiss_ids_map_path: Path to FAISS ID mapping. Defaults to config path.
         """
         self.db_url = db_url or Config.DATABASE_URL
         self.engine: AsyncEngine = create_async_engine(self.db_url)
         self.embedding_client = embedding_client or EmbeddingClient(
             model_name=embedding_model_name
         )
+
+        faiss_index_path = faiss_index_path or Config.FAISS_INDEX_PATH
+        faiss_ids_map_path = faiss_ids_map_path or Config.FAISS_IDS_MAP_PATH
+
+        if not faiss_index_path.exists():
+            raise FileNotFoundError(
+                f"FAISS index not found at {faiss_index_path}. "
+                "Please run 'lean-explore download' to fetch the data."
+            )
+        if not faiss_ids_map_path.exists():
+            raise FileNotFoundError(
+                f"FAISS ID mapping not found at {faiss_ids_map_path}. "
+                "Please run 'lean-explore download' to fetch the data."
+            )
+
+        logger.info(f"Loading FAISS index from {faiss_index_path}")
+        self.faiss_index = faiss.read_index(str(faiss_index_path))
+
+        logger.info(f"Loading FAISS ID mapping from {faiss_ids_map_path}")
+        with open(faiss_ids_map_path) as file:
+            self.faiss_id_to_declaration_id: list[int] = json.load(file)
 
     async def search(
         self,
@@ -62,41 +91,38 @@ class SearchEngine:
         Returns:
             List of SearchResult objects, ranked by combined score.
         """
+        embedding_response = await self.embedding_client.embed([query])
+        query_embedding = np.array([embedding_response.embeddings[0]], dtype=np.float32)
+
+        num_candidates = limit * 3
+        distances, faiss_indices = self.faiss_index.search(
+            query_embedding, num_candidates
+        )
+
+        declaration_ids = [
+            self.faiss_id_to_declaration_id[idx]
+            for idx in faiss_indices[0]
+            if idx < len(self.faiss_id_to_declaration_id)
+        ]
+
+        semantic_scores = {}
+        for idx, distance in zip(faiss_indices[0], distances[0]):
+            if idx < len(self.faiss_id_to_declaration_id):
+                declaration_id = self.faiss_id_to_declaration_id[idx]
+                similarity = 1 / (1 + distance)
+                semantic_scores[declaration_id] = similarity
+
         async with AsyncSession(self.engine) as session:
-            # Generate query embedding
-            embedding_response = await self.embedding_client.embed([query])
-            query_embedding = embedding_response.embeddings[0]
-
-            # Perform vector similarity search
-            # Using informalization_embedding as primary semantic signal
-            stmt = (
-                select(Declaration)
-                .order_by(
-                    Declaration.informalization_embedding.cosine_distance(
-                        query_embedding
-                    )
-                )
-                .limit(limit * 3)
-            )  # Get more candidates for reranking
-
+            stmt = select(Declaration).where(Declaration.id.in_(declaration_ids))
             result = await session.execute(stmt)
             candidates = result.scalars().all()
 
-            # Score and rank candidates
             scored_results = []
             for decl in candidates:
-                # Semantic similarity (cosine similarity, 0-1)
-                semantic_score = self._compute_semantic_similarity(
-                    query_embedding, decl
-                )
-
-                # PageRank score (normalize to 0-1)
+                semantic_score = semantic_scores.get(decl.id, 0.0)
                 pagerank_score = decl.pagerank or 0.0
-
-                # Lexical match score (BM25-like)
                 lexical_score = self._compute_lexical_score(query, decl)
 
-                # Combined weighted score
                 final_score = (
                     semantic_weight * semantic_score
                     + pagerank_weight * pagerank_score
@@ -105,7 +131,6 @@ class SearchEngine:
 
                 scored_results.append((decl, final_score))
 
-            # Sort by score and convert to SearchResult
             scored_results.sort(key=lambda x: x[1], reverse=True)
             return [self._to_search_result(decl) for decl, _ in scored_results[:limit]]
 
@@ -121,26 +146,6 @@ class SearchEngine:
         async with AsyncSession(self.engine) as session:
             decl = await session.get(Declaration, declaration_id)
             return self._to_search_result(decl) if decl else None
-
-    def _compute_semantic_similarity(
-        self, query_embedding: list[float], decl: Declaration
-    ) -> float:
-        """Compute semantic similarity score.
-
-        Args:
-            query_embedding: Query embedding vector.
-            decl: Declaration to score.
-
-        Returns:
-            Similarity score (0-1).
-        """
-        # pgvector cosine_distance returns distance, convert to similarity
-        # This is a simplified version - in practice, use pgvector's built-in similarity
-        if decl.informalization_embedding:
-            # Cosine similarity = 1 - cosine_distance
-            # This is approximate; actual computation happens in SQL
-            return 0.8  # Placeholder - actual scoring done in query
-        return 0.0
 
     def _compute_lexical_score(self, query: str, decl: Declaration) -> float:
         """Compute lexical matching score.

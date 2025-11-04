@@ -1,11 +1,11 @@
 """SQLAlchemy ORM models for Lean declaration database.
 
 Simple schema for a Lean declaration search engine.
-Uses SQLAlchemy 2.0 syntax with pgvector for vector similarity search.
+Uses SQLAlchemy 2.0 syntax with SQLite for storage and FAISS for vector search.
 """
 
-from pgvector.sqlalchemy import Vector
-from sqlalchemy import Float, Index, Integer, Text
+from sqlalchemy import Float, Integer, Text
+from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -19,32 +19,6 @@ class Declaration(Base):
     """Represents a Lean declaration for search."""
 
     __tablename__ = "declarations"
-    __table_args__ = (
-        Index(
-            "ix_declarations_name_embedding_hnsw",
-            "name_embedding",
-            postgresql_using="hnsw",
-            postgresql_ops={"name_embedding": "vector_cosine_ops"},
-        ),
-        Index(
-            "ix_declarations_informalization_embedding_hnsw",
-            "informalization_embedding",
-            postgresql_using="hnsw",
-            postgresql_ops={"informalization_embedding": "vector_cosine_ops"},
-        ),
-        Index(
-            "ix_declarations_source_text_embedding_hnsw",
-            "source_text_embedding",
-            postgresql_using="hnsw",
-            postgresql_ops={"source_text_embedding": "vector_cosine_ops"},
-        ),
-        Index(
-            "ix_declarations_docstring_embedding_hnsw",
-            "docstring_embedding",
-            postgresql_using="hnsw",
-            postgresql_ops={"docstring_embedding": "vector_cosine_ops"},
-        ),
-    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     """Primary key identifier."""
@@ -70,23 +44,21 @@ class Declaration(Base):
     informalization: Mapped[str | None] = mapped_column(Text, nullable=True)
     """Natural language description of the declaration."""
 
-    name_embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(768), nullable=True
-    )
+    name_embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
     """768-dimensional embedding of the declaration name."""
 
     informalization_embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(768), nullable=True
+        JSON, nullable=True
     )
     """768-dimensional embedding of the informalization text."""
 
     source_text_embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(768), nullable=True
+        JSON, nullable=True
     )
     """768-dimensional embedding of the source text."""
 
     docstring_embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(768), nullable=True
+        JSON, nullable=True
     )
     """768-dimensional embedding of the docstring."""
 

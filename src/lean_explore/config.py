@@ -13,48 +13,61 @@ import pathlib
 class Config:
     """Application-wide configuration settings."""
 
+    CACHE_DIRECTORY: pathlib.Path = pathlib.Path(
+        os.getenv(
+            "LEAN_EXPLORE_CACHE_DIR",
+            pathlib.Path.home() / ".lean_explore" / "cache",
+        )
+    )
+    """Cache directory for downloaded data (used by search engine and MCP server).
+
+    Can be overridden with LEAN_EXPLORE_CACHE_DIR environment variable.
+    Default: ~/.lean_explore/cache
+    """
+
     DATA_DIRECTORY: pathlib.Path = pathlib.Path(
         os.getenv(
             "LEAN_EXPLORE_DATA_DIR",
-            pathlib.Path.home() / ".lean_explore" / "data",
+            pathlib.Path(__file__).parent.parent.parent / "data",
         )
     )
-    """Base directory for all lean_explore data storage.
+    """Local data directory for extraction pipeline output.
 
     Can be overridden with LEAN_EXPLORE_DATA_DIR environment variable.
-    Default: ~/.lean_explore/data
+    Default: <repo-root>/data
     """
-
-    TOOLCHAINS_DIRECTORY: pathlib.Path = DATA_DIRECTORY / "toolchains"
-    """Directory containing versioned data toolchains."""
-
-    ACTIVE_TOOLCHAIN_VERSION: str = "1.0.0"
-    """Version identifier for the currently active data toolchain."""
-
-    ACTIVE_TOOLCHAIN_DIRECTORY: pathlib.Path = (
-        TOOLCHAINS_DIRECTORY / ACTIVE_TOOLCHAIN_VERSION
-    )
-    """Directory for the active toolchain version's data files."""
 
     DEFAULT_LEAN_VERSION: str = "4.24.0"
     """Lean version for database naming and dependency resolution."""
 
-    DB_BASE_URL: str = os.getenv(
-        "LEAN_EXPLORE_DB_BASE_URL",
-        "postgresql+asyncpg://localhost:5432",
+    ACTIVE_VERSION: str = f"v{DEFAULT_LEAN_VERSION}"
+    """Active version identifier (e.g., v4.24.0)."""
+
+    ACTIVE_CACHE_PATH: pathlib.Path = CACHE_DIRECTORY / ACTIVE_VERSION
+    """Directory for the active version's cached data files."""
+
+    ACTIVE_DATA_PATH: pathlib.Path = DATA_DIRECTORY / ACTIVE_VERSION
+    """Directory for the active version's local data files."""
+
+    DATABASE_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "lean_explore.db"
+    """Path to SQLite database file in cache (used by search engine)."""
+
+    FAISS_INDEX_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "informalization_faiss.index"
+    """Path to FAISS index file in cache (using informalization embeddings)."""
+
+    FAISS_IDS_MAP_PATH: pathlib.Path = (
+        ACTIVE_CACHE_PATH / "informalization_faiss_ids_map.json"
     )
-    """Base PostgreSQL connection URL without database name.
+    """Path to FAISS ID mapping file in cache."""
 
-    Can be overridden with LEAN_EXPLORE_DB_BASE_URL environment variable.
-    Default: postgresql+asyncpg://localhost:5432
-    PostgreSQL will use the current system user when no username is specified.
-    """
+    DATABASE_URL: str = f"sqlite+aiosqlite:///{DATABASE_PATH}"
+    """Async SQLAlchemy database URL for SQLite (used by search engine)."""
 
-    DATABASE_NAME: str = f"lean_explore_{DEFAULT_LEAN_VERSION}"
-    """Database name constructed from Lean version (e.g., lean_explore_4.23.0)."""
+    EXTRACTION_DATABASE_PATH: pathlib.Path = ACTIVE_DATA_PATH / "lean_explore.db"
+    """Path to SQLite database file in data directory (used by extraction)."""
 
-    DATABASE_URL: str = f"{DB_BASE_URL}/{DATABASE_NAME}"
-    """Async SQLAlchemy database URL constructed from DB_BASE_URL and DATABASE_NAME."""
+    EXTRACTION_DATABASE_URL: str = f"sqlite+aiosqlite:///{EXTRACTION_DATABASE_PATH}"
+    """Async SQLAlchemy database URL for extraction pipeline."""
 
     EXTRACT_PACKAGES: set[str] = {
         "batteries",

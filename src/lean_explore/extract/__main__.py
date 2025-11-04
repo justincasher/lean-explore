@@ -5,6 +5,7 @@ This module provides functions to coordinate the complete data extraction pipeli
 2. Calculate PageRank scores based on dependencies
 3. Generate informal natural language descriptions
 4. Generate vector embeddings for semantic search
+5. Build FAISS indices for vector similarity search
 """
 
 import asyncio
@@ -16,54 +17,19 @@ import subprocess
 from pathlib import Path
 
 import click
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 import lean_explore.config
 from lean_explore.config import Config
 from lean_explore.extract.doc_parser import extract_declarations
 from lean_explore.extract.embeddings import generate_embeddings
+from lean_explore.extract.index import build_faiss_indices
 from lean_explore.extract.informalize import informalize_declarations
 from lean_explore.extract.pagerank import calculate_pagerank
 from lean_explore.models import Base
 from lean_explore.util import setup_logging
 
 logger = logging.getLogger(__name__)
-
-
-async def ensure_database_exists(database_url: str, database_name: str) -> None:
-    """Ensure the database exists, creating it if necessary.
-
-    Args:
-        database_url: Full database URL.
-        database_name: Name of the database to create.
-    """
-    # Try to connect to check if database exists
-    test_engine = create_async_engine(database_url, echo=False)
-    try:
-        async with test_engine.connect():
-            logger.info(f"Database {database_name} already exists")
-    except Exception as e:
-        # Database doesn't exist, create it
-        if "does not exist" in str(e):
-            logger.info(f"Database {database_name} does not exist, creating it...")
-
-            # Connect to default postgres database to create our database
-            base_url = database_url.rsplit("/", 1)[0]
-            maintenance_url = f"{base_url}/postgres"
-            maintenance_engine = create_async_engine(
-                maintenance_url, isolation_level="AUTOCOMMIT", echo=False
-            )
-
-            async with maintenance_engine.connect() as connection:
-                await connection.execute(text(f'CREATE DATABASE "{database_name}"'))
-
-            await maintenance_engine.dispose()
-            logger.info(f"Database {database_name} created successfully")
-        else:
-            raise
-    finally:
-        await test_engine.dispose()
 
 
 async def create_database_schema(engine: AsyncEngine) -> None:
@@ -74,8 +40,6 @@ async def create_database_schema(engine: AsyncEngine) -> None:
     """
     logger.info("Creating database schema...")
     async with engine.begin() as connection:
-        # Enable pgvector extension for vector similarity search
-        await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await connection.run_sync(Base.metadata.create_all)
     logger.info("Database schema created successfully")
 
@@ -161,6 +125,13 @@ async def run_embeddings_step(
     logger.info("Embedding generation complete")
 
 
+async def run_index_step(engine: AsyncEngine) -> None:
+    """Build FAISS indices from embeddings."""
+    logger.info("Step 5: Building FAISS indices...")
+    await build_faiss_indices(engine)
+    logger.info("FAISS index building complete")
+
+
 async def run_pipeline(
     database_url: str,
     run_doc_gen4: bool = False,
@@ -168,6 +139,7 @@ async def run_pipeline(
     pagerank: bool = True,
     informalize: bool = True,
     embeddings: bool = True,
+    index: bool = True,
     pagerank_alpha: float = 0.85,
     pagerank_batch_size: int = 1000,
     informalize_model: str = "google/gemini-2.5-flash",
@@ -182,12 +154,13 @@ async def run_pipeline(
     """Run the Lean declaration extraction and enrichment pipeline.
 
     Args:
-        database_url: PostgreSQL database URL (e.g., postgresql+asyncpg://user:pass@host/db)
+        database_url: SQLite database URL (e.g., sqlite+aiosqlite:///path/to/db)
         run_doc_gen4: Run doc-gen4 to generate documentation before parsing
         parse_docs: Run doc-gen4 parsing step
         pagerank: Run PageRank calculation step
         informalize: Run informalization step
         embeddings: Run embeddings generation step
+        index: Run FAISS index building step
         pagerank_alpha: PageRank damping parameter
         pagerank_batch_size: Batch size for PageRank updates
         informalize_model: LLM model for generating informalizations
@@ -219,14 +192,12 @@ async def run_pipeline(
         steps_enabled.append("informalize")
     if embeddings:
         steps_enabled.append("embeddings")
+    if index:
+        steps_enabled.append("index")
 
     logger.info("Starting Lean Explore extraction pipeline")
     logger.info(f"Database URL: {database_url}")
     logger.info(f"Steps to run: {', '.join(steps_enabled)}")
-
-    # Ensure database exists before trying to connect
-    database_name = database_url.rsplit("/", 1)[1]
-    await ensure_database_exists(database_url, database_name)
 
     engine = create_async_engine(database_url, echo=verbose)
 
@@ -256,11 +227,10 @@ async def run_pipeline(
                 engine, embedding_model, embedding_batch_size, embedding_limit
             )
 
-        logger.info("Pipeline completed successfully!")
+        if index:
+            await run_index_step(engine)
 
-    except Exception:
-        logger.exception("Pipeline failed with error")
-        raise
+        logger.info("Pipeline completed successfully!")
 
     finally:
         await engine.dispose()
@@ -301,6 +271,11 @@ async def run_pipeline(
     help="Run embeddings generation step",
 )
 @click.option(
+    "--index/--no-index",
+    default=None,
+    help="Run FAISS index building step",
+)
+@click.option(
     "--informalize-model",
     default="google/gemini-2.5-flash",
     help="LLM model for generating informalizations",
@@ -336,6 +311,7 @@ def main(
     pagerank: bool | None,
     informalize: bool | None,
     embeddings: bool | None,
+    index: bool | None,
     informalize_model: str,
     informalize_max_concurrent: int,
     informalize_limit: int | None,
@@ -345,27 +321,33 @@ def main(
 ) -> None:
     """Run the Lean declaration extraction and enrichment pipeline."""
     # Determine if any step flags were explicitly set
-    step_flags = [parse_docs, pagerank, informalize, embeddings]
+    step_flags = [parse_docs, pagerank, informalize, embeddings, index]
     any_step_explicitly_set = any(flag is not None for flag in step_flags)
 
     # If no steps were explicitly set, run all by default
     # Otherwise, only run explicitly enabled steps (default unset to False)
     if not any_step_explicitly_set:
-        parse_docs = pagerank = informalize = embeddings = True
+        parse_docs = pagerank = informalize = embeddings = index = True
     else:
         parse_docs = parse_docs if parse_docs is not None else False
         pagerank = pagerank if pagerank is not None else False
         informalize = informalize if informalize is not None else False
         embeddings = embeddings if embeddings is not None else False
+        index = index if index is not None else False
 
     if lean_version:
         os.environ["LEAN_EXPLORE_LEAN_VERSION"] = lean_version
         importlib.reload(lean_explore.config)
         from lean_explore.config import Config as ReloadedConfig
 
-        database_url = ReloadedConfig.DATABASE_URL
+        database_url = ReloadedConfig.EXTRACTION_DATABASE_URL
+        data_directory = ReloadedConfig.ACTIVE_DATA_PATH
     else:
-        database_url = Config.DATABASE_URL
+        database_url = Config.EXTRACTION_DATABASE_URL
+        data_directory = Config.ACTIVE_DATA_PATH
+
+    data_directory.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Extraction output directory: {data_directory}")
 
     asyncio.run(
         run_pipeline(
@@ -375,6 +357,7 @@ def main(
             pagerank=pagerank,
             informalize=informalize,
             embeddings=embeddings,
+            index=index,
             informalize_model=informalize_model,
             informalize_max_concurrent=informalize_max_concurrent,
             informalize_limit=informalize_limit,
