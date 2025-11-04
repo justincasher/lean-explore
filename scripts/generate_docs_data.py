@@ -43,6 +43,9 @@ from griffe import (
 get_logger().setLevel(logging.WARNING)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
+
+# --- Configuration ---
+
 PACKAGE_PATH = pathlib.Path("src/lean_explore")
 OUTPUT_PATH = pathlib.Path("data/module_data.json")
 
@@ -185,11 +188,17 @@ ReturnsSectionData = ReturnDict | list[ReturnDict] | None
 """Return type for docstring returns section: single return, multiple, or none."""
 
 
+# --- Utility Functions ---
+
+
 def resolve_annotation(annotation: str | Expr | None) -> str:
     """Converts a griffe annotation to its string representation."""
     if isinstance(annotation, (Expr, str)):
         return str(annotation)
     return ""
+
+
+# --- Docstring Parsing ---
 
 
 def extract_summary_and_text(
@@ -414,6 +423,9 @@ def parse_docstring(docstring_object: object | None) -> DocstringSections:
     return sections_data
 
 
+# --- Code Serialization ---
+
+
 def serialize_typer_option(function_call: ExprCall) -> str:
     """Formats a typer.Option call as a multi-line string."""
     function_name = str(function_call.function)
@@ -511,6 +523,9 @@ def build_returns_info(
             returns_info["description"] += " (Multiple return paths documented)"
 
     return returns_info
+
+
+# --- Function/Class/Module Serialization ---
 
 
 def serialize_function(function: Function, module_path: str) -> FunctionDict:
@@ -702,6 +717,9 @@ def serialize_class(class_object: Class, module_path: str) -> ClassDict:
     }
 
 
+# --- Module Collection ---
+
+
 def is_target_package_module(module: Module, package_name: str) -> bool:
     """Checks if a module belongs to the target package.
 
@@ -773,6 +791,9 @@ def collect_modules_recursively(
             continue
 
     return modules
+
+
+# --- Main Entry Point ---
 
 
 def main() -> None:
