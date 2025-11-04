@@ -594,6 +594,10 @@ def serialize_module(module: Module) -> ModuleDict:
 
             definition_path = get_definition_module_path(target)
 
+            # Skip private members (single underscore) but keep dunder methods
+            if target.name.startswith("_") and not target.name.startswith("__"):
+                continue
+
             # Only include items defined in this module
             if target.is_function and isinstance(target, Function):
                 if definition_path == current_path:
@@ -635,6 +639,10 @@ def merge_docstring_attributes(
     for docstring_attribute in docstring_attributes:
         name = docstring_attribute["name"]
 
+        # Skip private attributes (single underscore) but keep dunder methods
+        if name.startswith("_") and not name.startswith("__"):
+            continue
+
         if name not in existing_names:
             # Add attribute that only exists in docstring
             code_attributes.append(
@@ -667,6 +675,10 @@ def serialize_class(class_object: Class, module_path: str) -> ClassDict:
     attributes = []
 
     for member_name, member in class_object.members.items():
+        # Skip private members (single underscore) but keep dunder methods
+        if member.name.startswith("_") and not member.name.startswith("__"):
+            continue
+
         if member.is_attribute:
             attributes.append(
                 {
