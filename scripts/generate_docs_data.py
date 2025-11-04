@@ -8,7 +8,7 @@ is serialized to JSON for consumption by frontend applications.
 import json
 import logging
 import pathlib
-from typing import Any
+from typing import NotRequired, TypedDict
 
 from griffe import (
     Alias,
@@ -47,6 +47,144 @@ PACKAGE_PATH = pathlib.Path("src/lean_explore")
 OUTPUT_PATH = pathlib.Path("data/module_data.json")
 
 
+# --- Types ---
+
+
+class ParameterDict(TypedDict):
+    """Parameter information from function signature and docstring."""
+
+    name: str
+    annotation: str
+    kind: str
+    default: str | None
+    description: NotRequired[str]
+
+
+class ReturnDict(TypedDict):
+    """Return value information from function signature and docstring."""
+
+    name: NotRequired[str]
+    annotation: str
+    description: str
+
+
+class DocstringAttributeDict(TypedDict):
+    """Attribute information from docstring only."""
+
+    name: str
+    annotation: str
+    description: str
+    value: NotRequired[str | None]
+
+
+class AttributeDict(TypedDict):
+    """Attribute information from class code definition."""
+
+    name: str
+    value: str | None
+    annotation: str
+    docstring: str
+    path: str
+    filepath: str | None
+    lineno: int | None
+
+
+class ExceptionDict(TypedDict):
+    """Exception information from docstring raises section."""
+
+    type: str
+    description: str
+
+
+class ExampleDict(TypedDict):
+    """Example code from docstring examples section."""
+
+    title: str | None
+    code: str
+
+
+class AdmonitionDict(TypedDict):
+    """Admonition (note, warning, etc.) from docstring."""
+
+    title: str
+    text: str
+
+
+class DecoratorDict(TypedDict):
+    """Decorator information from function or class definition."""
+
+    text: str
+    path: str
+    lineno: int | None
+    endlineno: int | None
+
+
+class DocstringSections(TypedDict, total=False):
+    """All possible sections parsed from a docstring."""
+
+    summary: str
+    text: str
+    parameters: list[ParameterDict]
+    returns: ReturnDict | list[ReturnDict]
+    attributes: list[DocstringAttributeDict]
+    raises: list[ExceptionDict]
+    examples: list[ExampleDict]
+    note: list[AdmonitionDict]
+    warning: list[AdmonitionDict]
+    deprecated: list[str] | str
+    warns: list[str] | str
+    yields: list[str] | str
+    receives: list[str] | str
+
+
+class FunctionDict(TypedDict):
+    """Serialized function with full documentation."""
+
+    name: str
+    path: str
+    docstring: str
+    docstring_sections: DocstringSections
+    parameters: list[ParameterDict]
+    returns: ReturnDict
+    decorators: list[DecoratorDict]
+    is_async: bool
+    filepath: str | None
+    lineno: int | None
+    lines: list[int]
+
+
+class ClassDict(TypedDict):
+    """Serialized class with full documentation."""
+
+    name: str
+    path: str
+    docstring: str
+    docstring_sections: DocstringSections
+    methods: list[FunctionDict]
+    attributes: list[AttributeDict]
+    bases: list[str]
+    filepath: str | None
+    lineno: int | None
+    lines: list[int]
+
+
+class ModuleDict(TypedDict):
+    """Serialized module with full documentation."""
+
+    name: str
+    path: str
+    filepath: str | None
+    docstring: str
+    docstring_sections: DocstringSections
+    functions: list[FunctionDict]
+    classes: list[ClassDict]
+    lineno: int | None
+
+
+ReturnsSectionData = ReturnDict | list[ReturnDict] | None
+"""Return type for docstring returns section: single return, multiple, or none."""
+
+
 def resolve_annotation(annotation: str | Expr | None) -> str:
     """Converts a griffe annotation to its string representation."""
     if isinstance(annotation, (Expr, str)):
@@ -73,7 +211,7 @@ def extract_summary_and_text(
 
 def parse_parameters_section(
     section: DocstringSectionParameters,
-) -> list[dict[str, Any]]:
+) -> list[ParameterDict]:
     """Parses a parameters section from a docstring."""
     return [
         {
@@ -88,9 +226,7 @@ def parse_parameters_section(
     ]
 
 
-def parse_returns_section(
-    section: DocstringSectionReturns,
-) -> dict[str, Any] | list[dict[str, Any]] | None:
+def parse_returns_section(section: DocstringSectionReturns) -> ReturnsSectionData:
     """Parses a returns section from a docstring.
 
     Returns a single dict for one return value, a list for multiple, or None for empty.
@@ -113,7 +249,7 @@ def parse_returns_section(
 
 def parse_attributes_section(
     section: DocstringSectionAttributes,
-) -> list[dict[str, Any]]:
+) -> list[DocstringAttributeDict]:
     """Parses an attributes section from a docstring."""
     return [
         {
@@ -127,7 +263,7 @@ def parse_attributes_section(
     ]
 
 
-def parse_raises_section(section: DocstringSectionRaises) -> list[dict[str, Any]]:
+def parse_raises_section(section: DocstringSectionRaises) -> list[ExceptionDict]:
     """Parses a raises section from a docstring."""
     return [
         {
@@ -140,7 +276,7 @@ def parse_raises_section(section: DocstringSectionRaises) -> list[dict[str, Any]
     ]
 
 
-def parse_examples_section(section: DocstringSectionExamples) -> list[dict[str, Any]]:
+def parse_examples_section(section: DocstringSectionExamples) -> list[ExampleDict]:
     """Parses an examples section from a docstring."""
     return [
         {
@@ -152,7 +288,7 @@ def parse_examples_section(section: DocstringSectionExamples) -> list[dict[str, 
 
 
 def parse_admonition_section(
-    section: DocstringSectionAdmonition, sections_data: dict[str, Any]
+    section: DocstringSectionAdmonition, sections_data: DocstringSections
 ) -> None:
     """Parses an admonition section (note, warning, etc.).
 
@@ -212,12 +348,12 @@ def parse_generic_section(section) -> list | str:
     return values
 
 
-def parse_docstring(docstring_object: Any | None) -> dict[str, Any]:
+def parse_docstring(docstring_object: object | None) -> DocstringSections:
     """Parses all sections from a griffe docstring object into structured data."""
     if not docstring_object or not hasattr(docstring_object, "parsed"):
-        return {}
+        return DocstringSections()
 
-    sections_data: dict[str, Any] = {}
+    sections_data: DocstringSections = DocstringSections()
     summary = [""]
     text_parts = []
 
@@ -294,12 +430,12 @@ def serialize_typer_option(function_call: ExprCall) -> str:
     return f"{function_name}(\n{indent}{formatted_arguments}\n)"
 
 
-def serialize_parameters(parameters: Parameters) -> list[dict[str, Any]]:
+def serialize_parameters(parameters: Parameters) -> list[ParameterDict]:
     """Converts griffe Parameters into serializable dictionaries."""
     if not parameters:
         return []
 
-    result: list[dict[str, Any]] = []
+    result: list[ParameterDict] = []
     for parameter in parameters:
         default_representation: str | None = None
 
@@ -326,7 +462,7 @@ def serialize_parameters(parameters: Parameters) -> list[dict[str, Any]]:
     return result
 
 
-def serialize_decorators(decorators: list[Decorator]) -> list[dict[str, Any]]:
+def serialize_decorators(decorators: list[Decorator]) -> list[DecoratorDict]:
     """Converts griffe Decorator objects into serializable dictionaries."""
     return [
         {
@@ -340,7 +476,7 @@ def serialize_decorators(decorators: list[Decorator]) -> list[dict[str, Any]]:
 
 
 def merge_parameter_descriptions(
-    code_parameters: list[dict[str, Any]], docstring_parameters: list[dict[str, Any]]
+    code_parameters: list[ParameterDict], docstring_parameters: list[ParameterDict]
 ) -> None:
     """Merges docstring descriptions into code parameters in-place."""
     docstring_map = {parameter["name"]: parameter for parameter in docstring_parameters}
@@ -353,8 +489,8 @@ def merge_parameter_descriptions(
 
 
 def build_returns_info(
-    function: Function, docstring_sections: dict[str, Any]
-) -> dict[str, Any]:
+    function: Function, docstring_sections: DocstringSections
+) -> ReturnDict:
     """Builds return information combining code annotation and docstring description."""
     returns_info = {
         "annotation": resolve_annotation(function.returns),
@@ -377,7 +513,7 @@ def build_returns_info(
     return returns_info
 
 
-def serialize_function(function: Function, module_path: str) -> dict[str, Any]:
+def serialize_function(function: Function, module_path: str) -> FunctionDict:
     """Converts a griffe Function into a serializable dictionary.
 
     Includes full documentation from both code and docstrings.
@@ -409,7 +545,7 @@ def serialize_function(function: Function, module_path: str) -> dict[str, Any]:
     }
 
 
-def get_definition_module_path(object: Any) -> str:
+def get_definition_module_path(object: Function | Class | Module) -> str:
     """Determines the canonical module path where an object is defined."""
     if (
         hasattr(object, "parent")
@@ -423,7 +559,7 @@ def get_definition_module_path(object: Any) -> str:
         return object.canonical_path
 
 
-def serialize_module(module: Module) -> dict[str, Any]:
+def serialize_module(module: Module) -> ModuleDict:
     """Converts a griffe Module into a serializable dictionary.
 
     Only includes functions and classes defined directly in this module,
@@ -470,8 +606,8 @@ def serialize_module(module: Module) -> dict[str, Any]:
 
 
 def merge_docstring_attributes(
-    code_attributes: list[dict[str, Any]],
-    docstring_attributes: list[dict[str, Any]],
+    code_attributes: list[AttributeDict],
+    docstring_attributes: list[DocstringAttributeDict],
     class_path: str,
 ) -> None:
     """Merges docstring-only attributes with code attributes.
@@ -507,7 +643,7 @@ def merge_docstring_attributes(
                     break
 
 
-def serialize_class(class_object: Class, module_path: str) -> dict[str, Any]:
+def serialize_class(class_object: Class, module_path: str) -> ClassDict:
     """Converts a griffe Class into a serializable dictionary.
 
     Includes full documentation from both code and docstrings.
@@ -595,7 +731,7 @@ def is_target_package_module(module: Module, package_name: str) -> bool:
 
 def collect_modules_recursively(
     module: Module, package_name: str, processed: set[str]
-) -> list[dict[str, Any]]:
+) -> list[ModuleDict]:
     """Recursively collects and serializes all modules in the package.
 
     Args:
