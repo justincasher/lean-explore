@@ -25,7 +25,6 @@ from lean_explore.extract.informalize import (
     informalize_declarations,
 )
 from lean_explore.models import Declaration
-from lean_explore.util import OpenRouterClient
 
 
 class TestDependencyParsing:
@@ -315,7 +314,7 @@ class TestProcessingFunctions:
         assert result.informalization == "This is a mock informalization"
         mock_openai_client.generate.assert_called_once()
 
-    async def test_process_one_declaration_cached(self):
+    async def test_process_one_declaration_cached(self, mock_openai_client):
         """Test processing with cached informalization."""
         # Create declaration without informalization
         declaration = Declaration(
@@ -330,12 +329,10 @@ class TestProcessingFunctions:
         prompt_template = "Name: {name}"
         cache = {declaration.source_text: "Cached informalization"}
 
-        # Create a real client but we shouldn't call it
-        client = OpenRouterClient()
-
+        # Use mock client - shouldn't be called due to cache
         result = await _process_one_declaration(
             declaration=declaration,
-            client=client,
+            client=mock_openai_client,
             model="test-model",
             prompt_template=prompt_template,
             informalizations_by_name={},
@@ -344,20 +341,21 @@ class TestProcessingFunctions:
         )
 
         assert result.informalization == "Cached informalization"
+        # Verify client was not called (cache hit)
+        mock_openai_client.generate.assert_not_called()
 
     async def test_process_one_declaration_already_informalized(
-        self, sample_declaration
+        self, sample_declaration, mock_openai_client
     ):
         """Test processing declaration that already has informalization."""
         semaphore = asyncio.Semaphore(5)
-        client = OpenRouterClient()
 
         # Set existing informalization
         sample_declaration.informalization = "Already done"
 
         result = await _process_one_declaration(
             declaration=sample_declaration,
-            client=client,
+            client=mock_openai_client,
             model="test-model",
             prompt_template="",
             informalizations_by_name={},
@@ -366,6 +364,8 @@ class TestProcessingFunctions:
         )
 
         assert result.informalization is None
+        # Verify client was not called (already informalized)
+        mock_openai_client.generate.assert_not_called()
 
     @pytest.mark.slow
     async def test_process_layer(
