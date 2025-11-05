@@ -67,6 +67,8 @@ lean-explore = "lean_explore.cli.main:app"
 [project.optional-dependencies]
 extract = [
     "sentence-transformers>=2.2.0",
+    "networkx>=3.0",
+    "torch>=2.0.0",
 ]
 
 dev = [
@@ -75,6 +77,8 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
     "pre-commit>=3.0.0",
+    "networkx>=3.0",
+    "torch>=2.0.0",
 ]
 
 [tool.setuptools.packages.find]
