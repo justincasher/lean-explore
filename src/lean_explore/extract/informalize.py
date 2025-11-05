@@ -20,12 +20,16 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
-from lean_explore.models import Declaration, InformalizationCache
+from lean_explore.config import Config
+from lean_explore.models import Declaration
 from lean_explore.util import OpenRouterClient
 
 logger = logging.getLogger(__name__)
+
+
+# --- Data Classes ---
 
 
 @dataclass
@@ -35,6 +39,9 @@ class InformalizationResult:
     declaration_id: int
     declaration_name: str
     informalization: str | None
+
+
+# --- Utility Functions ---
 
 
 def _parse_dependencies(dependencies: str | list[str] | None) -> list[str]:
@@ -108,6 +115,9 @@ def _build_dependency_layers(
     return layers
 
 
+# --- Database Loading ---
+
+
 async def _load_existing_informalizations(
     session: AsyncSession,
 ) -> list[InformalizationResult]:
@@ -128,29 +138,6 @@ async def _load_existing_informalizations(
     return informalizations
 
 
-async def _load_informalization_cache(
-    session: AsyncSession, model: str
-) -> dict[str, str]:
-    """Load all cached informalizations for the given model.
-
-    Args:
-        session: Async database session for informalization cache
-        model: LLM model name to filter cache entries
-
-    Returns:
-        Dictionary mapping source_text_hash -> informalization
-    """
-    logger.info(f"Loading informalization cache for model '{model}'...")
-    stmt = select(InformalizationCache).where(InformalizationCache.model == model)
-    result = await session.execute(stmt)
-    cache_entries = result.scalars().all()
-    cache_by_hash = {
-        entry.source_text_hash: entry.informalization for entry in cache_entries
-    }
-    logger.info(f"Loaded {len(cache_by_hash)} cached informalizations")
-    return cache_by_hash
-
-
 async def _get_declarations_to_process(
     session: AsyncSession, limit: int | None
 ) -> list[Declaration]:
@@ -162,6 +149,86 @@ async def _get_declarations_to_process(
     return list(result.scalars().all())
 
 
+# --- Cross-Database Cache Loading ---
+
+
+def _discover_database_files() -> list[Path]:
+    """Discover all lean_explore.db files in data/ and cache/ directories.
+
+    Returns:
+        List of paths to discovered database files
+    """
+    database_files = []
+
+    # Search in data directory
+    data_dir = Config.DATA_DIRECTORY
+    if data_dir.exists():
+        database_files.extend(data_dir.rglob("lean_explore.db"))
+
+    # Search in cache directory
+    cache_dir = Config.CACHE_DIRECTORY
+    if cache_dir.exists():
+        database_files.extend(cache_dir.rglob("lean_explore.db"))
+
+    logger.info(f"Discovered {len(database_files)} database files")
+    return database_files
+
+
+async def _load_cache_from_databases(
+    database_files: list[Path],
+) -> dict[str, str]:
+    """Load informalizations from all discovered databases.
+
+    Builds a cache mapping source_text -> informalization by scanning
+    all databases for declarations that have informalizations.
+
+    Args:
+        database_files: List of database file paths to scan
+
+    Returns:
+        Dictionary mapping source_text -> informalization
+    """
+    cache_by_source_text = {}
+
+    for db_path in database_files:
+        db_url = f"sqlite+aiosqlite:///{db_path}"
+        logger.info(f"Loading cache from {db_path}")
+
+        try:
+            engine = create_async_engine(db_url)
+            async with AsyncSession(engine) as session:
+                stmt = select(Declaration).where(
+                    Declaration.informalization.isnot(None)
+                )
+                result = await session.execute(stmt)
+                declarations = result.scalars().all()
+
+                for declaration in declarations:
+                    # Only cache if we haven't seen this source_text before
+                    if declaration.source_text not in cache_by_source_text:
+                        cache_by_source_text[declaration.source_text] = (
+                            declaration.informalization
+                        )
+
+                logger.info(
+                    f"Loaded {len(declarations)} informalizations from {db_path}"
+                )
+
+            await engine.dispose()
+
+        except Exception as e:
+            logger.warning(f"Failed to load cache from {db_path}: {e}")
+            continue
+
+    logger.info(
+        f"Total cache size: {len(cache_by_source_text)} unique source texts"
+    )
+    return cache_by_source_text
+
+
+# --- Processing Functions ---
+
+
 async def _process_one_declaration(
     *,
     declaration: Declaration,
@@ -169,7 +236,7 @@ async def _process_one_declaration(
     model: str,
     prompt_template: str,
     informalizations_by_name: dict[str, str],
-    cache_by_hash: dict[str, str],
+    cache_by_source_text: dict[str, str],
     semaphore: asyncio.Semaphore,
 ) -> InformalizationResult:
     """Process a single declaration and generate its informalization.
@@ -180,7 +247,7 @@ async def _process_one_declaration(
         model: Model name to use
         prompt_template: Prompt template string
         informalizations_by_name: Map of declaration names to informalizations
-        cache_by_hash: Map of source text hashes to cached informalizations
+        cache_by_source_text: Map of source_text to cached informalizations
         semaphore: Concurrency control semaphore
 
     Returns:
@@ -193,12 +260,12 @@ async def _process_one_declaration(
             informalization=None,
         )
 
-    source_hash = InformalizationCache.compute_hash(declaration.source_text)
-    if source_hash in cache_by_hash:
+    # Check cross-database cache first
+    if declaration.source_text in cache_by_source_text:
         return InformalizationResult(
             declaration_id=declaration.id,
             declaration_name=declaration.name,
-            informalization=cache_by_hash[source_hash],
+            informalization=cache_by_source_text[declaration.source_text],
         )
 
     async with semaphore:
@@ -250,13 +317,12 @@ async def _process_one_declaration(
 async def _process_layer(
     *,
     session: AsyncSession,
-    informal_session: AsyncSession,
     layer: list[Declaration],
     client: OpenRouterClient,
     model: str,
     prompt_template: str,
     informalizations_by_name: dict[str, str],
-    cache_by_hash: dict[str, str],
+    cache_by_source_text: dict[str, str],
     semaphore: asyncio.Semaphore,
     progress,
     task,
@@ -266,13 +332,12 @@ async def _process_layer(
 
     Args:
         session: Async database session for search database
-        informal_session: Async database session for informalization cache
         layer: List of declarations in this layer
         client: OpenRouter client
         model: Model name to use
         prompt_template: Prompt template string
         informalizations_by_name: Map of declaration names to informalizations
-        cache_by_hash: Map of source text hashes to cached informalizations
+        cache_by_source_text: Map of source_text to cached informalizations
         semaphore: Concurrency control semaphore
         progress: Rich progress bar
         task: Progress task ID
@@ -283,7 +348,6 @@ async def _process_layer(
     """
     processed = 0
     pending_updates = []
-    pending_cache_inserts = []
 
     # Process all declarations in this layer in parallel (controlled by semaphore)
     tasks = [
@@ -293,7 +357,7 @@ async def _process_layer(
             model=model,
             prompt_template=prompt_template,
             informalizations_by_name=informalizations_by_name,
-            cache_by_hash=cache_by_hash,
+            cache_by_source_text=cache_by_source_text,
             semaphore=semaphore,
         )
         for declaration in layer
@@ -310,13 +374,6 @@ async def _process_layer(
             )
             informalizations_by_name[result.declaration_name] = result.informalization
 
-            cache_entry = InformalizationCache.create(
-                source_text=declaration.source_text,
-                informalization=result.informalization,
-                model=model,
-            )
-            pending_cache_inserts.append(cache_entry)
-
             processed += 1
 
         progress.update(task, advance=1)
@@ -327,24 +384,10 @@ async def _process_layer(
             logger.info(f"Committed batch of {len(pending_updates)} updates")
             pending_updates.clear()
 
-            informal_session.add_all(pending_cache_inserts)
-            await informal_session.commit()
-            logger.info(
-                f"Committed batch of {len(pending_cache_inserts)} cache entries"
-            )
-            pending_cache_inserts.clear()
-
     if pending_updates:
         await session.execute(update(Declaration), pending_updates)
         await session.commit()
         logger.info(f"Committed batch of {len(pending_updates)} updates")
-
-    if pending_cache_inserts:
-        informal_session.add_all(pending_cache_inserts)
-        await informal_session.commit()
-        logger.info(
-            f"Committed batch of {len(pending_cache_inserts)} cache entries"
-        )
 
     return processed
 
@@ -352,13 +395,12 @@ async def _process_layer(
 async def _process_layers(
     *,
     session: AsyncSession,
-    informal_session: AsyncSession,
     layers: list[list[Declaration]],
     client: OpenRouterClient,
     model: str,
     prompt_template: str,
     existing_informalizations: list[InformalizationResult],
-    cache_by_hash: dict[str, str],
+    cache_by_source_text: dict[str, str],
     semaphore: asyncio.Semaphore,
     commit_batch_size: int,
 ) -> int:
@@ -366,13 +408,12 @@ async def _process_layers(
 
     Args:
         session: Async database session for search database
-        informal_session: Async database session for informalization cache
         layers: List of dependency layers to process
         client: OpenRouter client
         model: Model name to use
         prompt_template: Prompt template string
         existing_informalizations: List of existing informalizations
-        cache_by_hash: Map of source text hashes to cached informalizations
+        cache_by_source_text: Map of source_text to cached informalizations
         semaphore: Concurrency control semaphore
         commit_batch_size: Number of updates to batch before committing to database
 
@@ -404,13 +445,12 @@ async def _process_layers(
             )
             layer_processed = await _process_layer(
                 session=session,
-                informal_session=informal_session,
                 layer=layer,
                 client=client,
                 model=model,
                 prompt_template=prompt_template,
                 informalizations_by_name=informalizations_by_name,
-                cache_by_hash=cache_by_hash,
+                cache_by_source_text=cache_by_source_text,
                 semaphore=semaphore,
                 progress=progress,
                 task=task,
@@ -425,9 +465,11 @@ async def _process_layers(
     return processed
 
 
+# --- Public API ---
+
+
 async def informalize_declarations(
     search_db_engine: AsyncEngine,
-    informal_db_engine: AsyncEngine,
     *,
     model: str = "google/gemini-2.5-flash",
     commit_batch_size: int = 1000,
@@ -438,7 +480,6 @@ async def informalize_declarations(
 
     Args:
         search_db_engine: Async database engine for search database (Declaration table)
-        informal_db_engine: Async database engine for informalization cache
         model: LLM model to use for generation
         commit_batch_size: Number of updates to batch before committing to database
         max_concurrent: Maximum number of concurrent LLM API calls
@@ -454,43 +495,41 @@ async def informalize_declarations(
     client = OpenRouterClient()
     semaphore = asyncio.Semaphore(max_concurrent)
 
+    # Discover and load cache from all existing databases
+    logger.info("Discovering existing databases for cache...")
+    database_files = _discover_database_files()
+    cache_by_source_text = await _load_cache_from_databases(database_files)
+
     async with AsyncSession(search_db_engine) as search_session:
-        async with AsyncSession(informal_db_engine) as informal_session:
-            existing_informalizations = await _load_existing_informalizations(
-                search_session
-            )
-            cache_by_hash = await _load_informalization_cache(
-                informal_session, model
-            )
-            declarations = await _get_declarations_to_process(
-                search_session, limit
-            )
+        existing_informalizations = await _load_existing_informalizations(
+            search_session
+        )
+        declarations = await _get_declarations_to_process(search_session, limit)
 
-            logger.info(
-                f"Found {len(declarations)} declarations needing informalization"
-            )
-            if not declarations:
-                logger.info("No declarations to process")
-                return
+        logger.info(
+            f"Found {len(declarations)} declarations needing informalization"
+        )
+        if not declarations:
+            logger.info("No declarations to process")
+            return
 
-            logger.info("Building dependency layers...")
-            layers = _build_dependency_layers(declarations)
-            logger.info(f"Built {len(layers)} dependency layers")
+        logger.info("Building dependency layers...")
+        layers = _build_dependency_layers(declarations)
+        logger.info(f"Built {len(layers)} dependency layers")
 
-            processed = await _process_layers(
-                session=search_session,
-                informal_session=informal_session,
-                layers=layers,
-                client=client,
-                model=model,
-                prompt_template=prompt_template,
-                existing_informalizations=existing_informalizations,
-                cache_by_hash=cache_by_hash,
-                semaphore=semaphore,
-                commit_batch_size=commit_batch_size,
-            )
+        processed = await _process_layers(
+            session=search_session,
+            layers=layers,
+            client=client,
+            model=model,
+            prompt_template=prompt_template,
+            existing_informalizations=existing_informalizations,
+            cache_by_source_text=cache_by_source_text,
+            semaphore=semaphore,
+            commit_batch_size=commit_batch_size,
+        )
 
-            logger.info(
-                f"Informalization complete. Processed {processed}/"
-                f"{sum(len(layer) for layer in layers)} declarations"
-            )
+        logger.info(
+            f"Informalization complete. Processed {processed}/"
+            f"{sum(len(layer) for layer in layers)} declarations"
+        )
