@@ -81,8 +81,13 @@ dev = [
 where = ["src"]
 
 [tool.pytest.ini_options]
-asyncio_mode = "strict"
+asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "external: marks tests that require external services",
+]
 
 # -- Ruff Configuration --
 
