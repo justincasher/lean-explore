@@ -106,7 +106,7 @@ async def _run_informalize_step(
     await informalize_declarations(
         engine,
         model=model,
-        batch_size=batch_size,
+        commit_batch_size=batch_size,
         max_concurrent=max_concurrent,
         limit=limit,
     )
