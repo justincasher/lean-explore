@@ -79,6 +79,7 @@ dev = [
     "pre-commit>=3.0.0",
     "networkx>=3.0",
     "torch>=2.0.0",
+    "sentence-transformers>=2.2.0",
 ]
 
 [tool.setuptools.packages.find]
