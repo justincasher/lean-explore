@@ -207,9 +207,7 @@ class TestFullPipeline:
                         ) as mock_index:
                             mock_index.return_value = AsyncMock()
 
-                            with patch(
-                                "lean_explore.extract.__main__.setup_logging"
-                            ):
+                            with patch("lean_explore.extract.__main__.setup_logging"):
                                 os.environ["OPENROUTER_API_KEY"] = "test-key"
 
                                 await run_pipeline(
@@ -244,9 +242,7 @@ class TestFullPipeline:
             ) as mock_pagerank:
                 mock_pagerank.return_value = AsyncMock()
 
-                with patch(
-                    "lean_explore.extract.__main__.setup_logging"
-                ):
+                with patch("lean_explore.extract.__main__.setup_logging"):
                     # Only run parse and pagerank
                     await run_pipeline(
                         database_url=database_url,

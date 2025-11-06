@@ -220,9 +220,7 @@ async def _load_cache_from_databases(
             logger.warning(f"Failed to load cache from {db_path}: {e}")
             continue
 
-    logger.info(
-        f"Total cache size: {len(cache_by_source_text)} unique source texts"
-    )
+    logger.info(f"Total cache size: {len(cache_by_source_text)} unique source texts")
     return cache_by_source_text
 
 
@@ -506,9 +504,7 @@ async def informalize_declarations(
         )
         declarations = await _get_declarations_to_process(search_session, limit)
 
-        logger.info(
-            f"Found {len(declarations)} declarations needing informalization"
-        )
+        logger.info(f"Found {len(declarations)} declarations needing informalization")
         if not declarations:
             logger.info("No declarations to process")
             return

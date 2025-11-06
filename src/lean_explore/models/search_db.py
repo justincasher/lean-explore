@@ -57,9 +57,7 @@ class Declaration(Base):
     )
     """768-dimensional embedding of the source text."""
 
-    docstring_embedding: Mapped[list[float] | None] = mapped_column(
-        JSON, nullable=True
-    )
+    docstring_embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
     """768-dimensional embedding of the docstring."""
 
     pagerank: Mapped[float | None] = mapped_column(Float, nullable=True)

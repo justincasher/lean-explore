@@ -451,9 +451,7 @@ class TestInformalizeE2E:
                     "Doc: {docstring}\n{dependencies}"
                 )
                 mock_prompt_file.read_text.return_value = prompt
-                mock_path_cls.return_value.__truediv__.return_value = (
-                    mock_prompt_file
-                )
+                mock_path_cls.return_value.__truediv__.return_value = mock_prompt_file
 
                 # Mock database discovery
                 with patch(

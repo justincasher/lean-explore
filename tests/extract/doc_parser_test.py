@@ -97,9 +97,7 @@ class TestSourceExtraction:
         source_file = mathlib_directory / "Mathlib" / "Data" / "List" / "Basic.lean"
         source_file.parent.mkdir(parents=True)
         source_text = (
-            "def length : List α → Nat\n"
-            "  | [] => 0\n"
-            "  | _ :: xs => 1 + length xs\n"
+            "def length : List α → Nat\n  | [] => 0\n  | _ :: xs => 1 + length xs\n"
         )
         source_file.write_text(source_text)
 

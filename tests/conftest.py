@@ -158,6 +158,23 @@ def mock_embedding_client() -> MagicMock:
 
 
 @pytest.fixture
+def empty_embedding_caches():
+    """Create empty embedding caches for testing.
+
+    Returns:
+        EmbeddingCaches: Empty caches with no pre-loaded embeddings.
+    """
+    from lean_explore.extract.embeddings import EmbeddingCaches
+
+    return EmbeddingCaches(
+        by_name={},
+        by_informalization={},
+        by_source_text={},
+        by_docstring={},
+    )
+
+
+@pytest.fixture
 def sample_bmp_json_data() -> dict:
     """Create sample BMP (doc-gen4) JSON data for parser testing.
 
