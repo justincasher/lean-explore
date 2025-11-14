@@ -32,9 +32,9 @@ async def run_doc_gen4() -> None:
     logger.info("Running doc-gen4 to generate documentation...")
 
     commands = [
-        (["lake", "update", "doc-gen4"], "Updating doc-gen4 dependency"),
-        (["lake", "update", "extractor"], "Updating extractor dependency"),
-        (["lake", "exe", "cache", "get"], "Fetching cached build artifacts"),
+        # (["lake", "update", "doc-gen4"], "Updating doc-gen4 dependency"),
+        # (["lake", "update", "extractor"], "Updating extractor dependency"),
+        # (["lake", "exe", "cache", "get"], "Fetching cached build artifacts"),
         (["lake", "build"], "Building Lean library"),
         (["lake", "build", "LeanExtract:docs"], "Generating documentation"),
     ]
