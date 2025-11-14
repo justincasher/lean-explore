@@ -5,6 +5,7 @@ data that can be parsed and processed by the extraction pipeline.
 """
 
 import logging
+import os
 import subprocess
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,11 @@ async def run_doc_gen4() -> None:
         (["lake", "build", "LeanExtract:docs"], "Generating documentation"),
     ]
 
+    # Set environment variable to mitigate mathlib caching issue
+    # See: https://github.com/leanprover/doc-gen4#usage
+    env = os.environ.copy()
+    env["MATHLIB_NO_CACHE_ON_UPDATE"] = "1"
+
     for command, description in commands:
         logger.info(f"{description}...")
 
@@ -44,6 +50,7 @@ async def run_doc_gen4() -> None:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            env=env,
         )
 
         if process.stdout:
