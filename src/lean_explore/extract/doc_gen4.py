@@ -18,7 +18,7 @@ async def run_doc_gen4() -> None:
 
     Steps:
     1. Updates doc-gen4 dependency to the pinned version
-    2. Updates LeanExtract dependency (parent library)
+    2. Updates extractor dependency (parent package)
     3. Generates documentation using doc-gen4
 
     Each step streams output in real-time.
@@ -30,7 +30,7 @@ async def run_doc_gen4() -> None:
 
     commands = [
         (["lake", "update", "doc-gen4"], "Updating doc-gen4 dependency"),
-        (["lake", "update", "LeanExtract"], "Updating LeanExtract dependency"),
+        (["lake", "update", "extractor"], "Updating extractor dependency"),
         (["lake", "build", "LeanExtract:docs"], "Generating documentation"),
     ]
 
