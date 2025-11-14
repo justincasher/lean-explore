@@ -12,15 +12,13 @@ import asyncio
 import importlib
 import logging
 import os
-import shutil
-import subprocess
-from pathlib import Path
 
 import click
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 import lean_explore.config
 from lean_explore.config import Config
+from lean_explore.extract.doc_gen4 import run_doc_gen4 as execute_doc_gen4
 from lean_explore.extract.doc_parser import extract_declarations
 from lean_explore.extract.embeddings import generate_embeddings
 from lean_explore.extract.index import build_faiss_indices
@@ -42,40 +40,6 @@ async def _create_database_schema(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     logger.info("Database schema created successfully")
-
-
-async def _run_doc_gen4_step() -> None:
-    """Run doc-gen4 to generate documentation data."""
-    logger.info("Running doc-gen4 to generate documentation...")
-
-    # Clean up old build artifacts to prevent version conflicts
-    build_directory = Path("lean") / ".lake" / "build"
-    for artifact_directory in ["doc", "doc-data"]:
-        artifact_path = build_directory / artifact_directory
-        if artifact_path.exists():
-            logger.info(f"Removing old build artifacts from {artifact_path}")
-            shutil.rmtree(artifact_path)
-
-    process = subprocess.Popen(
-        ["lake", "build", "LeanExtract:docs"],
-        cwd="lean",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-
-    if process.stdout:
-        for line in process.stdout:
-            print(line, end="", flush=True)
-
-    returncode = process.wait()
-
-    if returncode != 0:
-        logger.error(f"doc-gen4 failed with return code {returncode}")
-        raise RuntimeError("doc-gen4 generation failed")
-
-    logger.info("doc-gen4 generation complete")
 
 
 async def _run_extract_step(engine: AsyncEngine) -> None:
@@ -207,7 +171,7 @@ async def run_pipeline(
         await _create_database_schema(engine)
 
         if run_doc_gen4:
-            await _run_doc_gen4_step()
+            await execute_doc_gen4()
 
         if parse_docs:
             await _run_extract_step(engine)
