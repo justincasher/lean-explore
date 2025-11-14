@@ -286,13 +286,15 @@ def main(
     verbose: bool,
 ) -> None:
     """Run the Lean declaration extraction and enrichment pipeline."""
-    # Determine if any step flags were explicitly set
-    step_flags = [parse_docs, pagerank, informalize, embeddings, index]
-    any_step_explicitly_set = any(flag is not None for flag in step_flags)
+    # Determine if any flags were explicitly set (including --run-doc-gen4)
+    step_flags = [run_doc_gen4, parse_docs, pagerank, informalize, embeddings, index]
+    any_flag_explicitly_set = (
+        run_doc_gen4 or any(flag is not None for flag in step_flags[1:])
+    )
 
-    # If no steps were explicitly set, run all by default
-    # Otherwise, only run explicitly enabled steps (default unset to False)
-    if not any_step_explicitly_set:
+    # If no flags were explicitly set, run all pipeline steps by default
+    # Otherwise, only run what was explicitly requested
+    if not any_flag_explicitly_set:
         parse_docs = pagerank = informalize = embeddings = index = True
     else:
         parse_docs = parse_docs if parse_docs is not None else False
