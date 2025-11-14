@@ -282,7 +282,10 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
         batch_size: Number of declarations to insert per database transaction.
     """
     lean_root = Path("lean")
-    documentation_data_directory = lean_root / ".lake" / "build" / "doc-data"
+    # Documentation is now generated in the docbuild subdirectory
+    documentation_data_directory = (
+        lean_root / "docbuild" / ".lake" / "build" / "doc-data"
+    )
 
     if not documentation_data_directory.exists():
         raise FileNotFoundError(

@@ -13,12 +13,13 @@ logger = logging.getLogger(__name__)
 async def run_doc_gen4() -> None:
     """Run doc-gen4 to generate documentation data.
 
-    This function:
-    1. Cleans the Lake build cache
-    2. Updates Lake dependencies
-    3. Fetches cached build artifacts
-    4. Builds the Lean library
-    5. Generates documentation using doc-gen4
+    This function runs doc-gen4 from the lean/docbuild subdirectory
+    following the recommended setup from the doc-gen4 documentation.
+
+    Steps:
+    1. Updates doc-gen4 dependency to the pinned version
+    2. Updates LeanExtract dependency (parent library)
+    3. Generates documentation using doc-gen4
 
     Each step streams output in real-time.
 
@@ -28,10 +29,8 @@ async def run_doc_gen4() -> None:
     logger.info("Running doc-gen4 to generate documentation...")
 
     commands = [
-        (["lake", "clean"], "Cleaning Lake build cache"),
-        (["lake", "update"], "Updating Lake dependencies"),
-        (["lake", "exe", "cache", "get"], "Fetching cached build artifacts"),
-        (["lake", "build"], "Building Lean library"),
+        (["lake", "update", "doc-gen4"], "Updating doc-gen4 dependency"),
+        (["lake", "update", "LeanExtract"], "Updating LeanExtract dependency"),
         (["lake", "build", "LeanExtract:docs"], "Generating documentation"),
     ]
 
@@ -40,7 +39,7 @@ async def run_doc_gen4() -> None:
 
         process = subprocess.Popen(
             command,
-            cwd="lean",
+            cwd="lean/docbuild",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
