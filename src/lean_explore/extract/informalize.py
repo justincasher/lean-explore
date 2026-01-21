@@ -41,6 +41,18 @@ class InformalizationResult:
     informalization: str | None
 
 
+@dataclass
+class DeclarationData:
+    """Plain data extracted from Declaration ORM object for async processing."""
+
+    id: int
+    name: str
+    source_text: str
+    docstring: str | None
+    dependencies: str | None
+    informalization: str | None
+
+
 # --- Utility Functions ---
 
 
@@ -229,7 +241,7 @@ async def _load_cache_from_databases(
 
 async def _process_one_declaration(
     *,
-    declaration: Declaration,
+    declaration_data: DeclarationData,
     client: OpenRouterClient,
     model: str,
     prompt_template: str,
@@ -240,7 +252,7 @@ async def _process_one_declaration(
     """Process a single declaration and generate its informalization.
 
     Args:
-        declaration: Declaration to process
+        declaration_data: Plain data extracted from Declaration ORM object
         client: OpenRouter client
         model: Model name to use
         prompt_template: Prompt template string
@@ -251,24 +263,24 @@ async def _process_one_declaration(
     Returns:
         InformalizationResult with declaration info and generated informalization
     """
-    if declaration.informalization is not None:
+    if declaration_data.informalization is not None:
         return InformalizationResult(
-            declaration_id=declaration.id,
-            declaration_name=declaration.name,
+            declaration_id=declaration_data.id,
+            declaration_name=declaration_data.name,
             informalization=None,
         )
 
     # Check cross-database cache first
-    if declaration.source_text in cache_by_source_text:
+    if declaration_data.source_text in cache_by_source_text:
         return InformalizationResult(
-            declaration_id=declaration.id,
-            declaration_name=declaration.name,
-            informalization=cache_by_source_text[declaration.source_text],
+            declaration_id=declaration_data.id,
+            declaration_name=declaration_data.name,
+            informalization=cache_by_source_text[declaration_data.source_text],
         )
 
     async with semaphore:
         dependencies_text = ""
-        dependencies = _parse_dependencies(declaration.dependencies)
+        dependencies = _parse_dependencies(declaration_data.dependencies)
         if dependencies:
             dependency_informalizations = []
             for dependency_name in dependencies:
@@ -284,9 +296,9 @@ async def _process_one_declaration(
                 )
 
         prompt = prompt_template.format(
-            name=declaration.name,
-            source_text=declaration.source_text,
-            docstring=declaration.docstring or "No docstring available",
+            name=declaration_data.name,
+            source_text=declaration_data.source_text,
+            docstring=declaration_data.docstring or "No docstring available",
             dependencies=dependencies_text,
         )
 
@@ -299,15 +311,15 @@ async def _process_one_declaration(
         if response.choices and response.choices[0].message.content:
             result = response.choices[0].message.content.strip()
             return InformalizationResult(
-                declaration_id=declaration.id,
-                declaration_name=declaration.name,
+                declaration_id=declaration_data.id,
+                declaration_name=declaration_data.name,
                 informalization=result,
             )
 
-        logger.warning(f"Empty response for declaration {declaration.name}")
+        logger.warning(f"Empty response for declaration {declaration_data.name}")
         return InformalizationResult(
-            declaration_id=declaration.id,
-            declaration_name=declaration.name,
+            declaration_id=declaration_data.id,
+            declaration_name=declaration_data.name,
             informalization=None,
         )
 
@@ -349,11 +361,25 @@ async def _process_layer(
     processed = 0
     pending_updates = []
 
+    # Extract data from ORM objects before creating async tasks
+    # This avoids SQLAlchemy session issues with concurrent access
+    declaration_data_list = [
+        DeclarationData(
+            id=d.id,
+            name=d.name,
+            source_text=d.source_text,
+            docstring=d.docstring,
+            dependencies=d.dependencies,
+            informalization=d.informalization,
+        )
+        for d in layer
+    ]
+
     # Create tasks for all declarations in this layer
     tasks = [
         asyncio.create_task(
             _process_one_declaration(
-                declaration=declaration,
+                declaration_data=data,
                 client=client,
                 model=model,
                 prompt_template=prompt_template,
@@ -362,7 +388,7 @@ async def _process_layer(
                 semaphore=semaphore,
             )
         )
-        for declaration in layer
+        for data in declaration_data_list
     ]
 
     # Process results as they complete
