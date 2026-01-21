@@ -56,9 +56,15 @@ class EmbeddingClient:
             EmbeddingResponse with texts, embeddings, and model info
         """
         loop = asyncio.get_event_loop()
-        embeddings = await loop.run_in_executor(
-            None, self.model.encode, texts, False, True
-        )
+
+        def _encode():
+            return self.model.encode(
+                texts,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+            )
+
+        embeddings = await loop.run_in_executor(None, _encode)
         return EmbeddingResponse(
             texts=texts,
             embeddings=[emb.tolist() for emb in embeddings],
