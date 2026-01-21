@@ -8,17 +8,22 @@ Reads declarations from the database and generates embeddings for:
 """
 
 import logging
+import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
 from rich.progress import (
     BarColumn,
     Progress,
+    ProgressColumn,
     SpinnerColumn,
+    Task,
     TaskProgressColumn,
     TextColumn,
     TimeRemainingColumn,
 )
+from rich.text import Text
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
@@ -27,6 +32,50 @@ from lean_explore.models import Declaration
 from lean_explore.util import EmbeddingClient
 
 logger = logging.getLogger(__name__)
+
+
+class RateColumn(ProgressColumn):
+    """Custom column showing embeddings per second over a rolling window."""
+
+    def __init__(self, window_seconds: int = 60):
+        """Initialize rate column.
+
+        Args:
+            window_seconds: Rolling window size in seconds for rate calculation
+        """
+        super().__init__()
+        self.window_seconds = window_seconds
+        self.history: deque[tuple[float, int]] = deque()
+        self.total_count = 0
+
+    def add_count(self, count: int) -> None:
+        """Add embedding count with timestamp."""
+        now = time.time()
+        self.history.append((now, count))
+        self.total_count += count
+        # Remove old entries outside window
+        cutoff = now - self.window_seconds
+        while self.history and self.history[0][0] < cutoff:
+            self.history.popleft()
+
+    def render(self, task: Task) -> Text:
+        """Render the rate column."""
+        if not self.history:
+            return Text("-- emb/s", style="cyan")
+
+        now = time.time()
+        cutoff = now - self.window_seconds
+        # Sum counts within window
+        window_count = sum(c for t, c in self.history if t >= cutoff)
+        # Calculate elapsed time in window
+        if self.history:
+            oldest_in_window = max(self.history[0][0], cutoff)
+            elapsed = now - oldest_in_window
+            if elapsed > 0:
+                rate = window_count / elapsed
+                return Text(f"{rate:.1f} emb/s", style="cyan")
+
+        return Text("-- emb/s", style="cyan")
 
 
 # --- Data Classes ---
@@ -310,11 +359,13 @@ async def generate_embeddings(
             return
 
         total_embeddings = 0
+        rate_column = RateColumn(window_seconds=60)
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             TaskProgressColumn(),
+            rate_column,
             TimeRemainingColumn(),
         ) as progress:
             task = progress.add_task("Generating embeddings", total=total)
@@ -323,6 +374,7 @@ async def generate_embeddings(
                 batch = declarations[i : i + batch_size]
                 count = await _process_batch(session, batch, client, caches)
                 total_embeddings += count
+                rate_column.add_count(count)
                 progress.update(task, advance=len(batch))
 
         logger.info(f"Generated {total_embeddings} embeddings for {total} declarations")
