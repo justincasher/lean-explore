@@ -112,7 +112,7 @@ async def run_pipeline(
     informalize_batch_size: int = 1000,
     informalize_max_concurrent: int = 10,
     informalize_limit: int | None = None,
-    embedding_model: str = "BAAI/bge-base-en-v1.5",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
     embedding_batch_size: int = 250,
     embedding_limit: int | None = None,
     verbose: bool = False,
@@ -260,7 +260,7 @@ async def run_pipeline(
 )
 @click.option(
     "--embedding-model",
-    default="BAAI/bge-base-en-v1.5",
+    default="Qwen/Qwen3-Embedding-0.6B",
     help="Sentence transformer model for embeddings",
 )
 @click.option(
