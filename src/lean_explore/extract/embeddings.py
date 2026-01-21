@@ -300,7 +300,7 @@ async def generate_embeddings(
     database_files = _discover_database_files()
     caches = await _load_embedding_caches(database_files)
 
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(engine, expire_on_commit=False) as session:
         declarations = await _get_declarations_needing_embeddings(session, limit)
         total = len(declarations)
         logger.info(f"Found {total} declarations needing embeddings")
