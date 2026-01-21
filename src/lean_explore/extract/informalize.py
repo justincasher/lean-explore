@@ -349,22 +349,26 @@ async def _process_layer(
     processed = 0
     pending_updates = []
 
-    # Process all declarations in this layer in parallel (controlled by semaphore)
+    # Create tasks for all declarations in this layer
     tasks = [
-        _process_one_declaration(
-            declaration=declaration,
-            client=client,
-            model=model,
-            prompt_template=prompt_template,
-            informalizations_by_name=informalizations_by_name,
-            cache_by_source_text=cache_by_source_text,
-            semaphore=semaphore,
+        asyncio.create_task(
+            _process_one_declaration(
+                declaration=declaration,
+                client=client,
+                model=model,
+                prompt_template=prompt_template,
+                informalizations_by_name=informalizations_by_name,
+                cache_by_source_text=cache_by_source_text,
+                semaphore=semaphore,
+            )
         )
         for declaration in layer
     ]
-    results = await asyncio.gather(*tasks)
 
-    for declaration, result in zip(layer, results):
+    # Process results as they complete
+    for coro in asyncio.as_completed(tasks):
+        result = await coro
+
         if result.informalization:
             pending_updates.append(
                 {
@@ -373,7 +377,6 @@ async def _process_layer(
                 }
             )
             informalizations_by_name[result.declaration_name] = result.informalization
-
             processed += 1
 
         progress.update(total_task, advance=1)
@@ -384,7 +387,6 @@ async def _process_layer(
             await session.commit()
             logger.info(f"Committed batch of {len(pending_updates)} updates")
             pending_updates.clear()
-            # Reset batch progress
             progress.reset(batch_task)
 
     if pending_updates:
