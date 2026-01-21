@@ -108,7 +108,7 @@ async def run_pipeline(
     index: bool = True,
     pagerank_alpha: float = 0.85,
     pagerank_batch_size: int = 1000,
-    informalize_model: str = "google/gemini-2.5-flash",
+    informalize_model: str = "google/gemini-3-flash-preview",
     informalize_batch_size: int = 1000,
     informalize_max_concurrent: int = 10,
     informalize_limit: int | None = None,
