@@ -198,14 +198,20 @@ def _parse_declarations_from_files(
                 header_html = declaration_data.get("header", "")
                 dependencies = _extract_dependencies_from_html(header_html)
 
+                # Filter out self-references from dependencies
+                declaration_name = information["name"]
+                filtered_dependencies = [
+                    d for d in dependencies if d != declaration_name
+                ]
+
                 declarations.append(
                     Declaration(
-                        name=information["name"],
+                        name=declaration_name,
                         module=module_name,
                         docstring=information.get("doc"),
                         source_text=source_text,
                         source_link=information["sourceLink"],
-                        dependencies=dependencies if dependencies else None,
+                        dependencies=filtered_dependencies or None,
                     )
                 )
 
