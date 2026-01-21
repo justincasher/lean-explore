@@ -323,7 +323,8 @@ async def _process_layer(
     cache_by_source_text: dict[str, str],
     semaphore: asyncio.Semaphore,
     progress,
-    task,
+    total_task,
+    batch_task,
     commit_batch_size: int,
 ) -> int:
     """Process a single dependency layer.
@@ -338,7 +339,8 @@ async def _process_layer(
         cache_by_source_text: Map of source_text to cached informalizations
         semaphore: Concurrency control semaphore
         progress: Rich progress bar
-        task: Progress task ID
+        total_task: Progress task ID for total progress
+        batch_task: Progress task ID for batch progress
         commit_batch_size: Number of updates to batch before committing
 
     Returns:
@@ -374,18 +376,22 @@ async def _process_layer(
 
             processed += 1
 
-        progress.update(task, advance=1)
+        progress.update(total_task, advance=1)
+        progress.update(batch_task, advance=1)
 
         if len(pending_updates) >= commit_batch_size:
             await session.execute(update(Declaration), pending_updates)
             await session.commit()
             logger.info(f"Committed batch of {len(pending_updates)} updates")
             pending_updates.clear()
+            # Reset batch progress
+            progress.reset(batch_task)
 
     if pending_updates:
         await session.execute(update(Declaration), pending_updates)
         await session.commit()
         logger.info(f"Committed batch of {len(pending_updates)} updates")
+        progress.reset(batch_task)
 
     return processed
 
@@ -434,7 +440,12 @@ async def _process_layers(
         TaskProgressColumn(),
         TimeRemainingColumn(),
     ) as progress:
-        task = progress.add_task("Informalizing declarations", total=total)
+        total_task = progress.add_task(
+            f"[cyan]Total ({total:,})", total=total
+        )
+        batch_task = progress.add_task(
+            f"[green]Batch ({commit_batch_size:,})", total=commit_batch_size
+        )
 
         for layer_num, layer in enumerate(layers):
             logger.info(
@@ -451,7 +462,8 @@ async def _process_layers(
                 cache_by_source_text=cache_by_source_text,
                 semaphore=semaphore,
                 progress=progress,
-                task=task,
+                total_task=total_task,
+                batch_task=batch_task,
                 commit_batch_size=commit_batch_size,
             )
             processed += layer_processed
