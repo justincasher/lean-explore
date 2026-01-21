@@ -7,9 +7,9 @@
 * **Informal Naming:** If the concept being defined or the main assertion has a standard informal name or definition (e.g., "the axiom of choice", "a continuous function", "associativity of addition"), use that. Otherwise, provide a clear informal definition or description of the assertion.
 * **Conciseness:** The informal description should clearly explain the statement of the definition or theorem, while remaining thorough enough that it is clear, while also being concise. Focus on *what* the statement asserts or defines, not *how* it's proven or implemented. Do not discuss the Lean language itself.
 * **Output Format:** Your output must follow this exact format:
-  **{informal_name}.** {informal_description}
+  **{{informal_name}}.** {{informal_description}}
 
-  Where {informal_name} is a concise name for the concept (e.g., "Fundamental Theorem of Calculus", "Associativity of Addition", "Continuous Function") and {informal_description} is the full informal description. Provide only this formatted output, with no preamble, quotation marks, or explanation about your process.
+  Where {{informal_name}} is a concise name for the concept (e.g., "Fundamental Theorem of Calculus", "Associativity of Addition", "Continuous Function") and {{informal_description}} is the full informal description. Provide only this formatted output, with no preamble, quotation marks, or explanation about your process.
 
 **Declaration Name:** {name}
 
