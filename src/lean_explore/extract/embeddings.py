@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 class RateColumn(ProgressColumn):
     """Custom column showing embeddings per second over a rolling window."""
 
-    def __init__(self, window_seconds: int = 60):
+    def __init__(self, window_seconds: int = 300):
         """Initialize rate column.
 
         Args:
@@ -328,8 +328,9 @@ async def _process_batch(
 async def generate_embeddings(
     engine: AsyncEngine,
     model_name: str,
-    batch_size: int = 250,
+    batch_size: int = 128,
     limit: int | None = None,
+    max_seq_length: int = 512,
 ) -> None:
     """Generate embeddings for all declarations.
 
@@ -338,13 +339,15 @@ async def generate_embeddings(
         model_name: Name of the sentence transformer model to use
         batch_size: Number of declarations to process in each batch (default 250)
         limit: Maximum number of declarations to process (None for all)
+        max_seq_length: Maximum sequence length for tokenization (default 512).
+            Lower values reduce memory usage but may truncate long texts.
     """
-    client = EmbeddingClient(model_name=model_name)
+    client = EmbeddingClient(model_name=model_name, max_length=max_seq_length)
     logger.info(
         f"Starting embedding generation with {client.model_name} on {client.device}"
     )
 
-    # Discover and load embedding caches from all existing databases
+    # Discover and load embedding caches from all existinig databases
     logger.info("Discovering existing databases for embedding cache...")
     database_files = _discover_database_files()
     caches = await _load_embedding_caches(database_files)
