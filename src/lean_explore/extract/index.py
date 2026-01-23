@@ -11,16 +11,9 @@ from pathlib import Path
 
 import faiss
 import numpy as np
-import torch
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-)
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy import create_engine, select
+from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.orm import Session
 
 from lean_explore.config import Config
 from lean_explore.models import Declaration
@@ -29,31 +22,28 @@ logger = logging.getLogger(__name__)
 
 
 def _get_device() -> str:
-    """Detect the best available device for PyTorch operations.
+    """Detect if CUDA GPU is available for FAISS.
 
     Returns:
-        Device string: 'cuda' if CUDA GPU available, 'mps' if Apple Silicon,
-        otherwise 'cpu'.
+        Device string: 'cuda' if CUDA GPU available, otherwise 'cpu'.
+        Note: FAISS doesn't support MPS, so Apple Silicon uses CPU.
     """
-    if torch.cuda.is_available():
+    if faiss.get_num_gpus() > 0:
         device = "cuda"
-        logger.info(f"Using CUDA GPU: {torch.cuda.get_device_name(0)}")
-    elif torch.backends.mps.is_available():
-        device = "mps"
-        logger.info("Using Apple Silicon GPU (MPS)")
+        logger.info("Using CUDA GPU for FAISS")
     else:
         device = "cpu"
-        logger.info("Using CPU")
+        logger.info("Using CPU for FAISS")
     return device
 
 
-async def _load_embeddings_from_database(
-    session: AsyncSession, embedding_field: str
+def _load_embeddings_from_database(
+    session: Session, embedding_field: str
 ) -> tuple[list[int], np.ndarray]:
     """Load embeddings and IDs from the database.
 
     Args:
-        session: Async database session.
+        session: Sync database session.
         embedding_field: Name of the embedding field to load
             (e.g., 'informalization_embedding').
 
@@ -64,7 +54,7 @@ async def _load_embeddings_from_database(
     stmt = select(Declaration.id, getattr(Declaration, embedding_field)).where(
         getattr(Declaration, embedding_field).isnot(None)
     )
-    result = await session.execute(stmt)
+    result = session.execute(stmt)
     rows = list(result.all())
 
     if not rows:
@@ -124,7 +114,7 @@ async def build_faiss_indices(
     along with ID mappings.
 
     Args:
-        engine: Async database engine.
+        engine: Async database engine (URL extracted for sync access).
         output_directory: Directory to save indices. Defaults to active data path.
     """
     if output_directory is None:
@@ -142,48 +132,42 @@ async def build_faiss_indices(
         "docstring_embedding",
     ]
 
-    async with AsyncSession(engine) as session:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-        ) as progress:
-            task = progress.add_task(
-                "Building FAISS indices", total=len(embedding_fields)
+    # Use sync engine to avoid aiosqlite issues with binary data
+    sync_url = str(engine.url).replace("sqlite+aiosqlite", "sqlite")
+    sync_engine = create_engine(sync_url)
+
+    with Session(sync_engine) as session:
+        for i, embedding_field in enumerate(embedding_fields, 1):
+            logger.info(
+                f"Processing {embedding_field} ({i}/{len(embedding_fields)})..."
             )
 
-            for embedding_field in embedding_fields:
-                logger.info(f"Processing {embedding_field}...")
+            declaration_ids, embeddings = _load_embeddings_from_database(
+                session, embedding_field
+            )
 
-                declaration_ids, embeddings = await _load_embeddings_from_database(
-                    session, embedding_field
-                )
+            if len(declaration_ids) == 0:
+                logger.warning(f"Skipping {embedding_field} (no data)")
+                continue
 
-                if len(declaration_ids) == 0:
-                    logger.warning(f"Skipping {embedding_field} (no data)")
-                    progress.update(task, advance=1)
-                    continue
+            index = _build_faiss_index(embeddings, device)
 
-                index = _build_faiss_index(embeddings, device)
+            # Move GPU index back to CPU for serialization
+            if device == "cuda" and isinstance(index, faiss.GpuIndex):
+                index = faiss.index_gpu_to_cpu(index)
 
-                # Move GPU index back to CPU for serialization
-                if device == "cuda" and isinstance(index, faiss.GpuIndex):
-                    index = faiss.index_gpu_to_cpu(index)
+            index_filename = embedding_field.replace("_embedding", "_faiss.index")
+            index_path = output_directory / index_filename
+            faiss.write_index(index, str(index_path))
+            logger.info(f"Saved FAISS index to {index_path}")
 
-                index_filename = embedding_field.replace("_embedding", "_faiss.index")
-                index_path = output_directory / index_filename
-                faiss.write_index(index, str(index_path))
-                logger.info(f"Saved FAISS index to {index_path}")
+            ids_map_filename = embedding_field.replace(
+                "_embedding", "_faiss_ids_map.json"
+            )
+            ids_map_path = output_directory / ids_map_filename
+            with open(ids_map_path, "w") as file:
+                json.dump(declaration_ids, file)
+            logger.info(f"Saved ID mapping to {ids_map_path}")
 
-                ids_map_filename = embedding_field.replace(
-                    "_embedding", "_faiss_ids_map.json"
-                )
-                ids_map_path = output_directory / ids_map_filename
-                with open(ids_map_path, "w") as file:
-                    json.dump(declaration_ids, file)
-                logger.info(f"Saved ID mapping to {ids_map_path}")
-
-                progress.update(task, advance=1)
-
+    sync_engine.dispose()
     logger.info("All FAISS indices built successfully")
