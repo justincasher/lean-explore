@@ -4,9 +4,35 @@ Simple schema for a Lean declaration search engine.
 Uses SQLAlchemy 2.0 syntax with SQLite for storage and FAISS for vector search.
 """
 
-from sqlalchemy import Float, Integer, Text
-from sqlalchemy.dialects.sqlite import JSON
+import struct
+
+from sqlalchemy import Float, Integer, LargeBinary, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.types import TypeDecorator
+
+
+class BinaryEmbedding(TypeDecorator):
+    """Custom type for storing embeddings as binary blobs.
+
+    Converts between Python list[float] and compact binary representation.
+    Uses float32 (4 bytes per dimension) for ~5x space savings over JSON.
+    """
+
+    impl = LargeBinary
+    cache_ok = True
+
+    def process_bind_param(self, value: list[float] | None, dialect) -> bytes | None:
+        """Convert list[float] to binary for storage."""
+        if value is None:
+            return None
+        return struct.pack(f"{len(value)}f", *value)
+
+    def process_result_value(self, value: bytes | None, dialect) -> list[float] | None:
+        """Convert binary back to list[float] on retrieval."""
+        if value is None:
+            return None
+        num_floats = len(value) // 4
+        return list(struct.unpack(f"{num_floats}f", value))
 
 
 class Base(DeclarativeBase):
@@ -44,21 +70,25 @@ class Declaration(Base):
     informalization: Mapped[str | None] = mapped_column(Text, nullable=True)
     """Natural language description of the declaration."""
 
-    name_embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
-    """768-dimensional embedding of the declaration name."""
+    name_embedding: Mapped[list[float] | None] = mapped_column(
+        BinaryEmbedding, nullable=True
+    )
+    """1024-dimensional embedding of the declaration name (binary float32)."""
 
     informalization_embedding: Mapped[list[float] | None] = mapped_column(
-        JSON, nullable=True
+        BinaryEmbedding, nullable=True
     )
-    """768-dimensional embedding of the informalization text."""
+    """1024-dimensional embedding of the informalization text (binary float32)."""
 
     source_text_embedding: Mapped[list[float] | None] = mapped_column(
-        JSON, nullable=True
+        BinaryEmbedding, nullable=True
     )
-    """768-dimensional embedding of the source text."""
+    """1024-dimensional embedding of the source text (binary float32)."""
 
-    docstring_embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
-    """768-dimensional embedding of the docstring."""
+    docstring_embedding: Mapped[list[float] | None] = mapped_column(
+        BinaryEmbedding, nullable=True
+    )
+    """1024-dimensional embedding of the docstring (binary float32)."""
 
     pagerank: Mapped[float | None] = mapped_column(Float, nullable=True)
     """PageRank score based on dependency graph."""
