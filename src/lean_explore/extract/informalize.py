@@ -283,9 +283,13 @@ async def _process_one_declaration(
         dependencies = _parse_dependencies(declaration_data.dependencies)
         if dependencies:
             dependency_informalizations = []
-            for dependency_name in dependencies:
+            # Limit to first 20 dependencies
+            for dependency_name in dependencies[:20]:
                 if dependency_name in informalizations_by_name:
                     informal_description = informalizations_by_name[dependency_name]
+                    # Truncate description to 256 characters
+                    if len(informal_description) > 256:
+                        informal_description = informal_description[:253] + "..."
                     dependency_informalizations.append(
                         f"- {dependency_name}: {informal_description}"
                     )
@@ -468,9 +472,7 @@ async def _process_layers(
         TaskProgressColumn(),
         TimeRemainingColumn(),
     ) as progress:
-        total_task = progress.add_task(
-            f"[cyan]Total ({total:,})", total=total
-        )
+        total_task = progress.add_task(f"[cyan]Total ({total:,})", total=total)
         batch_task = progress.add_task(
             f"[green]Batch ({commit_batch_size:,})", total=commit_batch_size
         )
@@ -509,9 +511,9 @@ async def _process_layers(
 async def informalize_declarations(
     search_db_engine: AsyncEngine,
     *,
-    model: str = "google/gemini-2.5-flash",
+    model: str = "google/gemini-3-flash-preview",
     commit_batch_size: int = 1000,
-    max_concurrent: int = 10,
+    max_concurrent: int = 100,
     limit: int | None = None,
 ) -> None:
     """Generate informalizations for declarations missing them.
@@ -538,7 +540,7 @@ async def informalize_declarations(
     database_files = _discover_database_files()
     cache_by_source_text = await _load_cache_from_databases(database_files)
 
-    async with AsyncSession(search_db_engine) as search_session:
+    async with AsyncSession(search_db_engine, expire_on_commit=False) as search_session:
         existing_informalizations = await _load_existing_informalizations(
             search_session
         )
