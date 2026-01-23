@@ -2,20 +2,28 @@
 
 This module provides the core search functionality using SQLite for storage,
 FAISS for semantic search, combined with BM25 lexical matching and PageRank scoring.
+
+Note: On macOS, torch and FAISS have OpenMP library conflicts. To avoid segfaults:
+- FAISS is imported lazily (not at module level)
+- When semantic search is needed, torch/embeddings are loaded FIRST, then FAISS
 """
 
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import faiss
 import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from lean_explore.config import Config
 from lean_explore.models import Declaration, SearchResult
-from lean_explore.util import EmbeddingClient
+
+if TYPE_CHECKING:
+    import faiss
+
+    from lean_explore.util import EmbeddingClient
 
 logger = logging.getLogger(__name__)
 
@@ -30,46 +38,105 @@ class SearchEngine:
     def __init__(
         self,
         db_url: str | None = None,
-        embedding_client: EmbeddingClient | None = None,
-        embedding_model_name: str = "nomic-ai/nomic-embed-text-v1",
+        embedding_client: "EmbeddingClient | None" = None,
+        embedding_model_name: str = "Qwen/Qwen3-Embedding-0.6B",
         faiss_index_path: Path | None = None,
         faiss_ids_map_path: Path | None = None,
+        use_local_data: bool = True,
     ):
         """Initialize the search engine.
 
         Args:
             db_url: Database URL. Defaults to configured URL.
-            embedding_client: Client for generating embeddings. Defaults to new client.
+            embedding_client: Client for generating embeddings. Created lazily if None.
             embedding_model_name: Name of the embedding model to use.
             faiss_index_path: Path to FAISS index. Defaults to config path.
             faiss_ids_map_path: Path to FAISS ID mapping. Defaults to config path.
+            use_local_data: If True, use DATA_DIRECTORY paths. If False, use
+                CACHE_DIRECTORY paths (for downloaded remote data).
         """
-        self.db_url = db_url or Config.DATABASE_URL
+        # Store for lazy embedding client creation
+        self._embedding_client = embedding_client
+        self._embedding_model_name = embedding_model_name
+
+        # Select paths based on data source
+        if use_local_data:
+            base_path = Config.ACTIVE_DATA_PATH
+            default_db_url = Config.EXTRACTION_DATABASE_URL
+        else:
+            base_path = Config.ACTIVE_CACHE_PATH
+            default_db_url = Config.DATABASE_URL
+
+        self.db_url = db_url or default_db_url
         self.engine: AsyncEngine = create_async_engine(self.db_url)
-        self.embedding_client = embedding_client or EmbeddingClient(
-            model_name=embedding_model_name
+
+        # Store paths for lazy FAISS loading (to avoid torch/FAISS OpenMP conflict)
+        self._faiss_index_path = faiss_index_path or (
+            base_path / "informalization_faiss.index"
         )
+        self._faiss_ids_map_path = faiss_ids_map_path or (
+            base_path / "informalization_faiss_ids_map.json"
+        )
+        self._faiss_index: faiss.Index | None = None
+        self._faiss_id_to_declaration_id: list[int] | None = None
 
-        faiss_index_path = faiss_index_path or Config.FAISS_INDEX_PATH
-        faiss_ids_map_path = faiss_ids_map_path or Config.FAISS_IDS_MAP_PATH
-
-        if not faiss_index_path.exists():
+        # Validate paths exist (fail fast)
+        if not self._faiss_index_path.exists():
             raise FileNotFoundError(
-                f"FAISS index not found at {faiss_index_path}. "
+                f"FAISS index not found at {self._faiss_index_path}. "
                 "Please run 'lean-explore download' to fetch the data."
             )
-        if not faiss_ids_map_path.exists():
+        if not self._faiss_ids_map_path.exists():
             raise FileNotFoundError(
-                f"FAISS ID mapping not found at {faiss_ids_map_path}. "
+                f"FAISS ID mapping not found at {self._faiss_ids_map_path}. "
                 "Please run 'lean-explore download' to fetch the data."
             )
 
-        logger.info(f"Loading FAISS index from {faiss_index_path}")
-        self.faiss_index = faiss.read_index(str(faiss_index_path))
+    @property
+    def embedding_client(self) -> "EmbeddingClient":
+        """Lazily create the embedding client to avoid loading torch at import time.
 
-        logger.info(f"Loading FAISS ID mapping from {faiss_ids_map_path}")
-        with open(faiss_ids_map_path) as file:
-            self.faiss_id_to_declaration_id: list[int] = json.load(file)
+        This prevents OpenMP library conflicts between torch and FAISS on macOS.
+        The embedding client (and torch) must be loaded BEFORE FAISS.
+        """
+        if self._embedding_client is None:
+            from lean_explore.util import EmbeddingClient
+
+            self._embedding_client = EmbeddingClient(
+                model_name=self._embedding_model_name,
+                max_length=512,
+            )
+        return self._embedding_client
+
+    def _ensure_faiss_loaded(self) -> None:
+        """Load FAISS index and ID mapping if not already loaded.
+
+        Important: This must be called AFTER torch is loaded (via embedding_client)
+        to avoid OpenMP library conflicts on macOS.
+        """
+        if self._faiss_index is not None:
+            return
+
+        import faiss
+
+        logger.info(f"Loading FAISS index from {self._faiss_index_path}")
+        self._faiss_index = faiss.read_index(str(self._faiss_index_path))
+
+        logger.info(f"Loading FAISS ID mapping from {self._faiss_ids_map_path}")
+        with open(self._faiss_ids_map_path) as file:
+            self._faiss_id_to_declaration_id = json.load(file)
+
+    @property
+    def faiss_index(self) -> "faiss.Index":
+        """Get the FAISS index, loading it if necessary."""
+        self._ensure_faiss_loaded()
+        return self._faiss_index  # type: ignore[return-value]
+
+    @property
+    def faiss_id_to_declaration_id(self) -> list[int]:
+        """Get the FAISS ID to declaration ID mapping, loading it if necessary."""
+        self._ensure_faiss_loaded()
+        return self._faiss_id_to_declaration_id  # type: ignore[return-value]
 
     async def search(
         self,
@@ -91,9 +158,11 @@ class SearchEngine:
         Returns:
             List of SearchResult objects, ranked by combined score.
         """
+        # Generate embedding FIRST (loads torch before FAISS to avoid OpenMP conflict)
         embedding_response = await self.embedding_client.embed([query])
         query_embedding = np.array([embedding_response.embeddings[0]], dtype=np.float32)
 
+        # Now safe to load/use FAISS (torch is already loaded)
         num_candidates = limit * 3
         distances, faiss_indices = self.faiss_index.search(
             query_embedding, num_candidates
