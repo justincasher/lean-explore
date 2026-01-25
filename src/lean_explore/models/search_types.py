@@ -34,9 +34,6 @@ class SearchResult(BaseModel):
     informalization: str | None
     """Natural language description of the declaration."""
 
-    pagerank: float | None
-    """PageRank score based on dependency graph."""
-
     class Config:
         """Pydantic configuration."""
 
