@@ -52,15 +52,19 @@ class EmbeddingClient:
         """Select best available device."""
         if torch.cuda.is_available():
             return "cuda"
-        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            return "mps"
         return "cpu"
 
-    async def embed(self, texts: list[str]) -> EmbeddingResponse:
+    async def embed(
+        self, texts: list[str], is_query: bool = False
+    ) -> EmbeddingResponse:
         """Generate embeddings for a list of texts.
 
         Args:
             texts: List of text strings to embed
+            is_query: If True, encode as search queries using the model's query
+                prompt. If False (default), encode as documents without prompt.
+                Qwen3-Embedding models are asymmetric and perform better when
+                queries use prompt_name="query".
 
         Returns:
             EmbeddingResponse with texts, embeddings, and model info
@@ -68,12 +72,15 @@ class EmbeddingClient:
         loop = asyncio.get_event_loop()
 
         def _encode():
-            return self.model.encode(
-                texts,
-                show_progress_bar=False,
-                convert_to_numpy=True,
-                batch_size=256,  # Larger batches for GPU utilization
-            )
+            # Use query prompt for search queries, no prompt for documents
+            encode_kwargs = {
+                "show_progress_bar": False,
+                "convert_to_numpy": True,
+                "batch_size": 256,  # Larger batches for GPU utilization
+            }
+            if is_query:
+                encode_kwargs["prompt_name"] = "query"
+            return self.model.encode(texts, **encode_kwargs)
 
         embeddings = await loop.run_in_executor(None, _encode)
         return EmbeddingResponse(

@@ -10,6 +10,10 @@ def __getattr__(name: str):
         from lean_explore.util.embedding_client import EmbeddingClient
 
         return EmbeddingClient
+    if name == "RerankerClient":
+        from lean_explore.util.reranker_client import RerankerClient
+
+        return RerankerClient
     if name == "OpenRouterClient":
         from lean_explore.util.openrouter_client import OpenRouterClient
 
@@ -21,4 +25,4 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["EmbeddingClient", "OpenRouterClient", "setup_logging"]
+__all__ = ["EmbeddingClient", "RerankerClient", "OpenRouterClient", "setup_logging"]
