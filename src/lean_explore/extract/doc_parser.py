@@ -204,6 +204,10 @@ def _parse_declarations_from_files(
                     d for d in dependencies if d != declaration_name
                 ]
 
+                # Skip auto-generated .mk constructors
+                if declaration_name.endswith(".mk"):
+                    continue
+
                 declarations.append(
                     Declaration(
                         name=declaration_name,
