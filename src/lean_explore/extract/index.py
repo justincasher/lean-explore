@@ -1,8 +1,8 @@
 """Build FAISS index from declaration embeddings.
 
-This module creates a FAISS HNSW index for semantic search from embeddings
-stored in the database. The index is built using PyTorch for efficient
-device-accelerated processing.
+This module creates a FAISS IVF index for semantic search from embeddings
+stored in the database. IVF (Inverted File) uses k-means clustering for
+efficient approximate nearest neighbor search with controllable recall.
 """
 
 import json
@@ -74,32 +74,43 @@ def _load_embeddings_from_database(
 
 
 def _build_faiss_index(embeddings: np.ndarray, device: str) -> faiss.Index:
-    """Build a FAISS HNSW index from embeddings.
+    """Build a FAISS IVF index from embeddings.
 
     Args:
         embeddings: Numpy array of embeddings, shape (num_vectors, dimension).
         device: Device to use ('cuda', 'mps', or 'cpu').
 
     Returns:
-        FAISS index with HNSW graph structure for fast similarity search.
+        FAISS IVF index for fast approximate nearest neighbor search.
     """
     num_vectors = embeddings.shape[0]
     dimension = embeddings.shape[1]
 
-    logger.info(f"Building FAISS HNSW index for {num_vectors} vectors...")
+    # Number of clusters: sqrt(n) is a good heuristic, minimum 256
+    nlist = max(256, int(np.sqrt(num_vectors)))
 
-    # M=32 connections per layer, efConstruction=40 for index quality
-    index = faiss.IndexHNSWFlat(dimension, 32)
-    index.hnsw.efConstruction = 40
+    logger.info(
+        f"Building FAISS IVF index for {num_vectors} vectors "
+        f"with {nlist} clusters..."
+    )
+
+    # Use inner product (cosine similarity on normalized vectors)
+    quantizer = faiss.IndexFlatIP(dimension)
+    index = faiss.IndexIVFFlat(quantizer, dimension, nlist, faiss.METRIC_INNER_PRODUCT)
 
     if device == "cuda" and faiss.get_num_gpus() > 0:
-        logger.info("Moving FAISS index to GPU")
+        logger.info("Training IVF index on GPU")
         resource = faiss.StandardGpuResources()
-        index = faiss.index_cpu_to_gpu(resource, 0, index)
+        gpu_index = faiss.index_cpu_to_gpu(resource, 0, index)
+        gpu_index.train(embeddings)
+        gpu_index.add(embeddings)
+        index = faiss.index_gpu_to_cpu(gpu_index)
+    else:
+        logger.info("Training IVF index on CPU")
+        index.train(embeddings)
+        index.add(embeddings)
 
-    index.add(embeddings)
-
-    logger.info("FAISS index built successfully")
+    logger.info("FAISS IVF index built successfully")
     return index
 
 
@@ -107,11 +118,10 @@ async def build_faiss_indices(
     engine: AsyncEngine,
     output_directory: Path | None = None,
 ) -> None:
-    """Build FAISS indices for all embedding types.
+    """Build FAISS index for informalization embeddings.
 
-    This function creates FAISS HNSW indices for each embedding type
-    (name, informalization, source_text, docstring) and saves them to disk
-    along with ID mappings.
+    This function creates a FAISS IVF index for informalization embeddings
+    and saves it to disk along with ID mappings.
 
     Args:
         engine: Async database engine (URL extracted for sync access).
@@ -126,10 +136,7 @@ async def build_faiss_indices(
     device = _get_device()
 
     embedding_fields = [
-        "name_embedding",
         "informalization_embedding",
-        "source_text_embedding",
-        "docstring_embedding",
     ]
 
     # Use sync engine to avoid aiosqlite issues with binary data
