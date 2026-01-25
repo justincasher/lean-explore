@@ -6,7 +6,7 @@ Uses SQLAlchemy 2.0 syntax with SQLite for storage and FAISS for vector search.
 
 import struct
 
-from sqlalchemy import Float, Integer, LargeBinary, Text
+from sqlalchemy import Integer, LargeBinary, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
@@ -70,25 +70,7 @@ class Declaration(Base):
     informalization: Mapped[str | None] = mapped_column(Text, nullable=True)
     """Natural language description of the declaration."""
 
-    name_embedding: Mapped[list[float] | None] = mapped_column(
-        BinaryEmbedding, nullable=True
-    )
-    """1024-dimensional embedding of the declaration name (binary float32)."""
-
     informalization_embedding: Mapped[list[float] | None] = mapped_column(
         BinaryEmbedding, nullable=True
     )
     """1024-dimensional embedding of the informalization text (binary float32)."""
-
-    source_text_embedding: Mapped[list[float] | None] = mapped_column(
-        BinaryEmbedding, nullable=True
-    )
-    """1024-dimensional embedding of the source text (binary float32)."""
-
-    docstring_embedding: Mapped[list[float] | None] = mapped_column(
-        BinaryEmbedding, nullable=True
-    )
-    """1024-dimensional embedding of the docstring (binary float32)."""
-
-    pagerank: Mapped[float | None] = mapped_column(Float, nullable=True)
-    """PageRank score based on dependency graph."""
