@@ -198,14 +198,24 @@ def _parse_declarations_from_files(
                 header_html = declaration_data.get("header", "")
                 dependencies = _extract_dependencies_from_html(header_html)
 
+                # Filter out self-references from dependencies
+                declaration_name = information["name"]
+                filtered_dependencies = [
+                    d for d in dependencies if d != declaration_name
+                ]
+
+                # Skip auto-generated .mk constructors
+                if declaration_name.endswith(".mk"):
+                    continue
+
                 declarations.append(
                     Declaration(
-                        name=information["name"],
+                        name=declaration_name,
                         module=module_name,
                         docstring=information.get("doc"),
                         source_text=source_text,
                         source_link=information["sourceLink"],
-                        dependencies=dependencies if dependencies else None,
+                        dependencies=filtered_dependencies or None,
                     )
                 )
 
@@ -282,7 +292,10 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
         batch_size: Number of declarations to insert per database transaction.
     """
     lean_root = Path("lean")
-    documentation_data_directory = lean_root / ".lake" / "build" / "doc-data"
+    # Documentation is now generated in the docbuild subdirectory
+    documentation_data_directory = (
+        lean_root / "docbuild" / ".lake" / "build" / "doc-data"
+    )
 
     if not documentation_data_directory.exists():
         raise FileNotFoundError(

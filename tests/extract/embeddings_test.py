@@ -21,7 +21,7 @@ from lean_explore.models import Declaration
 class TestDeclarationQuerying:
     """Tests for finding declarations needing embeddings."""
 
-    async def test_get_declarations_needing_embeddings_all_missing(
+    async def test_get_declarations_needing_embeddings_missing(
         self, async_db_session
     ):
         """Test getting declarations with no embeddings."""
@@ -42,41 +42,17 @@ class TestDeclarationQuerying:
         assert len(declarations) == 1
         assert declarations[0].name == "Test"
 
-    async def test_get_declarations_needing_embeddings_partial(self, async_db_session):
-        """Test getting declarations with some embeddings missing."""
-        declaration = Declaration(
-            name="Test",
-            module="Test",
-            source_text="def test := 1",
-            source_link="https://example.com",
-            name_embedding=[0.1] * 768,  # Has this
-            source_text_embedding=[0.3] * 768,  # Has this
-        )
-        async_db_session.add(declaration)
-        await async_db_session.commit()
-
-        declarations = await _get_declarations_needing_embeddings(
-            async_db_session, limit=None
-        )
-
-        # Should still return declaration since some embeddings are missing
-        assert len(declarations) == 1
-
-    async def test_get_declarations_needing_embeddings_all_complete(
+    async def test_get_declarations_needing_embeddings_complete(
         self, async_db_session
     ):
-        """Test that declarations with all embeddings are not returned."""
+        """Test that declarations with embeddings are not returned."""
         declaration = Declaration(
             name="Test",
             module="Test",
             source_text="def test := 1",
             source_link="https://example.com",
-            docstring="Test",
             informalization="Test declaration",
-            name_embedding=[0.1] * 768,
             informalization_embedding=[0.2] * 768,
-            source_text_embedding=[0.3] * 768,
-            docstring_embedding=[0.4] * 768,
         )
         async_db_session.add(declaration)
         await async_db_session.commit()
@@ -85,7 +61,28 @@ class TestDeclarationQuerying:
             async_db_session, limit=None
         )
 
-        # Should not return since all embeddings present
+        # Should not return since embedding present
+        assert len(declarations) == 0
+
+    async def test_get_declarations_no_informalization_skipped(
+        self, async_db_session
+    ):
+        """Test that declarations without informalization are not returned."""
+        declaration = Declaration(
+            name="Test",
+            module="Test",
+            source_text="def test := 1",
+            source_link="https://example.com",
+            informalization=None,  # No informalization
+        )
+        async_db_session.add(declaration)
+        await async_db_session.commit()
+
+        declarations = await _get_declarations_needing_embeddings(
+            async_db_session, limit=None
+        )
+
+        # Should not return since no informalization to embed
         assert len(declarations) == 0
 
     async def test_get_declarations_with_limit(self, async_db_session):
@@ -96,6 +93,7 @@ class TestDeclarationQuerying:
                 module="Test",
                 source_text=f"def test{i} := {i}",
                 source_link=f"https://example.com/{i}",
+                informalization=f"Test declaration {i}",
             )
             async_db_session.add(declaration)
         await async_db_session.commit()
@@ -110,16 +108,15 @@ class TestDeclarationQuerying:
 class TestBatchProcessing:
     """Tests for batch embedding generation."""
 
-    async def test_process_batch_all_fields(
+    async def test_process_batch_generates_embedding(
         self, async_db_session, mock_embedding_client, empty_embedding_caches
     ):
-        """Test processing batch with all fields needing embeddings."""
+        """Test processing batch generates informalization embedding."""
         declaration = Declaration(
             name="Test",
             module="Test",
             source_text="def test := 1",
             source_link="https://example.com",
-            docstring="Test docstring",
             informalization="Test informalization",
         )
         async_db_session.add(declaration)
@@ -132,32 +129,28 @@ class TestBatchProcessing:
             empty_embedding_caches,
         )
 
-        # Should generate embeddings for: name, informalization, source_text, docstring
-        assert count == 4
+        # Should generate embedding for informalization
+        assert count == 1
 
-        # Verify embeddings were set
+        # Verify embedding was set
         result = await async_db_session.execute(
             select(Declaration).where(Declaration.name == "Test")
         )
         updated = result.scalar_one()
 
-        assert updated.name_embedding is not None
         assert updated.informalization_embedding is not None
-        assert updated.source_text_embedding is not None
-        assert updated.docstring_embedding is not None
 
-    async def test_process_batch_partial_fields(
+    async def test_process_batch_skips_existing(
         self, async_db_session, mock_embedding_client, empty_embedding_caches
     ):
-        """Test processing batch where some embeddings already exist."""
+        """Test processing batch skips declarations with existing embeddings."""
         declaration = Declaration(
             name="Test",
             module="Test",
             source_text="def test := 1",
             source_link="https://example.com",
-            name_embedding=[0.1] * 768,  # Already exists
             informalization="Test",
-            informalization_embedding=None,  # Missing
+            informalization_embedding=[0.1] * 768,  # Already exists
         )
         async_db_session.add(declaration)
         await async_db_session.commit()
@@ -169,20 +162,18 @@ class TestBatchProcessing:
             empty_embedding_caches,
         )
 
-        # Should only generate for: informalization and source_text
-        # (name already exists)
-        assert count == 2
+        # Should skip since embedding already exists
+        assert count == 0
 
-    async def test_process_batch_no_optional_fields(
+    async def test_process_batch_skips_no_informalization(
         self, async_db_session, mock_embedding_client, empty_embedding_caches
     ):
-        """Test processing declarations without optional fields."""
+        """Test processing declarations without informalization."""
         declaration = Declaration(
             name="Test",
             module="Test",
             source_text="def test := 1",
             source_link="https://example.com",
-            docstring=None,
             informalization=None,
         )
         async_db_session.add(declaration)
@@ -195,18 +186,8 @@ class TestBatchProcessing:
             empty_embedding_caches,
         )
 
-        # Should only generate for: name and source_text
-        assert count == 2
-
-        result = await async_db_session.execute(
-            select(Declaration).where(Declaration.name == "Test")
-        )
-        updated = result.scalar_one()
-
-        assert updated.name_embedding is not None
-        assert updated.source_text_embedding is not None
-        assert updated.informalization_embedding is None
-        assert updated.docstring_embedding is None
+        # Should skip since no informalization to embed
+        assert count == 0
 
     async def test_process_batch_multiple_declarations(
         self, async_db_session, mock_embedding_client, empty_embedding_caches
@@ -219,6 +200,7 @@ class TestBatchProcessing:
                 module="Test",
                 source_text=f"def test{i} := {i}",
                 source_link=f"https://example.com/{i}",
+                informalization=f"Test informalization {i}",
             )
             async_db_session.add(decl)
             declarations.append(decl)
@@ -231,15 +213,14 @@ class TestBatchProcessing:
             empty_embedding_caches,
         )
 
-        # Each declaration has name and source_text: 3 * 2 = 6
-        assert count == 6
+        # Each declaration has informalization: 3 embeddings
+        assert count == 3
 
         # Verify all were updated
         result = await async_db_session.execute(select(Declaration))
         all_declarations = result.scalars().all()
         for declaration in all_declarations:
-            assert declaration.name_embedding is not None
-            assert declaration.source_text_embedding is not None
+            assert declaration.informalization_embedding is not None
 
     async def test_process_batch_empty(
         self, async_db_session, mock_embedding_client, empty_embedding_caches
@@ -312,9 +293,7 @@ class TestGenerateEmbeddingsE2E:
 
             assert len(all_declarations) == 2
             for declaration in all_declarations:
-                # All should have name and source_text embeddings
-                assert declaration.name_embedding is not None
-                assert declaration.source_text_embedding is not None
+                # All should have informalization embeddings
                 assert declaration.informalization_embedding is not None
 
     @pytest.mark.integration
@@ -364,7 +343,7 @@ class TestGenerateEmbeddingsE2E:
 
             assert len(all_declarations) == 10
             for declaration in all_declarations:
-                assert declaration.name_embedding is not None
+                assert declaration.informalization_embedding is not None
 
     @pytest.mark.integration
     async def test_generate_embeddings_with_limit(self, async_db_engine):
@@ -376,6 +355,7 @@ class TestGenerateEmbeddingsE2E:
                     module="Test",
                     source_text=f"def decl{i} := {i}",
                     source_link=f"https://example.com/{i}",
+                    informalization=f"Declaration number {i}",
                 )
                 session.add(declaration)
             await session.commit()
@@ -404,7 +384,9 @@ class TestGenerateEmbeddingsE2E:
         # Verify only 5 were processed
         async with AsyncSession(async_db_engine) as session:
             result = await session.execute(
-                select(Declaration).where(Declaration.name_embedding.isnot(None))
+                select(Declaration).where(
+                    Declaration.informalization_embedding.isnot(None)
+                )
             )
             declarations_with_embeddings = result.scalars().all()
 

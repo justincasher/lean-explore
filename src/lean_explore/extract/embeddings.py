@@ -1,26 +1,30 @@
 """Generate embeddings for Lean declarations.
 
-Reads declarations from the database and generates embeddings for:
-- name
-- informalization (if available)
-- source_text
-- docstring (if available)
+Reads declarations from the database and generates informalization embeddings
+for semantic search.
 """
 
 import logging
+import sqlite3
+import struct
+import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
 from rich.progress import (
     BarColumn,
     Progress,
+    ProgressColumn,
     SpinnerColumn,
+    Task,
     TaskProgressColumn,
     TextColumn,
     TimeRemainingColumn,
 )
+from rich.text import Text
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from lean_explore.config import Config
 from lean_explore.models import Declaration
@@ -29,17 +33,75 @@ from lean_explore.util import EmbeddingClient
 logger = logging.getLogger(__name__)
 
 
+class RateColumn(ProgressColumn):
+    """Custom column showing embeddings per second over a rolling window."""
+
+    def __init__(self, window_seconds: int = 300):
+        """Initialize rate column.
+
+        Args:
+            window_seconds: Rolling window size in seconds for rate calculation
+        """
+        super().__init__()
+        self.window_seconds = window_seconds
+        self.history: deque[tuple[float, int]] = deque()
+        self.total_count = 0
+
+    def add_count(self, count: int) -> None:
+        """Add embedding count with timestamp."""
+        now = time.time()
+        self.history.append((now, count))
+        self.total_count += count
+        # Remove old entries outside window
+        cutoff = now - self.window_seconds
+        while self.history and self.history[0][0] < cutoff:
+            self.history.popleft()
+
+    def render(self, task: Task) -> Text:
+        """Render the rate column."""
+        if not self.history:
+            return Text("-- emb/s", style="cyan")
+
+        now = time.time()
+        cutoff = now - self.window_seconds
+        # Sum counts within window
+        window_count = sum(c for t, c in self.history if t >= cutoff)
+        # Calculate elapsed time in window
+        if self.history:
+            oldest_in_window = max(self.history[0][0], cutoff)
+            elapsed = now - oldest_in_window
+            if elapsed > 0:
+                rate = window_count / elapsed
+                return Text(f"{rate:.1f} emb/s", style="cyan")
+
+        return Text("-- emb/s", style="cyan")
+
+
 # --- Data Classes ---
 
 
 @dataclass
 class EmbeddingCaches:
-    """Container for all embedding caches."""
+    """Container for embedding caches.
 
-    by_name: dict[str, list[float]]
-    by_informalization: dict[str, list[float]]
-    by_source_text: dict[str, list[float]]
-    by_docstring: dict[str, list[float]]
+    Stores embeddings as raw bytes for efficiency. Use _deserialize_embedding()
+    to convert to list[float] when actually needed.
+    """
+
+    by_informalization: dict[str, bytes]
+
+
+def _deserialize_embedding(data: bytes) -> list[float]:
+    """Convert raw binary embedding to list[float].
+
+    Args:
+        data: Binary embedding data (float32 packed)
+
+    Returns:
+        List of float values
+    """
+    num_floats = len(data) // 4
+    return list(struct.unpack(f"{num_floats}f", data))
 
 
 # --- Cross-Database Cache Loading ---
@@ -67,104 +129,69 @@ def _discover_database_files() -> list[Path]:
     return database_files
 
 
-async def _load_embedding_caches(database_files: list[Path]) -> EmbeddingCaches:
+def _load_embedding_caches(database_files: list[Path]) -> EmbeddingCaches:
     """Load embeddings from all discovered databases.
 
-    Builds four caches mapping text content to embeddings by scanning
+    Builds a cache mapping informalization text to raw embedding bytes by scanning
     all databases for declarations that have embeddings.
+
+    Uses sync sqlite3 directly to avoid SQLAlchemy ORM overhead and TypeDecorator
+    deserialization. Embeddings are stored as raw bytes and only deserialized
+    when actually used.
 
     Args:
         database_files: List of database file paths to scan
 
     Returns:
-        EmbeddingCaches with all four cache dictionaries populated
+        EmbeddingCaches with cache dictionary populated (as bytes)
     """
-    cache_by_name = {}
-    cache_by_informalization = {}
-    cache_by_source_text = {}
-    cache_by_docstring = {}
+    cache_by_informalization: dict[str, bytes] = {}
 
     for db_path in database_files:
-        db_url = f"sqlite+aiosqlite:///{db_path}"
         logger.info(f"Loading embedding cache from {db_path}")
 
         try:
-            engine = create_async_engine(db_url)
-            async with AsyncSession(engine) as session:
-                # Load all declarations that have at least one embedding
-                stmt = select(Declaration).where(
-                    (Declaration.name_embedding.isnot(None))
-                    | (Declaration.informalization_embedding.isnot(None))
-                    | (Declaration.source_text_embedding.isnot(None))
-                    | (Declaration.docstring_embedding.isnot(None))
-                )
-                result = await session.execute(stmt)
-                declarations = result.scalars().all()
+            connection = sqlite3.connect(db_path)
+            cursor = connection.execute(
+                """
+                SELECT informalization, informalization_embedding
+                FROM declarations
+                WHERE informalization_embedding IS NOT NULL
+                """
+            )
 
-                for declaration in declarations:
-                    # Cache name embedding
-                    if (
-                        declaration.name_embedding is not None
-                        and declaration.name not in cache_by_name
-                    ):
-                        cache_by_name[declaration.name] = declaration.name_embedding
+            count = 0
+            for row in cursor:
+                count += 1
+                (informalization, informalization_embedding) = row
 
-                    # Cache informalization embedding
-                    if (
-                        declaration.informalization is not None
-                        and declaration.informalization_embedding is not None
-                        and declaration.informalization not in cache_by_informalization
-                    ):
-                        cache_by_informalization[declaration.informalization] = (
-                            declaration.informalization_embedding
-                        )
+                # Cache informalization embedding
+                if (
+                    informalization is not None
+                    and informalization not in cache_by_informalization
+                ):
+                    cache_by_informalization[informalization] = (
+                        informalization_embedding
+                    )
 
-                    # Cache source_text embedding
-                    if (
-                        declaration.source_text_embedding is not None
-                        and declaration.source_text not in cache_by_source_text
-                    ):
-                        cache_by_source_text[declaration.source_text] = (
-                            declaration.source_text_embedding
-                        )
-
-                    # Cache docstring embedding
-                    if (
-                        declaration.docstring is not None
-                        and declaration.docstring_embedding is not None
-                        and declaration.docstring not in cache_by_docstring
-                    ):
-                        cache_by_docstring[declaration.docstring] = (
-                            declaration.docstring_embedding
-                        )
-
-                logger.info(f"Loaded {len(declarations)} declarations from {db_path}")
-
-            await engine.dispose()
+            connection.close()
+            logger.info(f"Loaded {count} declarations from {db_path}")
 
         except Exception as e:
             logger.warning(f"Failed to load embedding cache from {db_path}: {e}")
             continue
 
-    logger.info(
-        f"Total cache sizes - name: {len(cache_by_name)}, "
-        f"informalization: {len(cache_by_informalization)}, "
-        f"source_text: {len(cache_by_source_text)}, "
-        f"docstring: {len(cache_by_docstring)}"
-    )
+    logger.info(f"Total cache size - informalization: {len(cache_by_informalization)}")
 
-    return EmbeddingCaches(
-        by_name=cache_by_name,
-        by_informalization=cache_by_informalization,
-        by_source_text=cache_by_source_text,
-        by_docstring=cache_by_docstring,
-    )
+    return EmbeddingCaches(by_informalization=cache_by_informalization)
 
 
 async def _get_declarations_needing_embeddings(
     session: AsyncSession, limit: int | None
 ) -> list[Declaration]:
-    """Get declarations that need at least one embedding.
+    """Get declarations that need informalization embeddings.
+
+    Only returns declarations that have an informalization but no embedding yet.
 
     Args:
         session: Async database session
@@ -174,10 +201,8 @@ async def _get_declarations_needing_embeddings(
         List of declarations needing embeddings
     """
     stmt = select(Declaration).where(
-        (Declaration.name_embedding.is_(None))
-        | (Declaration.informalization_embedding.is_(None))
-        | (Declaration.source_text_embedding.is_(None))
-        | (Declaration.docstring_embedding.is_(None))
+        Declaration.informalization.isnot(None),
+        Declaration.informalization_embedding.is_(None),
     )
     if limit:
         stmt = stmt.limit(limit)
@@ -191,7 +216,7 @@ async def _process_batch(
     client: EmbeddingClient,
     caches: EmbeddingCaches,
 ) -> int:
-    """Process a batch of declarations and generate embeddings.
+    """Process a batch of declarations and generate informalization embeddings.
 
     Args:
         session: Async database session
@@ -202,85 +227,48 @@ async def _process_batch(
     Returns:
         Number of embeddings generated
     """
-    all_texts = []
-    text_metadata = []
+    texts_to_embed = []
+    declarations_to_embed = []
     cached_count = 0
 
     for declaration in declarations:
-        # Check name embedding
-        if declaration.name_embedding is None:
-            if declaration.name in caches.by_name:
-                declaration.name_embedding = caches.by_name[declaration.name]
-                cached_count += 1
-            else:
-                all_texts.append(declaration.name)
-                text_metadata.append((declaration, "name"))
+        # Skip if no informalization or already has embedding
+        if not declaration.informalization:
+            continue
+        if declaration.informalization_embedding is not None:
+            continue
 
-        # Check informalization embedding
-        if (
-            declaration.informalization
-            and declaration.informalization_embedding is None
-        ):
-            if declaration.informalization in caches.by_informalization:
-                declaration.informalization_embedding = caches.by_informalization[
-                    declaration.informalization
-                ]
-                cached_count += 1
-            else:
-                all_texts.append(declaration.informalization)
-                text_metadata.append((declaration, "informalization"))
-
-        # Check source_text embedding
-        if declaration.source_text_embedding is None:
-            if declaration.source_text in caches.by_source_text:
-                declaration.source_text_embedding = caches.by_source_text[
-                    declaration.source_text
-                ]
-                cached_count += 1
-            else:
-                all_texts.append(declaration.source_text)
-                text_metadata.append((declaration, "source_text"))
-
-        # Check docstring embedding
-        if declaration.docstring and declaration.docstring_embedding is None:
-            if declaration.docstring in caches.by_docstring:
-                declaration.docstring_embedding = caches.by_docstring[
-                    declaration.docstring
-                ]
-                cached_count += 1
-            else:
-                all_texts.append(declaration.docstring)
-                text_metadata.append((declaration, "docstring"))
+        # Check cache first
+        if declaration.informalization in caches.by_informalization:
+            declaration.informalization_embedding = _deserialize_embedding(
+                caches.by_informalization[declaration.informalization]
+            )
+            cached_count += 1
+        else:
+            texts_to_embed.append(declaration.informalization)
+            declarations_to_embed.append(declaration)
 
     # Generate embeddings for texts not found in cache
-    if all_texts:
-        response = await client.embed(all_texts)
+    if texts_to_embed:
+        response = await client.embed(texts_to_embed)
 
-        for (declaration, field_name), embedding in zip(
-            text_metadata, response.embeddings
-        ):
-            if field_name == "name":
-                declaration.name_embedding = embedding
-            elif field_name == "informalization":
-                declaration.informalization_embedding = embedding
-            elif field_name == "source_text":
-                declaration.source_text_embedding = embedding
-            elif field_name == "docstring":
-                declaration.docstring_embedding = embedding
+        for declaration, embedding in zip(declarations_to_embed, response.embeddings):
+            declaration.informalization_embedding = embedding
 
     await session.commit()
 
     if cached_count > 0:
         logger.debug(f"Reused {cached_count} embeddings from cache")
 
-    return len(all_texts)
+    return len(texts_to_embed)
 
 
 async def generate_embeddings(
     engine: AsyncEngine,
     model_name: str,
-    batch_size: int = 250,
+    batch_size: int = 128,
     limit: int | None = None,
+    max_seq_length: int = 512,
 ) -> None:
     """Generate embeddings for all declarations.
 
@@ -289,18 +277,20 @@ async def generate_embeddings(
         model_name: Name of the sentence transformer model to use
         batch_size: Number of declarations to process in each batch (default 250)
         limit: Maximum number of declarations to process (None for all)
+        max_seq_length: Maximum sequence length for tokenization (default 512).
+            Lower values reduce memory usage but may truncate long texts.
     """
-    client = EmbeddingClient(model_name=model_name)
+    client = EmbeddingClient(model_name=model_name, max_length=max_seq_length)
     logger.info(
         f"Starting embedding generation with {client.model_name} on {client.device}"
     )
 
-    # Discover and load embedding caches from all existing databases
+    # Discover and load embedding caches from all existinig databases
     logger.info("Discovering existing databases for embedding cache...")
     database_files = _discover_database_files()
-    caches = await _load_embedding_caches(database_files)
+    caches = _load_embedding_caches(database_files)
 
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(engine, expire_on_commit=False) as session:
         declarations = await _get_declarations_needing_embeddings(session, limit)
         total = len(declarations)
         logger.info(f"Found {total} declarations needing embeddings")
@@ -310,11 +300,13 @@ async def generate_embeddings(
             return
 
         total_embeddings = 0
+        rate_column = RateColumn(window_seconds=60)
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             TaskProgressColumn(),
+            rate_column,
             TimeRemainingColumn(),
         ) as progress:
             task = progress.add_task("Generating embeddings", total=total)
@@ -323,6 +315,7 @@ async def generate_embeddings(
                 batch = declarations[i : i + batch_size]
                 count = await _process_batch(session, batch, client, caches)
                 total_embeddings += count
+                rate_column.add_count(count)
                 progress.update(task, advance=len(batch))
 
         logger.info(f"Generated {total_embeddings} embeddings for {total} declarations")

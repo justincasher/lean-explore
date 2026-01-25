@@ -66,11 +66,7 @@ def sample_declaration() -> Declaration:
         source_link="https://github.com/leanprover/lean4/blob/master/src/Init/Data/Nat/Basic.lean#L100-L101",
         dependencies='["Nat", "Nat.succ"]',
         informalization="Adds two natural numbers together",
-        pagerank=0.5,
-        name_embedding=[0.1] * 768,
         informalization_embedding=[0.4] * 768,
-        source_text_embedding=[0.7] * 768,
-        docstring_embedding=[1.0] * 768,
     )
 
 
@@ -90,7 +86,6 @@ def sample_declarations() -> list[Declaration]:
             source_link="https://github.com/leanprover/lean4/blob/master/src/Init/Prelude.lean#L50",
             dependencies="[]",
             informalization="The type of natural numbers",
-            pagerank=0.8,
         ),
         Declaration(
             name="Nat.succ",
@@ -100,7 +95,6 @@ def sample_declarations() -> list[Declaration]:
             source_link="https://github.com/leanprover/lean4/blob/master/src/Init/Prelude.lean#L51",
             dependencies='["Nat"]',
             informalization="Returns the successor of a natural number",
-            pagerank=0.6,
         ),
         Declaration(
             name="Nat.add",
@@ -110,7 +104,6 @@ def sample_declarations() -> list[Declaration]:
             source_link="https://github.com/leanprover/lean4/blob/master/src/Init/Data/Nat/Basic.lean#L100",
             dependencies='["Nat", "Nat.succ"]',
             informalization="Adds two natural numbers together",
-            pagerank=0.5,
         ),
     ]
 
@@ -166,12 +159,7 @@ def empty_embedding_caches():
     """
     from lean_explore.extract.embeddings import EmbeddingCaches
 
-    return EmbeddingCaches(
-        by_name={},
-        by_informalization={},
-        by_source_text={},
-        by_docstring={},
-    )
+    return EmbeddingCaches(by_informalization={})
 
 
 @pytest.fixture

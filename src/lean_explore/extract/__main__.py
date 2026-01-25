@@ -2,10 +2,9 @@
 
 This module provides functions to coordinate the complete data extraction pipeline:
 1. Extract declarations from doc-gen4 output
-2. Calculate PageRank scores based on dependencies
-3. Generate informal natural language descriptions
-4. Generate vector embeddings for semantic search
-5. Build FAISS indices for vector similarity search
+2. Generate informal natural language descriptions
+3. Generate vector embeddings for semantic search
+4. Build FAISS indices for vector similarity search
 """
 
 import asyncio
@@ -18,14 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 import lean_explore.config
 from lean_explore.config import Config
-from lean_explore.extract.doc_gen4 import run_doc_gen4 as execute_doc_gen4
-from lean_explore.extract.doc_parser import extract_declarations
-from lean_explore.extract.embeddings import generate_embeddings
-from lean_explore.extract.index import build_faiss_indices
-from lean_explore.extract.informalize import informalize_declarations
-from lean_explore.extract.pagerank import calculate_pagerank
 from lean_explore.models import Base
-from lean_explore.util import setup_logging
+from lean_explore.util.logging import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -42,20 +35,22 @@ async def _create_database_schema(engine: AsyncEngine) -> None:
     logger.info("Database schema created successfully")
 
 
+async def _run_doc_gen4_step() -> None:
+    """Run doc-gen4 to generate documentation."""
+    from lean_explore.extract.doc_gen4 import run_doc_gen4
+
+    logger.info("Running doc-gen4...")
+    await run_doc_gen4()
+    logger.info("doc-gen4 complete")
+
+
 async def _run_extract_step(engine: AsyncEngine) -> None:
     """Extract declarations from doc-gen4 output."""
+    from lean_explore.extract.doc_parser import extract_declarations
+
     logger.info("Step 1: Extracting declarations from doc-gen4...")
     await extract_declarations(engine)
     logger.info("Declaration extraction complete")
-
-
-async def _run_pagerank_step(
-    engine: AsyncEngine, alpha: float, batch_size: int
-) -> None:
-    """Calculate PageRank scores for declarations."""
-    logger.info("Step 2: Calculating PageRank scores...")
-    await calculate_pagerank(engine, alpha=alpha, batch_size=batch_size)
-    logger.info("PageRank calculation complete")
 
 
 async def _run_informalize_step(
@@ -66,7 +61,9 @@ async def _run_informalize_step(
     limit: int | None,
 ) -> None:
     """Generate informal descriptions for declarations."""
-    logger.info("Step 3: Generating informal descriptions...")
+    from lean_explore.extract.informalize import informalize_declarations
+
+    logger.info("Step 2: Generating informal descriptions...")
     await informalize_declarations(
         engine,
         model=model,
@@ -82,18 +79,27 @@ async def _run_embeddings_step(
     model_name: str,
     batch_size: int,
     limit: int | None,
+    max_seq_length: int,
 ) -> None:
     """Generate embeddings for all declaration fields."""
-    logger.info("Step 4: Generating embeddings...")
+    from lean_explore.extract.embeddings import generate_embeddings
+
+    logger.info("Step 3: Generating embeddings...")
     await generate_embeddings(
-        engine, model_name=model_name, batch_size=batch_size, limit=limit
+        engine,
+        model_name=model_name,
+        batch_size=batch_size,
+        limit=limit,
+        max_seq_length=max_seq_length,
     )
     logger.info("Embedding generation complete")
 
 
 async def _run_index_step(engine: AsyncEngine) -> None:
     """Build FAISS indices from embeddings."""
-    logger.info("Step 5: Building FAISS indices...")
+    from lean_explore.extract.index import build_faiss_indices
+
+    logger.info("Step 4: Building FAISS indices...")
     await build_faiss_indices(engine)
     logger.info("FAISS index building complete")
 
@@ -102,19 +108,17 @@ async def run_pipeline(
     database_url: str,
     run_doc_gen4: bool = False,
     parse_docs: bool = True,
-    pagerank: bool = True,
     informalize: bool = True,
     embeddings: bool = True,
     index: bool = True,
-    pagerank_alpha: float = 0.85,
-    pagerank_batch_size: int = 1000,
-    informalize_model: str = "google/gemini-2.5-flash",
+    informalize_model: str = "google/gemini-3-flash-preview",
     informalize_batch_size: int = 1000,
-    informalize_max_concurrent: int = 10,
+    informalize_max_concurrent: int = 100,
     informalize_limit: int | None = None,
-    embedding_model: str = "BAAI/bge-base-en-v1.5",
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B",
     embedding_batch_size: int = 250,
     embedding_limit: int | None = None,
+    embedding_max_seq_length: int = 512,
     verbose: bool = False,
 ) -> None:
     """Run the Lean declaration extraction and enrichment pipeline.
@@ -123,12 +127,9 @@ async def run_pipeline(
         database_url: SQLite database URL (e.g., sqlite+aiosqlite:///path/to/db)
         run_doc_gen4: Run doc-gen4 to generate documentation before parsing
         parse_docs: Run doc-gen4 parsing step
-        pagerank: Run PageRank calculation step
         informalize: Run informalization step
         embeddings: Run embeddings generation step
         index: Run FAISS index building step
-        pagerank_alpha: PageRank damping parameter
-        pagerank_batch_size: Batch size for PageRank updates
         informalize_model: LLM model for generating informalizations
         informalize_batch_size: Commit batch size for informalization
         informalize_max_concurrent: Maximum concurrent informalization requests
@@ -136,6 +137,7 @@ async def run_pipeline(
         embedding_model: Sentence transformer model for embeddings
         embedding_batch_size: Batch size for embedding generation
         embedding_limit: Limit number of declarations for embeddings
+        embedding_max_seq_length: Max sequence length for embeddings (lower=less mem)
         verbose: Enable verbose logging
     """
     setup_logging(verbose)
@@ -152,8 +154,6 @@ async def run_pipeline(
     steps_enabled = []
     if parse_docs:
         steps_enabled.append("parse-docs")
-    if pagerank:
-        steps_enabled.append("pagerank")
     if informalize:
         steps_enabled.append("informalize")
     if embeddings:
@@ -171,13 +171,10 @@ async def run_pipeline(
         await _create_database_schema(engine)
 
         if run_doc_gen4:
-            await execute_doc_gen4()
+            await _run_doc_gen4_step()
 
         if parse_docs:
             await _run_extract_step(engine)
-
-        if pagerank:
-            await _run_pagerank_step(engine, pagerank_alpha, pagerank_batch_size)
 
         if informalize:
             await _run_informalize_step(
@@ -190,7 +187,11 @@ async def run_pipeline(
 
         if embeddings:
             await _run_embeddings_step(
-                engine, embedding_model, embedding_batch_size, embedding_limit
+                engine,
+                embedding_model,
+                embedding_batch_size,
+                embedding_limit,
+                embedding_max_seq_length,
             )
 
         if index:
@@ -222,11 +223,6 @@ async def run_pipeline(
     help="Run doc-gen4 parsing step",
 )
 @click.option(
-    "--pagerank/--no-pagerank",
-    default=None,
-    help="Run PageRank calculation step",
-)
-@click.option(
     "--informalize/--no-informalize",
     default=None,
     help="Run informalization step",
@@ -243,13 +239,13 @@ async def run_pipeline(
 )
 @click.option(
     "--informalize-model",
-    default="google/gemini-2.5-flash",
+    default="google/gemini-3-flash-preview",
     help="LLM model for generating informalizations",
 )
 @click.option(
     "--informalize-max-concurrent",
     type=int,
-    default=10,
+    default=100,
     help="Maximum concurrent informalization requests",
 )
 @click.option(
@@ -260,8 +256,14 @@ async def run_pipeline(
 )
 @click.option(
     "--embedding-model",
-    default="BAAI/bge-base-en-v1.5",
+    default="Qwen/Qwen3-Embedding-0.6B",
     help="Sentence transformer model for embeddings",
+)
+@click.option(
+    "--embedding-batch-size",
+    type=int,
+    default=250,
+    help="Batch size for embedding generation (lower = less memory, default 250)",
 )
 @click.option(
     "--embedding-limit",
@@ -269,12 +271,17 @@ async def run_pipeline(
     default=None,
     help="Limit number of declarations for embeddings (for testing)",
 )
+@click.option(
+    "--embedding-max-seq-length",
+    type=int,
+    default=512,
+    help="Max sequence length for embeddings (lower = less memory, default 512)",
+)
 @click.option("--verbose", is_flag=True, help="Enable verbose logging")
 def main(
     lean_version: str | None,
     run_doc_gen4: bool,
     parse_docs: bool | None,
-    pagerank: bool | None,
     informalize: bool | None,
     embeddings: bool | None,
     index: bool | None,
@@ -282,21 +289,24 @@ def main(
     informalize_max_concurrent: int,
     informalize_limit: int | None,
     embedding_model: str,
+    embedding_batch_size: int,
     embedding_limit: int | None,
+    embedding_max_seq_length: int,
     verbose: bool,
 ) -> None:
     """Run the Lean declaration extraction and enrichment pipeline."""
-    # Determine if any step flags were explicitly set
-    step_flags = [parse_docs, pagerank, informalize, embeddings, index]
-    any_step_explicitly_set = any(flag is not None for flag in step_flags)
+    # Determine if any flags were explicitly set (including --run-doc-gen4)
+    step_flags = [run_doc_gen4, parse_docs, informalize, embeddings, index]
+    any_flag_explicitly_set = run_doc_gen4 or any(
+        flag is not None for flag in step_flags[1:]
+    )
 
-    # If no steps were explicitly set, run all by default
-    # Otherwise, only run explicitly enabled steps (default unset to False)
-    if not any_step_explicitly_set:
-        parse_docs = pagerank = informalize = embeddings = index = True
+    # If no flags were explicitly set, run all pipeline steps by default
+    # Otherwise, only run what was explicitly requested
+    if not any_flag_explicitly_set:
+        parse_docs = informalize = embeddings = index = True
     else:
         parse_docs = parse_docs if parse_docs is not None else False
-        pagerank = pagerank if pagerank is not None else False
         informalize = informalize if informalize is not None else False
         embeddings = embeddings if embeddings is not None else False
         index = index if index is not None else False
@@ -320,7 +330,6 @@ def main(
             database_url=database_url,
             run_doc_gen4=run_doc_gen4,
             parse_docs=parse_docs,
-            pagerank=pagerank,
             informalize=informalize,
             embeddings=embeddings,
             index=index,
@@ -328,7 +337,9 @@ def main(
             informalize_max_concurrent=informalize_max_concurrent,
             informalize_limit=informalize_limit,
             embedding_model=embedding_model,
+            embedding_batch_size=embedding_batch_size,
             embedding_limit=embedding_limit,
+            embedding_max_seq_length=embedding_max_seq_length,
             verbose=verbose,
         )
     )

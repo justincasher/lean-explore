@@ -24,18 +24,14 @@ class Service:
         self,
         query: str,
         limit: int = 20,
-        semantic_weight: float = 0.4,
-        pagerank_weight: float = 0.3,
-        lexical_weight: float = 0.3,
+        rerank_top: int | None = 50,
     ) -> SearchResponse:
         """Search for Lean declarations.
 
         Args:
             query: Search query string.
             limit: Maximum number of results to return.
-            semantic_weight: Weight for semantic similarity (0-1).
-            pagerank_weight: Weight for PageRank score (0-1).
-            lexical_weight: Weight for lexical matching (0-1).
+            rerank_top: Number of candidates to rerank with cross-encoder.
 
         Returns:
             SearchResponse containing results and metadata.
@@ -45,9 +41,7 @@ class Service:
         results = await self.engine.search(
             query=query,
             limit=limit,
-            semantic_weight=semantic_weight,
-            pagerank_weight=pagerank_weight,
-            lexical_weight=lexical_weight,
+            rerank_top=rerank_top,
         )
 
         processing_time_ms = int((time.time() - start_time) * 1000)

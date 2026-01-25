@@ -41,6 +41,18 @@ class InformalizationResult:
     informalization: str | None
 
 
+@dataclass
+class DeclarationData:
+    """Plain data extracted from Declaration ORM object for async processing."""
+
+    id: int
+    name: str
+    source_text: str
+    docstring: str | None
+    dependencies: str | None
+    informalization: str | None
+
+
 # --- Utility Functions ---
 
 
@@ -229,7 +241,7 @@ async def _load_cache_from_databases(
 
 async def _process_one_declaration(
     *,
-    declaration: Declaration,
+    declaration_data: DeclarationData,
     client: OpenRouterClient,
     model: str,
     prompt_template: str,
@@ -240,7 +252,7 @@ async def _process_one_declaration(
     """Process a single declaration and generate its informalization.
 
     Args:
-        declaration: Declaration to process
+        declaration_data: Plain data extracted from Declaration ORM object
         client: OpenRouter client
         model: Model name to use
         prompt_template: Prompt template string
@@ -251,29 +263,33 @@ async def _process_one_declaration(
     Returns:
         InformalizationResult with declaration info and generated informalization
     """
-    if declaration.informalization is not None:
+    if declaration_data.informalization is not None:
         return InformalizationResult(
-            declaration_id=declaration.id,
-            declaration_name=declaration.name,
+            declaration_id=declaration_data.id,
+            declaration_name=declaration_data.name,
             informalization=None,
         )
 
     # Check cross-database cache first
-    if declaration.source_text in cache_by_source_text:
+    if declaration_data.source_text in cache_by_source_text:
         return InformalizationResult(
-            declaration_id=declaration.id,
-            declaration_name=declaration.name,
-            informalization=cache_by_source_text[declaration.source_text],
+            declaration_id=declaration_data.id,
+            declaration_name=declaration_data.name,
+            informalization=cache_by_source_text[declaration_data.source_text],
         )
 
     async with semaphore:
         dependencies_text = ""
-        dependencies = _parse_dependencies(declaration.dependencies)
+        dependencies = _parse_dependencies(declaration_data.dependencies)
         if dependencies:
             dependency_informalizations = []
-            for dependency_name in dependencies:
+            # Limit to first 20 dependencies
+            for dependency_name in dependencies[:20]:
                 if dependency_name in informalizations_by_name:
                     informal_description = informalizations_by_name[dependency_name]
+                    # Truncate description to 256 characters
+                    if len(informal_description) > 256:
+                        informal_description = informal_description[:253] + "..."
                     dependency_informalizations.append(
                         f"- {dependency_name}: {informal_description}"
                     )
@@ -284,9 +300,9 @@ async def _process_one_declaration(
                 )
 
         prompt = prompt_template.format(
-            name=declaration.name,
-            source_text=declaration.source_text,
-            docstring=declaration.docstring or "No docstring available",
+            name=declaration_data.name,
+            source_text=declaration_data.source_text,
+            docstring=declaration_data.docstring or "No docstring available",
             dependencies=dependencies_text,
         )
 
@@ -299,15 +315,15 @@ async def _process_one_declaration(
         if response.choices and response.choices[0].message.content:
             result = response.choices[0].message.content.strip()
             return InformalizationResult(
-                declaration_id=declaration.id,
-                declaration_name=declaration.name,
+                declaration_id=declaration_data.id,
+                declaration_name=declaration_data.name,
                 informalization=result,
             )
 
-        logger.warning(f"Empty response for declaration {declaration.name}")
+        logger.warning(f"Empty response for declaration {declaration_data.name}")
         return InformalizationResult(
-            declaration_id=declaration.id,
-            declaration_name=declaration.name,
+            declaration_id=declaration_data.id,
+            declaration_name=declaration_data.name,
             informalization=None,
         )
 
@@ -323,7 +339,8 @@ async def _process_layer(
     cache_by_source_text: dict[str, str],
     semaphore: asyncio.Semaphore,
     progress,
-    task,
+    total_task,
+    batch_task,
     commit_batch_size: int,
 ) -> int:
     """Process a single dependency layer.
@@ -338,7 +355,8 @@ async def _process_layer(
         cache_by_source_text: Map of source_text to cached informalizations
         semaphore: Concurrency control semaphore
         progress: Rich progress bar
-        task: Progress task ID
+        total_task: Progress task ID for total progress
+        batch_task: Progress task ID for batch progress
         commit_batch_size: Number of updates to batch before committing
 
     Returns:
@@ -347,22 +365,40 @@ async def _process_layer(
     processed = 0
     pending_updates = []
 
-    # Process all declarations in this layer in parallel (controlled by semaphore)
-    tasks = [
-        _process_one_declaration(
-            declaration=declaration,
-            client=client,
-            model=model,
-            prompt_template=prompt_template,
-            informalizations_by_name=informalizations_by_name,
-            cache_by_source_text=cache_by_source_text,
-            semaphore=semaphore,
+    # Extract data from ORM objects before creating async tasks
+    # This avoids SQLAlchemy session issues with concurrent access
+    declaration_data_list = [
+        DeclarationData(
+            id=d.id,
+            name=d.name,
+            source_text=d.source_text,
+            docstring=d.docstring,
+            dependencies=d.dependencies,
+            informalization=d.informalization,
         )
-        for declaration in layer
+        for d in layer
     ]
-    results = await asyncio.gather(*tasks)
 
-    for declaration, result in zip(layer, results):
+    # Create tasks for all declarations in this layer
+    tasks = [
+        asyncio.create_task(
+            _process_one_declaration(
+                declaration_data=data,
+                client=client,
+                model=model,
+                prompt_template=prompt_template,
+                informalizations_by_name=informalizations_by_name,
+                cache_by_source_text=cache_by_source_text,
+                semaphore=semaphore,
+            )
+        )
+        for data in declaration_data_list
+    ]
+
+    # Process results as they complete
+    for coro in asyncio.as_completed(tasks):
+        result = await coro
+
         if result.informalization:
             pending_updates.append(
                 {
@@ -371,21 +407,23 @@ async def _process_layer(
                 }
             )
             informalizations_by_name[result.declaration_name] = result.informalization
-
             processed += 1
 
-        progress.update(task, advance=1)
+        progress.update(total_task, advance=1)
+        progress.update(batch_task, advance=1)
 
         if len(pending_updates) >= commit_batch_size:
             await session.execute(update(Declaration), pending_updates)
             await session.commit()
             logger.info(f"Committed batch of {len(pending_updates)} updates")
             pending_updates.clear()
+            progress.reset(batch_task)
 
     if pending_updates:
         await session.execute(update(Declaration), pending_updates)
         await session.commit()
         logger.info(f"Committed batch of {len(pending_updates)} updates")
+        progress.reset(batch_task)
 
     return processed
 
@@ -434,7 +472,10 @@ async def _process_layers(
         TaskProgressColumn(),
         TimeRemainingColumn(),
     ) as progress:
-        task = progress.add_task("Informalizing declarations", total=total)
+        total_task = progress.add_task(f"[cyan]Total ({total:,})", total=total)
+        batch_task = progress.add_task(
+            f"[green]Batch ({commit_batch_size:,})", total=commit_batch_size
+        )
 
         for layer_num, layer in enumerate(layers):
             logger.info(
@@ -451,7 +492,8 @@ async def _process_layers(
                 cache_by_source_text=cache_by_source_text,
                 semaphore=semaphore,
                 progress=progress,
-                task=task,
+                total_task=total_task,
+                batch_task=batch_task,
                 commit_batch_size=commit_batch_size,
             )
             processed += layer_processed
@@ -469,9 +511,9 @@ async def _process_layers(
 async def informalize_declarations(
     search_db_engine: AsyncEngine,
     *,
-    model: str = "google/gemini-2.5-flash",
+    model: str = "google/gemini-3-flash-preview",
     commit_batch_size: int = 1000,
-    max_concurrent: int = 10,
+    max_concurrent: int = 100,
     limit: int | None = None,
 ) -> None:
     """Generate informalizations for declarations missing them.
@@ -498,7 +540,7 @@ async def informalize_declarations(
     database_files = _discover_database_files()
     cache_by_source_text = await _load_cache_from_databases(database_files)
 
-    async with AsyncSession(search_db_engine) as search_session:
+    async with AsyncSession(search_db_engine, expire_on_commit=False) as search_session:
         existing_informalizations = await _load_existing_informalizations(
             search_session
         )

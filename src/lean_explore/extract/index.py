@@ -1,8 +1,8 @@
 """Build FAISS index from declaration embeddings.
 
-This module creates a FAISS HNSW index for semantic search from embeddings
-stored in the database. The index is built using PyTorch for efficient
-device-accelerated processing.
+This module creates a FAISS IVF index for semantic search from embeddings
+stored in the database. IVF (Inverted File) uses k-means clustering for
+efficient approximate nearest neighbor search with controllable recall.
 """
 
 import json
@@ -11,16 +11,9 @@ from pathlib import Path
 
 import faiss
 import numpy as np
-import torch
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-)
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy import create_engine, select
+from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.orm import Session
 
 from lean_explore.config import Config
 from lean_explore.models import Declaration
@@ -29,31 +22,28 @@ logger = logging.getLogger(__name__)
 
 
 def _get_device() -> str:
-    """Detect the best available device for PyTorch operations.
+    """Detect if CUDA GPU is available for FAISS.
 
     Returns:
-        Device string: 'cuda' if CUDA GPU available, 'mps' if Apple Silicon,
-        otherwise 'cpu'.
+        Device string: 'cuda' if CUDA GPU available, otherwise 'cpu'.
+        Note: FAISS doesn't support MPS, so Apple Silicon uses CPU.
     """
-    if torch.cuda.is_available():
+    if faiss.get_num_gpus() > 0:
         device = "cuda"
-        logger.info(f"Using CUDA GPU: {torch.cuda.get_device_name(0)}")
-    elif torch.backends.mps.is_available():
-        device = "mps"
-        logger.info("Using Apple Silicon GPU (MPS)")
+        logger.info("Using CUDA GPU for FAISS")
     else:
         device = "cpu"
-        logger.info("Using CPU")
+        logger.info("Using CPU for FAISS")
     return device
 
 
-async def _load_embeddings_from_database(
-    session: AsyncSession, embedding_field: str
+def _load_embeddings_from_database(
+    session: Session, embedding_field: str
 ) -> tuple[list[int], np.ndarray]:
     """Load embeddings and IDs from the database.
 
     Args:
-        session: Async database session.
+        session: Sync database session.
         embedding_field: Name of the embedding field to load
             (e.g., 'informalization_embedding').
 
@@ -64,7 +54,7 @@ async def _load_embeddings_from_database(
     stmt = select(Declaration.id, getattr(Declaration, embedding_field)).where(
         getattr(Declaration, embedding_field).isnot(None)
     )
-    result = await session.execute(stmt)
+    result = session.execute(stmt)
     rows = list(result.all())
 
     if not rows:
@@ -84,32 +74,43 @@ async def _load_embeddings_from_database(
 
 
 def _build_faiss_index(embeddings: np.ndarray, device: str) -> faiss.Index:
-    """Build a FAISS HNSW index from embeddings.
+    """Build a FAISS IVF index from embeddings.
 
     Args:
         embeddings: Numpy array of embeddings, shape (num_vectors, dimension).
         device: Device to use ('cuda', 'mps', or 'cpu').
 
     Returns:
-        FAISS index with HNSW graph structure for fast similarity search.
+        FAISS IVF index for fast approximate nearest neighbor search.
     """
     num_vectors = embeddings.shape[0]
     dimension = embeddings.shape[1]
 
-    logger.info(f"Building FAISS HNSW index for {num_vectors} vectors...")
+    # Number of clusters: sqrt(n) is a good heuristic, minimum 256
+    nlist = max(256, int(np.sqrt(num_vectors)))
 
-    # M=32 connections per layer, efConstruction=40 for index quality
-    index = faiss.IndexHNSWFlat(dimension, 32)
-    index.hnsw.efConstruction = 40
+    logger.info(
+        f"Building FAISS IVF index for {num_vectors} vectors "
+        f"with {nlist} clusters..."
+    )
+
+    # Use inner product (cosine similarity on normalized vectors)
+    quantizer = faiss.IndexFlatIP(dimension)
+    index = faiss.IndexIVFFlat(quantizer, dimension, nlist, faiss.METRIC_INNER_PRODUCT)
 
     if device == "cuda" and faiss.get_num_gpus() > 0:
-        logger.info("Moving FAISS index to GPU")
+        logger.info("Training IVF index on GPU")
         resource = faiss.StandardGpuResources()
-        index = faiss.index_cpu_to_gpu(resource, 0, index)
+        gpu_index = faiss.index_cpu_to_gpu(resource, 0, index)
+        gpu_index.train(embeddings)
+        gpu_index.add(embeddings)
+        index = faiss.index_gpu_to_cpu(gpu_index)
+    else:
+        logger.info("Training IVF index on CPU")
+        index.train(embeddings)
+        index.add(embeddings)
 
-    index.add(embeddings)
-
-    logger.info("FAISS index built successfully")
+    logger.info("FAISS IVF index built successfully")
     return index
 
 
@@ -117,14 +118,13 @@ async def build_faiss_indices(
     engine: AsyncEngine,
     output_directory: Path | None = None,
 ) -> None:
-    """Build FAISS indices for all embedding types.
+    """Build FAISS index for informalization embeddings.
 
-    This function creates FAISS HNSW indices for each embedding type
-    (name, informalization, source_text, docstring) and saves them to disk
-    along with ID mappings.
+    This function creates a FAISS IVF index for informalization embeddings
+    and saves it to disk along with ID mappings.
 
     Args:
-        engine: Async database engine.
+        engine: Async database engine (URL extracted for sync access).
         output_directory: Directory to save indices. Defaults to active data path.
     """
     if output_directory is None:
@@ -136,54 +136,45 @@ async def build_faiss_indices(
     device = _get_device()
 
     embedding_fields = [
-        "name_embedding",
         "informalization_embedding",
-        "source_text_embedding",
-        "docstring_embedding",
     ]
 
-    async with AsyncSession(engine) as session:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-        ) as progress:
-            task = progress.add_task(
-                "Building FAISS indices", total=len(embedding_fields)
+    # Use sync engine to avoid aiosqlite issues with binary data
+    sync_url = str(engine.url).replace("sqlite+aiosqlite", "sqlite")
+    sync_engine = create_engine(sync_url)
+
+    with Session(sync_engine) as session:
+        for i, embedding_field in enumerate(embedding_fields, 1):
+            logger.info(
+                f"Processing {embedding_field} ({i}/{len(embedding_fields)})..."
             )
 
-            for embedding_field in embedding_fields:
-                logger.info(f"Processing {embedding_field}...")
+            declaration_ids, embeddings = _load_embeddings_from_database(
+                session, embedding_field
+            )
 
-                declaration_ids, embeddings = await _load_embeddings_from_database(
-                    session, embedding_field
-                )
+            if len(declaration_ids) == 0:
+                logger.warning(f"Skipping {embedding_field} (no data)")
+                continue
 
-                if len(declaration_ids) == 0:
-                    logger.warning(f"Skipping {embedding_field} (no data)")
-                    progress.update(task, advance=1)
-                    continue
+            index = _build_faiss_index(embeddings, device)
 
-                index = _build_faiss_index(embeddings, device)
+            # Move GPU index back to CPU for serialization
+            if device == "cuda" and isinstance(index, faiss.GpuIndex):
+                index = faiss.index_gpu_to_cpu(index)
 
-                # Move GPU index back to CPU for serialization
-                if device == "cuda" and isinstance(index, faiss.GpuIndex):
-                    index = faiss.index_gpu_to_cpu(index)
+            index_filename = embedding_field.replace("_embedding", "_faiss.index")
+            index_path = output_directory / index_filename
+            faiss.write_index(index, str(index_path))
+            logger.info(f"Saved FAISS index to {index_path}")
 
-                index_filename = embedding_field.replace("_embedding", "_faiss.index")
-                index_path = output_directory / index_filename
-                faiss.write_index(index, str(index_path))
-                logger.info(f"Saved FAISS index to {index_path}")
+            ids_map_filename = embedding_field.replace(
+                "_embedding", "_faiss_ids_map.json"
+            )
+            ids_map_path = output_directory / ids_map_filename
+            with open(ids_map_path, "w") as file:
+                json.dump(declaration_ids, file)
+            logger.info(f"Saved ID mapping to {ids_map_path}")
 
-                ids_map_filename = embedding_field.replace(
-                    "_embedding", "_faiss_ids_map.json"
-                )
-                ids_map_path = output_directory / ids_map_filename
-                with open(ids_map_path, "w") as file:
-                    json.dump(declaration_ids, file)
-                logger.info(f"Saved ID mapping to {ids_map_path}")
-
-                progress.update(task, advance=1)
-
+    sync_engine.dispose()
     logger.info("All FAISS indices built successfully")
