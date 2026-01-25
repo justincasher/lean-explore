@@ -59,7 +59,7 @@ class TestEmbeddingLoading:
     """Tests for loading embeddings from database."""
 
     async def test_load_embeddings_from_database(self, async_db_session):
-        """Test loading embeddings for a specific field."""
+        """Test loading embeddings for informalization field."""
         # Add declarations with embeddings
         for i in range(3):
             declaration = Declaration(
@@ -67,13 +67,14 @@ class TestEmbeddingLoading:
                 module="Test",
                 source_text=f"def test{i} := {i}",
                 source_link=f"https://example.com/{i}",
-                name_embedding=[float(i)] * 768,
+                informalization=f"Test informalization {i}",
+                informalization_embedding=[float(i)] * 768,
             )
             async_db_session.add(declaration)
         await async_db_session.commit()
 
         declaration_ids, embeddings = await _load_embeddings_from_database(
-            async_db_session, "name_embedding"
+            async_db_session, "informalization_embedding"
         )
 
         assert len(declaration_ids) == 3
@@ -88,20 +89,22 @@ class TestEmbeddingLoading:
             module="Test",
             source_text="def test := 1",
             source_link="https://example.com",
-            name_embedding=[0.1] * 768,
+            informalization="Has embedding",
+            informalization_embedding=[0.1] * 768,
         )
         decl_without = Declaration(
             name="NoEmbedding",
             module="Test",
             source_text="def test2 := 2",
             source_link="https://example.com",
+            informalization="No embedding",
         )
         async_db_session.add(decl_with)
         async_db_session.add(decl_without)
         await async_db_session.commit()
 
         declaration_ids, embeddings = await _load_embeddings_from_database(
-            async_db_session, "name_embedding"
+            async_db_session, "informalization_embedding"
         )
 
         # Should only return the one with embedding
@@ -111,37 +114,11 @@ class TestEmbeddingLoading:
     async def test_load_embeddings_empty_database(self, async_db_session):
         """Test loading from database with no embeddings."""
         declaration_ids, embeddings = await _load_embeddings_from_database(
-            async_db_session, "name_embedding"
+            async_db_session, "informalization_embedding"
         )
 
         assert declaration_ids == []
         assert embeddings.shape == (0,)
-
-    async def test_load_embeddings_different_fields(self, async_db_session):
-        """Test loading different embedding fields."""
-        declaration = Declaration(
-            name="Test",
-            module="Test",
-            source_text="def test := 1",
-            source_link="https://example.com",
-            name_embedding=[0.1] * 768,
-            source_text_embedding=[0.2] * 768,
-            informalization_embedding=[0.3] * 768,
-        )
-        async_db_session.add(declaration)
-        await async_db_session.commit()
-
-        # Load each field
-        for field in [
-            "name_embedding",
-            "source_text_embedding",
-            "informalization_embedding",
-        ]:
-            ids, embeddings = await _load_embeddings_from_database(
-                async_db_session, field
-            )
-            assert len(ids) == 1
-            assert embeddings.shape == (1, 768)
 
 
 class TestFAISSIndexBuilding:
@@ -207,7 +184,7 @@ class TestBuildFAISSIndices:
     async def test_build_faiss_indices_full_pipeline(
         self, async_db_engine, temp_directory
     ):
-        """Test building all FAISS indices from database."""
+        """Test building FAISS index from database."""
         # Add declarations with embeddings
         async with AsyncSession(async_db_engine) as session:
             for i in range(10):
@@ -217,11 +194,7 @@ class TestBuildFAISSIndices:
                     source_text=f"def test{i} := {i}",
                     source_link=f"https://example.com/{i}",
                     informalization=f"Declaration number {i}",
-                    docstring=f"Doc {i}",
-                    name_embedding=[float(i)] * 768,
-                    source_text_embedding=[float(i) + 0.1] * 768,
                     informalization_embedding=[float(i) + 0.2] * 768,
-                    docstring_embedding=[float(i) + 0.3] * 768,
                 )
                 session.add(declaration)
             await session.commit()
@@ -233,60 +206,20 @@ class TestBuildFAISSIndices:
 
             await build_faiss_indices(async_db_engine, output_directory)
 
-        # Verify index files were created
-        assert (output_directory / "name_faiss.index").exists()
-        assert (output_directory / "source_text_faiss.index").exists()
+        # Verify index file was created
         assert (output_directory / "informalization_faiss.index").exists()
-        assert (output_directory / "docstring_faiss.index").exists()
 
-        # Verify ID mapping files were created
-        assert (output_directory / "name_faiss_ids_map.json").exists()
-        assert (output_directory / "source_text_faiss_ids_map.json").exists()
+        # Verify ID mapping file was created
         assert (output_directory / "informalization_faiss_ids_map.json").exists()
-        assert (output_directory / "docstring_faiss_ids_map.json").exists()
 
-        # Verify index files can be loaded
-        index = faiss.read_index(str(output_directory / "name_faiss.index"))
+        # Verify index file can be loaded
+        index = faiss.read_index(str(output_directory / "informalization_faiss.index"))
         assert index.ntotal == 10
 
         # Verify ID mappings are correct
-        with open(output_directory / "name_faiss_ids_map.json") as f:
+        with open(output_directory / "informalization_faiss_ids_map.json") as f:
             id_mapping = json.load(f)
         assert len(id_mapping) == 10
-
-    @pytest.mark.integration
-    async def test_build_faiss_indices_partial_embeddings(
-        self, async_db_engine, temp_directory
-    ):
-        """Test building indices when some embedding types are missing."""
-        async with AsyncSession(async_db_engine) as session:
-            # Add declarations with only some embeddings
-            for i in range(5):
-                declaration = Declaration(
-                    name=f"Declaration{i}",
-                    module="Test",
-                    source_text=f"def test{i} := {i}",
-                    source_link=f"https://example.com/{i}",
-                    name_embedding=[float(i)] * 768,
-                    source_text_embedding=[float(i)] * 768,
-                    # No informalization or docstring embeddings
-                )
-                session.add(declaration)
-            await session.commit()
-
-        output_directory = temp_directory / "indices"
-
-        with patch("lean_explore.extract.index._get_device") as mock_device:
-            mock_device.return_value = "cpu"
-
-            await build_faiss_indices(async_db_engine, output_directory)
-
-        # Should create indices for name and source_text only
-        assert (output_directory / "name_faiss.index").exists()
-        assert (output_directory / "source_text_faiss.index").exists()
-
-        # Informalization and docstring indices should not be created
-        # (or be skipped with warning)
 
     @pytest.mark.integration
     async def test_build_faiss_indices_empty_database(
@@ -314,7 +247,8 @@ class TestBuildFAISSIndices:
                 module="Test",
                 source_text="def test := 1",
                 source_link="https://example.com",
-                name_embedding=[0.1] * 768,
+                informalization="Test informalization",
+                informalization_embedding=[0.1] * 768,
             )
             session.add(declaration)
             await session.commit()
@@ -352,7 +286,8 @@ class TestBuildFAISSIndices:
                     module="Test",
                     source_text=f"def test{i} := {i}",
                     source_link=f"https://example.com/{i}",
-                    name_embedding=[float(i)] * 768,
+                    informalization=f"Declaration number {i}",
+                    informalization_embedding=[float(i)] * 768,
                 )
                 session.add(declaration)
                 declarations.append(declaration)
@@ -373,7 +308,7 @@ class TestBuildFAISSIndices:
             await build_faiss_indices(async_db_engine, output_directory)
 
         # Load ID mapping and verify it matches database IDs
-        with open(output_directory / "name_faiss_ids_map.json") as f:
+        with open(output_directory / "informalization_faiss_ids_map.json") as f:
             id_mapping = json.load(f)
 
         assert id_mapping == expected_ids
