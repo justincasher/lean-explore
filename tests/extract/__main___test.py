@@ -18,7 +18,6 @@ from lean_explore.extract.__main__ import (
     _run_extract_step,
     _run_index_step,
     _run_informalize_step,
-    _run_pagerank_step,
     run_pipeline,
 )
 from lean_explore.models import Declaration
@@ -94,21 +93,6 @@ class TestExtractionStep:
             await _run_extract_step(async_db_engine)
 
             mock_extract.assert_called_once_with(async_db_engine)
-
-
-class TestPageRankStep:
-    """Tests for PageRank calculation step."""
-
-    async def test_run_pagerank_step(self, async_db_engine):
-        """Test PageRank calculation step."""
-        with patch("lean_explore.extract.__main__.calculate_pagerank") as mock_pagerank:
-            mock_pagerank.return_value = AsyncMock()
-
-            await _run_pagerank_step(async_db_engine, alpha=0.85, batch_size=1000)
-
-            mock_pagerank.assert_called_once_with(
-                async_db_engine, alpha=0.85, batch_size=1000
-            )
 
 
 class TestInformalizeStep:
@@ -188,44 +172,37 @@ class TestFullPipeline:
             mock_extract.return_value = AsyncMock()
 
             with patch(
-                "lean_explore.extract.__main__.calculate_pagerank"
-            ) as mock_pagerank:
-                mock_pagerank.return_value = AsyncMock()
+                "lean_explore.extract.__main__.informalize_declarations"
+            ) as mock_informalize:
+                mock_informalize.return_value = AsyncMock()
 
                 with patch(
-                    "lean_explore.extract.__main__.informalize_declarations"
-                ) as mock_informalize:
-                    mock_informalize.return_value = AsyncMock()
+                    "lean_explore.extract.__main__.generate_embeddings"
+                ) as mock_embeddings:
+                    mock_embeddings.return_value = AsyncMock()
 
                     with patch(
-                        "lean_explore.extract.__main__.generate_embeddings"
-                    ) as mock_embeddings:
-                        mock_embeddings.return_value = AsyncMock()
+                        "lean_explore.extract.__main__.build_faiss_indices"
+                    ) as mock_index:
+                        mock_index.return_value = AsyncMock()
 
-                        with patch(
-                            "lean_explore.extract.__main__.build_faiss_indices"
-                        ) as mock_index:
-                            mock_index.return_value = AsyncMock()
+                        with patch("lean_explore.extract.__main__.setup_logging"):
+                            os.environ["OPENROUTER_API_KEY"] = "test-key"
 
-                            with patch("lean_explore.extract.__main__.setup_logging"):
-                                os.environ["OPENROUTER_API_KEY"] = "test-key"
+                            await run_pipeline(
+                                database_url=database_url,
+                                run_doc_gen4=False,
+                                parse_docs=True,
+                                informalize=True,
+                                embeddings=True,
+                                index=True,
+                            )
 
-                                await run_pipeline(
-                                    database_url=database_url,
-                                    run_doc_gen4=False,
-                                    parse_docs=True,
-                                    pagerank=True,
-                                    informalize=True,
-                                    embeddings=True,
-                                    index=True,
-                                )
-
-                                # Verify all steps were called
-                                mock_extract.assert_called_once()
-                                mock_pagerank.assert_called_once()
-                                mock_informalize.assert_called_once()
-                                mock_embeddings.assert_called_once()
-                                mock_index.assert_called_once()
+                            # Verify all steps were called
+                            mock_extract.assert_called_once()
+                            mock_informalize.assert_called_once()
+                            mock_embeddings.assert_called_once()
+                            mock_index.assert_called_once()
 
     @pytest.mark.integration
     async def test_run_pipeline_selective_steps(self, temp_directory):
@@ -237,25 +214,18 @@ class TestFullPipeline:
         ) as mock_extract:
             mock_extract.return_value = AsyncMock()
 
-            with patch(
-                "lean_explore.extract.__main__.calculate_pagerank"
-            ) as mock_pagerank:
-                mock_pagerank.return_value = AsyncMock()
+            with patch("lean_explore.extract.__main__.setup_logging"):
+                # Only run parse step
+                await run_pipeline(
+                    database_url=database_url,
+                    run_doc_gen4=False,
+                    parse_docs=True,
+                    informalize=False,
+                    embeddings=False,
+                    index=False,
+                )
 
-                with patch("lean_explore.extract.__main__.setup_logging"):
-                    # Only run parse and pagerank
-                    await run_pipeline(
-                        database_url=database_url,
-                        run_doc_gen4=False,
-                        parse_docs=True,
-                        pagerank=True,
-                        informalize=False,
-                        embeddings=False,
-                        index=False,
-                    )
-
-                    mock_extract.assert_called_once()
-                    mock_pagerank.assert_called_once()
+                mock_extract.assert_called_once()
 
     @pytest.mark.integration
     async def test_run_pipeline_requires_openrouter_key(self, temp_directory):
@@ -285,60 +255,49 @@ class TestFullPipeline:
 
         with patch("lean_explore.extract.__main__.extract_declarations"):
             with patch(
-                "lean_explore.extract.__main__.calculate_pagerank"
-            ) as mock_pagerank:
-                mock_pagerank.return_value = AsyncMock()
+                "lean_explore.extract.__main__.informalize_declarations"
+            ) as mock_informalize:
+                mock_informalize.return_value = AsyncMock()
 
                 with patch(
-                    "lean_explore.extract.__main__.informalize_declarations"
-                ) as mock_informalize:
-                    mock_informalize.return_value = AsyncMock()
+                    "lean_explore.extract.__main__.generate_embeddings"
+                ) as mock_embeddings:
+                    mock_embeddings.return_value = AsyncMock()
 
-                    with patch(
-                        "lean_explore.extract.__main__.generate_embeddings"
-                    ) as mock_embeddings:
-                        mock_embeddings.return_value = AsyncMock()
+                    with patch("lean_explore.extract.__main__.build_faiss_indices"):
+                        with patch("lean_explore.extract.__main__.setup_logging"):
+                            import os
 
-                        with patch("lean_explore.extract.__main__.build_faiss_indices"):
-                            with patch("lean_explore.extract.__main__.setup_logging"):
-                                import os
+                            os.environ["OPENROUTER_API_KEY"] = "test-key"
 
-                                os.environ["OPENROUTER_API_KEY"] = "test-key"
+                            await run_pipeline(
+                                database_url=database_url,
+                                run_doc_gen4=False,
+                                parse_docs=False,
+                                informalize=True,
+                                embeddings=True,
+                                index=False,
+                                informalize_model="custom-model",
+                                informalize_batch_size=50,
+                                informalize_max_concurrent=20,
+                                informalize_limit=100,
+                                embedding_model="custom-embedding-model",
+                                embedding_batch_size=100,
+                                embedding_limit=50,
+                            )
 
-                                await run_pipeline(
-                                    database_url=database_url,
-                                    run_doc_gen4=False,
-                                    parse_docs=False,
-                                    pagerank=True,
-                                    informalize=True,
-                                    embeddings=True,
-                                    index=False,
-                                    pagerank_alpha=0.5,
-                                    pagerank_batch_size=500,
-                                    informalize_model="custom-model",
-                                    informalize_batch_size=50,
-                                    informalize_max_concurrent=20,
-                                    informalize_limit=100,
-                                    embedding_model="custom-embedding-model",
-                                    embedding_batch_size=100,
-                                    embedding_limit=50,
-                                )
-
-                                # Verify parameters were passed
-                                mock_pagerank.assert_called_with(
-                                    alpha=0.5, batch_size=500
-                                )
-                                mock_informalize.assert_called_with(
-                                    model="custom-model",
-                                    commit_batch_size=50,
-                                    max_concurrent=20,
-                                    limit=100,
-                                )
-                                mock_embeddings.assert_called_with(
-                                    model_name="custom-embedding-model",
-                                    batch_size=100,
-                                    limit=50,
-                                )
+                            # Verify parameters were passed
+                            mock_informalize.assert_called_with(
+                                model="custom-model",
+                                commit_batch_size=50,
+                                max_concurrent=20,
+                                limit=100,
+                            )
+                            mock_embeddings.assert_called_with(
+                                model_name="custom-embedding-model",
+                                batch_size=100,
+                                limit=50,
+                            )
 
     @pytest.mark.integration
     @pytest.mark.slow
