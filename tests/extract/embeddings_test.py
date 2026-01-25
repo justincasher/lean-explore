@@ -293,8 +293,7 @@ class TestGenerateEmbeddingsE2E:
 
             assert len(all_declarations) == 2
             for declaration in all_declarations:
-                # All should have name and informalization embeddings
-                assert declaration.name_embedding is not None
+                # All should have informalization embeddings
                 assert declaration.informalization_embedding is not None
 
     @pytest.mark.integration
@@ -344,7 +343,7 @@ class TestGenerateEmbeddingsE2E:
 
             assert len(all_declarations) == 10
             for declaration in all_declarations:
-                assert declaration.name_embedding is not None
+                assert declaration.informalization_embedding is not None
 
     @pytest.mark.integration
     async def test_generate_embeddings_with_limit(self, async_db_engine):
@@ -356,6 +355,7 @@ class TestGenerateEmbeddingsE2E:
                     module="Test",
                     source_text=f"def decl{i} := {i}",
                     source_link=f"https://example.com/{i}",
+                    informalization=f"Declaration number {i}",
                 )
                 session.add(declaration)
             await session.commit()
@@ -384,7 +384,9 @@ class TestGenerateEmbeddingsE2E:
         # Verify only 5 were processed
         async with AsyncSession(async_db_engine) as session:
             result = await session.execute(
-                select(Declaration).where(Declaration.name_embedding.isnot(None))
+                select(Declaration).where(
+                    Declaration.informalization_embedding.isnot(None)
+                )
             )
             declarations_with_embeddings = result.scalars().all()
 
