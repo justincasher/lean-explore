@@ -9,11 +9,37 @@ from rich.panel import Panel
 
 from lean_explore.models import SearchResponse
 
-console = Console()
+
+def _wrap_line(line: str, width: int) -> list[str]:
+    """Wraps a single line of text to the specified width.
+
+    Args:
+        line: The line to wrap.
+        width: The target width for wrapped text.
+
+    Returns:
+        List of wrapped line segments, each padded to the target width.
+    """
+    empty_line = " " * width
+    if not line.strip():
+        return [empty_line]
+
+    segments = textwrap.wrap(
+        line,
+        width=width,
+        replace_whitespace=True,
+        drop_whitespace=True,
+        break_long_words=True,
+        break_on_hyphens=True,
+    )
+    return [segment.ljust(width) for segment in segments] if segments else [empty_line]
 
 
 def _format_text_for_panel(text_content: str | None, width: int = 80) -> str:
     """Wraps text and pads lines to ensure fixed content width for a Panel.
+
+    Splits text into paragraphs (by double newline), wraps each line within
+    paragraphs, and pads all lines to the target width.
 
     Args:
         text_content: The text to format.
@@ -22,62 +48,46 @@ def _format_text_for_panel(text_content: str | None, width: int = 80) -> str:
     Returns:
         Formatted text with proper line wrapping and padding.
     """
+    empty_line = " " * width
     if not text_content:
-        return " " * width
+        return empty_line
 
-    final_output_lines = []
+    output_lines = []
     paragraphs = text_content.split("\n\n")
 
-    for i, paragraph in enumerate(paragraphs):
-        if not paragraph.strip() and i < len(paragraphs) - 1:
-            final_output_lines.append(" " * width)
+    for index, paragraph in enumerate(paragraphs):
+        # Handle empty paragraphs (preserve blank lines between paragraphs)
+        if not paragraph.strip():
+            if index < len(paragraphs) - 1:
+                output_lines.append(empty_line)
             continue
 
-        lines_in_paragraph = paragraph.splitlines()
-        if not lines_in_paragraph and paragraph.strip() == "":
-            final_output_lines.append(" " * width)
-            continue
-        if not lines_in_paragraph and not paragraph:
-            final_output_lines.append(" " * width)
-            continue
+        # Process each line within the paragraph
+        for line in paragraph.splitlines():
+            output_lines.extend(_wrap_line(line, width))
 
-        for line in lines_in_paragraph:
-            if not line.strip():
-                final_output_lines.append(" " * width)
-                continue
+        # Add separator between paragraphs (except after the last one)
+        if index < len(paragraphs) - 1:
+            output_lines.append(empty_line)
 
-            wrapped_segments = textwrap.wrap(
-                line,
-                width=width,
-                replace_whitespace=True,
-                drop_whitespace=True,
-                break_long_words=True,
-                break_on_hyphens=True,
-            )
-            if not wrapped_segments:
-                final_output_lines.append(" " * width)
-            else:
-                for segment in wrapped_segments:
-                    final_output_lines.append(segment.ljust(width))
-
-        if i < len(paragraphs) - 1 and (
-            paragraph.strip() or (not paragraph.strip() and not lines_in_paragraph)
-        ):
-            final_output_lines.append(" " * width)
-
-    if not final_output_lines and text_content.strip():
-        return " " * width
-
-    return "\n".join(final_output_lines)
+    return "\n".join(output_lines) if output_lines else empty_line
 
 
-def display_search_results(response: SearchResponse, display_limit: int = 5) -> None:
+def display_search_results(
+    response: SearchResponse,
+    display_limit: int = 5,
+    console: Console | None = None,
+) -> None:
     """Displays search results using fixed-width Panels for each item.
 
     Args:
         response: The search response containing results to display.
         display_limit: Maximum number of results to show.
+        console: The Rich console to use for output. If None, creates a new one.
     """
+    if console is None:
+        console = Console()
+
     console.print(
         Panel(
             f"[bold cyan]Search Query:[/bold cyan] {response.query}",
