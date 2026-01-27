@@ -111,7 +111,7 @@ class SearchEngine:
             if not path.exists():
                 raise FileNotFoundError(
                     f"Required file not found at {path}. "
-                    "Please run 'lean-explore download' to fetch the data."
+                    "Please run 'lean-explore data fetch' to download the data."
                 )
 
     @property

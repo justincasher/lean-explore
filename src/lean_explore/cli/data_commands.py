@@ -117,7 +117,7 @@ def _install_toolchain(version: str | None = None) -> None:
     base_url = f"{Config.R2_ASSETS_BASE_URL}/{base_path}/"
 
     file_downloader = pooch.create(
-        path=Config.DATA_DIRECTORY / resolved_version,
+        path=Config.CACHE_DIRECTORY / resolved_version,
         base_url=base_url,
         registry=registry,
     )
@@ -167,16 +167,16 @@ def clean_data_toolchains() -> None:
     """Removes all downloaded local data toolchains."""
     console = _get_console()
 
-    if not Config.DATA_DIRECTORY.exists():
+    if not Config.CACHE_DIRECTORY.exists():
         console.print("[yellow]No local data found to clean.[/yellow]")
         return
 
     if typer.confirm("Delete all cached data?", default=False, abort=True):
         try:
-            shutil.rmtree(Config.DATA_DIRECTORY)
+            shutil.rmtree(Config.CACHE_DIRECTORY)
             console.print("[green]Data cache cleared.[/green]")
         except OSError as error:
-            logger.error("Failed to clean data directory: %s", error)
+            logger.error("Failed to clean cache directory: %s", error)
             console.print(f"[bold red]Error cleaning data: {error}[/bold red]")
             raise typer.Exit(code=1)
 

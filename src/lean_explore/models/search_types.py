@@ -1,6 +1,6 @@
 """Type definitions for search results and related data structures."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SearchResult(BaseModel):
@@ -34,10 +34,7 @@ class SearchResult(BaseModel):
     informalization: str | None
     """Natural language description of the declaration."""
 
-    class Config:
-        """Pydantic configuration."""
-
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SearchResponse(BaseModel):

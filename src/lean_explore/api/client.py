@@ -40,12 +40,14 @@ class ApiClient:
         self,
         query: str,
         limit: int = 20,
+        rerank_top: int | None = None,  # Ignored for API (server handles reranking)
     ) -> SearchResponse:
         """Search for Lean declarations via the API.
 
         Args:
             query: The search query string.
             limit: Maximum number of results to return.
+            rerank_top: Ignored for API backend (included for interface consistency).
 
         Returns:
             SearchResponse containing results and metadata.
@@ -54,6 +56,7 @@ class ApiClient:
             httpx.HTTPStatusError: If the API returns an HTTP error status.
             httpx.RequestError: For network-related issues.
         """
+        del rerank_top  # Unused - server handles reranking
         endpoint = f"{self.base_url}/search"
         params = {"q": query, "limit": limit}
 
