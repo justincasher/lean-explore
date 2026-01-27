@@ -1,70 +1,168 @@
-"""Documentation generation using doc-gen4.
+"""Documentation generation using doc-gen4 for each package.
 
-This module provides functionality to run doc-gen4 to generate Lean documentation
-data that can be parsed and processed by the extraction pipeline.
+This module provides functionality to run doc-gen4 on each package workspace
+to generate Lean documentation data for the extraction pipeline.
 """
 
 import logging
 import os
 import subprocess
+from pathlib import Path
+
+from lean_explore.extract.github import extract_lean_version
+from lean_explore.extract.package_config import (
+    PACKAGE_REGISTRY,
+    PackageConfig,
+    get_extraction_order,
+    get_package_toolchain,
+    update_lakefile_docgen_version,
+)
 
 logger = logging.getLogger(__name__)
 
 
-async def run_doc_gen4() -> None:
-    """Run doc-gen4 to generate documentation data.
+def _get_doc_lib_names(package_name: str) -> list[str]:
+    """Get the library names to run doc-gen4 on for a package.
 
-    This function runs doc-gen4 from the lean/docbuild subdirectory
-    following the recommended setup from the doc-gen4 documentation.
-
-    Steps:
-    1. Updates doc-gen4 dependency to the pinned version
-    2. Updates extractor dependency (parent package)
-    3. Fetches cached build artifacts (avoids rebuilding mathlib)
-    4. Builds the Lean library
-    5. Generates documentation using doc-gen4
-
-    Each step streams output in real-time.
-
-    Raises:
-        RuntimeError: If any build step fails with a non-zero exit code.
+    Some packages have custom extract wrappers, others use upstream libraries directly.
     """
-    logger.info("Running doc-gen4 to generate documentation...")
+    lib_names: dict[str, list[str]] = {
+        "mathlib": ["MathExtract"],
+        "physlean": ["PhysExtract"],
+        "flt": ["FLTExtract"],
+        "formal-conjectures": ["FormalConjectures", "FormalConjecturesForMathlib"],
+        "cslib": ["CslibExtract"],
+    }
+    return lib_names.get(package_name, [f"{package_name.title()}Extract"])
 
-    commands = [
-        # (["lake", "update", "doc-gen4"], "Updating doc-gen4 dependency"),
-        # (["lake", "update", "extractor"], "Updating extractor dependency"),
-        # (["lake", "exe", "cache", "get"], "Fetching cached build artifacts"),
-        (["lake", "build"], "Building Lean library"),
-        (["lake", "build", "LeanExtract:docs"], "Generating documentation"),
-    ]
 
-    # Set environment variable to mitigate mathlib caching issue
-    # See: https://github.com/leanprover/doc-gen4#usage
+def _setup_workspace(package_config: PackageConfig) -> tuple[str, str]:
+    """Fetch toolchain from GitHub and update lakefile.
+
+    Returns:
+        Tuple of (lean_toolchain, git_ref).
+    """
+    workspace_path = Path("lean") / package_config.name
+    lakefile_path = workspace_path / "lakefile.lean"
+    toolchain_file = workspace_path / "lean-toolchain"
+
+    lean_toolchain, git_ref = get_package_toolchain(package_config)
+    lean_version = extract_lean_version(lean_toolchain)
+
+    update_lakefile_docgen_version(lakefile_path, lean_version)
+    toolchain_file.write_text(lean_toolchain + "\n")
+
+    return lean_toolchain, git_ref
+
+
+def _run_lake_for_package(package_name: str, verbose: bool = False) -> None:
+    """Run lake update, cache get, and doc-gen4 for a package."""
+    workspace_path = Path("lean") / package_name
+    package_config = PACKAGE_REGISTRY[package_name]
     env = os.environ.copy()
     env["MATHLIB_NO_CACHE_ON_UPDATE"] = "1"
 
-    for command, description in commands:
-        logger.info(f"{description}...")
+    logger.info(f"[{package_name}] Running lake update...")
+    result = subprocess.run(
+        ["lake", "update"],
+        cwd=workspace_path,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if verbose and result.stdout:
+        logger.info(result.stdout)
+    if result.returncode != 0:
+        logger.error(result.stderr)
+        raise RuntimeError(f"lake update failed for {package_name}")
+
+    # Fetch mathlib cache for packages that depend on mathlib
+    if "mathlib" in package_config.depends_on or package_name == "mathlib":
+        logger.info(f"[{package_name}] Fetching mathlib cache...")
+        result = subprocess.run(
+            ["lake", "exe", "cache", "get"],
+            cwd=workspace_path,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if verbose and result.stdout:
+            logger.info(result.stdout)
+        if result.returncode != 0:
+            logger.warning(f"[{package_name}] Cache fetch failed (non-fatal)")
+
+    logger.info(f"[{package_name}] Running lake build...")
+    process = subprocess.Popen(
+        ["lake", "build"],
+        cwd=workspace_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+    if process.stdout:
+        for line in process.stdout:
+            print(line, end="", flush=True)
+    if process.wait() != 0:
+        raise RuntimeError(f"lake build failed for {package_name}")
+
+    lib_names = _get_doc_lib_names(package_name)
+    for lib_name in lib_names:
+        logger.info(f"[{package_name}] Running doc-gen4 ({lib_name}:docs)...")
 
         process = subprocess.Popen(
-            command,
-            cwd="lean/docbuild",
+            ["lake", "build", f"{lib_name}:docs"],
+            cwd=workspace_path,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
             env=env,
         )
-
         if process.stdout:
             for line in process.stdout:
                 print(line, end="", flush=True)
-
         returncode = process.wait()
-
         if returncode != 0:
-            logger.error(f"{description} failed with return code {returncode}")
-            raise RuntimeError(f"{description} failed")
+            logger.warning(
+                f"[{package_name}] doc-gen4 had failures for {lib_name} "
+                "(continuing with generated docs)"
+            )
 
-    logger.info("doc-gen4 generation complete")
+
+async def run_doc_gen4(
+    packages: list[str] | None = None,
+    setup: bool = True,
+    verbose: bool = False,
+) -> None:
+    """Run doc-gen4 for each package to generate documentation data.
+
+    Args:
+        packages: List of package names to process. If None, processes all packages
+            in dependency order.
+        setup: Whether to fetch toolchain and update lakefile before building.
+        verbose: Enable verbose logging.
+
+    Raises:
+        RuntimeError: If any build step fails.
+    """
+    if packages is None:
+        packages = get_extraction_order()
+
+    logger.info(f"Running doc-gen4 for packages: {', '.join(packages)}")
+
+    for package_name in packages:
+        if package_name not in PACKAGE_REGISTRY:
+            raise ValueError(f"Unknown package: {package_name}")
+
+        config = PACKAGE_REGISTRY[package_name]
+        logger.info(f"\n{'='*50}\nPackage: {package_name}\n{'='*50}")
+
+        if setup:
+            toolchain, ref = _setup_workspace(config)
+            logger.info(f"Toolchain: {toolchain}, ref: {ref}")
+
+        _run_lake_for_package(package_name, verbose)
+
+    logger.info("doc-gen4 generation complete for all packages")
