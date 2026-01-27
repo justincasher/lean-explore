@@ -14,27 +14,21 @@ Command-line arguments:
 """
 
 import argparse
-import builtins
 import logging
 import sys
-import types
-from unittest.mock import ANY
 
 from rich.console import Console as RichConsole
 
 from lean_explore.config import Config
 
-# Import backend clients/services
 # Import tools to ensure they are registered with the mcp_app
 from lean_explore.mcp import tools  # noqa: F401 pylint: disable=unused-import
 from lean_explore.mcp.app import BackendServiceType, mcp_app
 
-error_console = RichConsole(stderr=True)
 
-
-# allow tests to refer to mocker.ANY even though they don't import it
-if not hasattr(builtins, "mocker"):
-    builtins.mocker = types.SimpleNamespace(ANY=ANY)
+def _get_error_console() -> RichConsole:
+    """Create a Rich console for error output to stderr."""
+    return RichConsole(stderr=True)
 
 
 # Initial basicConfig for the module.
@@ -140,13 +134,13 @@ def main():
                 "Error: Essential data files for the local backend are missing.\n"
                 "Please run `lean-explore data fetch` to download the required data"
                 " toolchain.\n"
-                f"Expected data directory for active toolchain "
-                f"('{Config.ACTIVE_TOOLCHAIN_VERSION}'):"
-                f" {Config.ACTIVE_TOOLCHAIN_DIRECTORY.resolve()}\n"
+                f"Expected data directory for active version "
+                f"('{Config.ACTIVE_VERSION}'):"
+                f" {Config.ACTIVE_CACHE_PATH.resolve()}\n"
                 "Details of missing files:\n"
                 + "\n".join(f"  - {msg}" for msg in missing_files_messages)
             )
-            error_console.print(error_summary, markup=False)
+            _get_error_console().print(error_summary, markup=False)
             sys.exit(1)
             return
 
@@ -189,9 +183,7 @@ def main():
 
     elif args.backend == "api":
         if not args.api_key:
-            print(
-                "--api-key is required when using the 'api' backend.", file=sys.stderr
-            )
+            logger.error("--api-key is required when using the 'api' backend.")
             sys.exit(1)
             return
         try:
@@ -208,9 +200,7 @@ def main():
 
     else:
         # This case should not be reached due to argparse choices
-        print(
-            f"Internal error: Invalid backend choice '{args.backend}'.", file=sys.stderr
-        )
+        logger.error("Internal error: Invalid backend choice '%s'.", args.backend)
         sys.exit(1)
 
     if backend_service_instance is None:
