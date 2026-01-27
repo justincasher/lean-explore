@@ -4,6 +4,7 @@ Provides commands to search for Lean declarations via the remote API,
 interact with AI agents, and manage local data.
 """
 
+import logging
 import os
 import subprocess
 import sys
@@ -15,7 +16,8 @@ from lean_explore.api import ApiClient
 from lean_explore.cli import data_commands
 from lean_explore.cli.display import display_search_results
 
-# Initialize Typer app and Rich console
+logger = logging.getLogger(__name__)
+
 app = typer.Typer(
     name="lean-explore",
     help="A CLI tool to explore and search Lean mathematical libraries.",
@@ -34,8 +36,17 @@ app.add_typer(
     help="Manage local data toolchains.",
 )
 
-console = Console()
-error_console = Console(stderr=True)
+
+def _get_console(use_stderr: bool = False) -> Console:
+    """Create a Rich console instance for output.
+
+    Args:
+        use_stderr: If True, output to stderr instead of stdout.
+
+    Returns:
+        A configured Console instance.
+    """
+    return Console(stderr=use_stderr)
 
 
 @app.command("search")
@@ -46,15 +57,19 @@ async def search_command(
     ),
 ):
     """Search for Lean declarations using the Lean Explore API."""
+    console = _get_console()
+    error_console = _get_console(use_stderr=True)
+
     try:
         client = ApiClient()
-    except ValueError as e:
-        error_console.print(f"[bold red]Error: {e}[/bold red]")
+    except ValueError as error:
+        logger.error("Failed to initialize API client: %s", error)
+        error_console.print(f"[bold red]Error: {error}[/bold red]")
         raise typer.Exit(code=1)
 
     console.print(f"Searching for: '{query_string}'...")
     response = await client.search(query=query_string, limit=limit)
-    display_search_results(response, display_limit=limit)
+    display_search_results(response, display_limit=limit, console=console)
 
 
 @mcp_app.command("serve")
@@ -74,6 +89,8 @@ def mcp_serve_command(
     ),
 ):
     """Launch the Lean Explore MCP (Model Context Protocol) server."""
+    error_console = _get_console(use_stderr=True)
+
     command_parts = [
         sys.executable,
         "-m",
@@ -85,6 +102,7 @@ def mcp_serve_command(
     if backend.lower() == "api":
         effective_api_key = api_key_override or os.getenv("LEANEXPLORE_API_KEY")
         if not effective_api_key:
+            logger.error("API key required for 'api' backend but not provided")
             error_console.print(
                 "[bold red]API key required for 'api' backend.[/bold red]\n"
                 "Set LEANEXPLORE_API_KEY or use --api-key option."
@@ -93,7 +111,12 @@ def mcp_serve_command(
         if api_key_override:
             command_parts.extend(["--api-key", api_key_override])
 
-    subprocess.run(command_parts, check=False)
+    logger.info("Starting MCP server with backend: %s", backend.lower())
+    result = subprocess.run(command_parts, check=False)
+
+    if result.returncode != 0:
+        logger.error("MCP server exited with code %d", result.returncode)
+        raise typer.Exit(code=result.returncode)
 
 
 if __name__ == "__main__":
