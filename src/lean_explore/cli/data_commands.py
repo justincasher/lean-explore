@@ -98,6 +98,24 @@ def _write_active_version(version: str) -> None:
     logger.info("Set active version to: %s", version)
 
 
+def _cleanup_old_versions(current_version: str) -> None:
+    """Remove all cached versions except the current one.
+
+    Args:
+        current_version: The version to keep.
+    """
+    if not Config.CACHE_DIRECTORY.exists():
+        return
+
+    for item in Config.CACHE_DIRECTORY.iterdir():
+        if item.is_dir() and item.name != current_version:
+            logger.info("Removing old version: %s", item.name)
+            try:
+                shutil.rmtree(item)
+            except OSError as error:
+                logger.warning("Failed to remove %s: %s", item.name, error)
+
+
 def _install_toolchain(version: str | None = None) -> None:
     """Installs the data toolchain for the specified version.
 
@@ -145,8 +163,9 @@ def _install_toolchain(version: str | None = None) -> None:
                 remote_name, processor=pooch.Decompress(name=local_name)
             )
 
-    # Set this version as the active version
+    # Set this version as the active version and clean up old versions
     _write_active_version(resolved_version)
+    _cleanup_old_versions(resolved_version)
 
     console.print(f"[green]Installed data for version {resolved_version}[/green]")
 
