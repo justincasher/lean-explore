@@ -37,6 +37,7 @@ async def search(
     ctx: MCPContext,
     query: str,
     limit: int = 10,
+    rerank_top: int | None = 50,
 ) -> dict[str, Any]:
     """Searches Lean declarations by a query string.
 
@@ -44,12 +45,17 @@ async def search(
         ctx: The MCP context, providing access to the backend service.
         query: A search query string, e.g., "continuous function".
         limit: The maximum number of search results to return. Defaults to 10.
+        rerank_top: Number of candidates to rerank with cross-encoder. Set to 0 or
+            None to skip reranking. Defaults to 50. Only used with local backend.
 
     Returns:
         A dictionary containing the search response with results.
     """
     backend = await _get_backend_from_context(ctx)
-    logger.info(f"MCP Tool 'search' called with query: '{query}', limit: {limit}")
+    logger.info(
+        f"MCP Tool 'search' called with query: '{query}', limit: {limit}, "
+        f"rerank_top: {rerank_top}"
+    )
 
     if not hasattr(backend, "search"):
         logger.error("Backend service does not have a 'search' method.")
@@ -57,9 +63,13 @@ async def search(
 
     # Call backend search (handle both async and sync)
     if asyncio.iscoroutinefunction(backend.search):
-        response: SearchResponse = await backend.search(query=query, limit=limit)
+        response: SearchResponse = await backend.search(
+            query=query, limit=limit, rerank_top=rerank_top
+        )
     else:
-        response: SearchResponse = backend.search(query=query, limit=limit)
+        response: SearchResponse = backend.search(
+            query=query, limit=limit, rerank_top=rerank_top
+        )
 
     # Return as dict for MCP
     return response.model_dump(exclude_none=True)

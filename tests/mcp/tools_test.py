@@ -80,7 +80,9 @@ class TestSearchTool:
 
         await search(mock_ctx, query="test query", limit=10)
 
-        mock_backend.search.assert_called_once_with(query="test query", limit=10)
+        mock_backend.search.assert_called_once_with(
+            query="test query", limit=10, rerank_top=50
+        )
 
     async def test_search_returns_dict(self, mock_context_with_backend):
         """Test that search returns a dictionary response."""
@@ -94,12 +96,14 @@ class TestSearchTool:
         assert result["query"] == "test query"
 
     async def test_search_default_limit(self, mock_context_with_backend):
-        """Test search with default limit parameter."""
+        """Test search with default limit and rerank_top parameters."""
         mock_ctx, mock_backend = mock_context_with_backend
 
         await search(mock_ctx, query="test")
 
-        mock_backend.search.assert_called_once_with(query="test", limit=10)
+        mock_backend.search.assert_called_once_with(
+            query="test", limit=10, rerank_top=50
+        )
 
     async def test_search_backend_without_method(self):
         """Test error when backend lacks search method."""

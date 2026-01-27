@@ -264,11 +264,11 @@ class TestCleanCommand:
         assert result.exit_code == 0
 
     def test_clean_command_no_data(self):
-        """Test clean when no data directory exists."""
+        """Test clean when no cache directory exists."""
         with tempfile.TemporaryDirectory() as tmpdir:
             nonexistent = Path(tmpdir) / "nonexistent"
             with patch(
-                "lean_explore.cli.data_commands.Config.DATA_DIRECTORY", nonexistent
+                "lean_explore.cli.data_commands.Config.CACHE_DIRECTORY", nonexistent
             ):
                 result = runner.invoke(app, ["clean"])
                 assert "No local data" in result.output
@@ -276,28 +276,28 @@ class TestCleanCommand:
     def test_clean_command_aborted(self):
         """Test clean command when user aborts confirmation."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            data_dir = Path(tmpdir) / "data"
-            data_dir.mkdir()
-            (data_dir / "test_file").touch()
+            cache_dir = Path(tmpdir) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "test_file").touch()
 
             with patch(
-                "lean_explore.cli.data_commands.Config.DATA_DIRECTORY", data_dir
+                "lean_explore.cli.data_commands.Config.CACHE_DIRECTORY", cache_dir
             ):
                 runner.invoke(app, ["clean"], input="n\n")
-                assert data_dir.exists()
+                assert cache_dir.exists()
 
     def test_clean_command_confirmed(self):
         """Test clean command when user confirms deletion."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            data_dir = Path(tmpdir) / "data"
-            data_dir.mkdir()
-            (data_dir / "test_file").touch()
+            cache_dir = Path(tmpdir) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "test_file").touch()
 
             with patch(
-                "lean_explore.cli.data_commands.Config.DATA_DIRECTORY", data_dir
+                "lean_explore.cli.data_commands.Config.CACHE_DIRECTORY", cache_dir
             ):
                 result = runner.invoke(app, ["clean"], input="y\n")
-                assert not data_dir.exists()
+                assert not cache_dir.exists()
                 assert "cleared" in result.output.lower()
 
 

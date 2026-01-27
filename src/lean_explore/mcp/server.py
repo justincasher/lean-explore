@@ -146,9 +146,11 @@ def main():
 
         # If pre-checks pass, proceed to initialize LocalService
         try:
-            from lean_explore.search import Service
+            from lean_explore.search import SearchEngine, Service
 
-            backend_service_instance = Service()
+            # use_local_data=False to use CACHE_DIRECTORY paths (downloaded data)
+            engine = SearchEngine(use_local_data=False)
+            backend_service_instance = Service(engine=engine)
             logger.info("Local backend service initialized successfully.")
         except FileNotFoundError as e:
             # This catch is now for FNFEs raised by LocalService for *other* reasons,

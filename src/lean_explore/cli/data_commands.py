@@ -86,11 +86,42 @@ def _build_file_registry(version_info: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _write_active_version(version: str) -> None:
+    """Write the active version to the version file.
+
+    Args:
+        version: The version string to write.
+    """
+    version_file = Config.CACHE_DIRECTORY.parent / "active_version"
+    version_file.parent.mkdir(parents=True, exist_ok=True)
+    version_file.write_text(version)
+    logger.info("Set active version to: %s", version)
+
+
+def _cleanup_old_versions(current_version: str) -> None:
+    """Remove all cached versions except the current one.
+
+    Args:
+        current_version: The version to keep.
+    """
+    if not Config.CACHE_DIRECTORY.exists():
+        return
+
+    for item in Config.CACHE_DIRECTORY.iterdir():
+        if item.is_dir() and item.name != current_version:
+            logger.info("Removing old version: %s", item.name)
+            try:
+                shutil.rmtree(item)
+            except OSError as error:
+                logger.warning("Failed to remove %s: %s", item.name, error)
+
+
 def _install_toolchain(version: str | None = None) -> None:
     """Installs the data toolchain for the specified version.
 
     Downloads and verifies all required data files (database, FAISS index, etc.)
     using Pooch. Files are automatically decompressed and cached locally.
+    After successful installation, sets this version as the active version.
 
     Args:
         version: The version to install. If None, uses the default version.
@@ -117,7 +148,7 @@ def _install_toolchain(version: str | None = None) -> None:
     base_url = f"{Config.R2_ASSETS_BASE_URL}/{base_path}/"
 
     file_downloader = pooch.create(
-        path=Config.DATA_DIRECTORY / resolved_version,
+        path=Config.CACHE_DIRECTORY / resolved_version,
         base_url=base_url,
         registry=registry,
     )
@@ -131,6 +162,10 @@ def _install_toolchain(version: str | None = None) -> None:
             file_downloader.fetch(
                 remote_name, processor=pooch.Decompress(name=local_name)
             )
+
+    # Set this version as the active version and clean up old versions
+    _write_active_version(resolved_version)
+    _cleanup_old_versions(resolved_version)
 
     console.print(f"[green]Installed data for version {resolved_version}[/green]")
 
@@ -167,16 +202,16 @@ def clean_data_toolchains() -> None:
     """Removes all downloaded local data toolchains."""
     console = _get_console()
 
-    if not Config.DATA_DIRECTORY.exists():
+    if not Config.CACHE_DIRECTORY.exists():
         console.print("[yellow]No local data found to clean.[/yellow]")
         return
 
     if typer.confirm("Delete all cached data?", default=False, abort=True):
         try:
-            shutil.rmtree(Config.DATA_DIRECTORY)
+            shutil.rmtree(Config.CACHE_DIRECTORY)
             console.print("[green]Data cache cleared.[/green]")
         except OSError as error:
-            logger.error("Failed to clean data directory: %s", error)
+            logger.error("Failed to clean cache directory: %s", error)
             console.print(f"[bold red]Error cleaning data: {error}[/bold red]")
             raise typer.Exit(code=1)
 
