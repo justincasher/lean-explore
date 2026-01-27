@@ -10,6 +10,7 @@ This module provides functions to coordinate the complete data extraction pipeli
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 import click
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -93,17 +94,23 @@ async def _run_embeddings_step(
     logger.info("Embedding generation complete")
 
 
-async def _run_index_step(engine: AsyncEngine) -> None:
-    """Build FAISS indices from embeddings."""
+async def _run_index_step(engine: AsyncEngine, extraction_path: Path) -> None:
+    """Build FAISS indices from embeddings.
+
+    Args:
+        engine: SQLAlchemy async engine instance.
+        extraction_path: Directory to save indices (same as database location).
+    """
     from lean_explore.extract.index import build_faiss_indices
 
     logger.info("Step 4: Building FAISS indices...")
-    await build_faiss_indices(engine)
+    await build_faiss_indices(engine, output_directory=extraction_path)
     logger.info("FAISS index building complete")
 
 
 async def run_pipeline(
     database_url: str,
+    extraction_path: Path,
     run_doc_gen4: bool = False,
     parse_docs: bool = True,
     informalize: bool = True,
@@ -123,6 +130,7 @@ async def run_pipeline(
 
     Args:
         database_url: SQLite database URL (e.g., sqlite+aiosqlite:///path/to/db)
+        extraction_path: Directory containing the extraction (for saving indices).
         run_doc_gen4: Run doc-gen4 to generate documentation before parsing
         parse_docs: Run doc-gen4 parsing step
         informalize: Run informalization step
@@ -193,7 +201,7 @@ async def run_pipeline(
             )
 
         if index:
-            await _run_index_step(engine)
+            await _run_index_step(engine, extraction_path)
 
         logger.info("Pipeline completed successfully!")
 
@@ -324,6 +332,7 @@ def main(
     asyncio.run(
         run_pipeline(
             database_url=database_url,
+            extraction_path=extraction_path,
             run_doc_gen4=run_doc_gen4,
             parse_docs=parse_docs,
             informalize=informalize,

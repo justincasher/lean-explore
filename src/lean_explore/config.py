@@ -46,7 +46,14 @@ class Config:
     ACTIVE_CACHE_PATH: pathlib.Path = CACHE_DIRECTORY / ACTIVE_VERSION
     """Directory for the active version's cached data files."""
 
-    ACTIVE_DATA_PATH: pathlib.Path = DATA_DIRECTORY / ACTIVE_VERSION
+    # Resolve ACTIVE_DATA_PATH: if DATA_DIRECTORY contains lean_explore.db directly
+    # (e.g., pointing to a timestamped extraction folder), use it directly.
+    # Otherwise, append the version subdirectory.
+    ACTIVE_DATA_PATH: pathlib.Path = (
+        DATA_DIRECTORY
+        if (DATA_DIRECTORY / "lean_explore.db").exists()
+        else DATA_DIRECTORY / ACTIVE_VERSION
+    )
     """Directory for the active version's local data files."""
 
     DATABASE_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "lean_explore.db"

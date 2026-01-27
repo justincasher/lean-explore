@@ -99,15 +99,46 @@ def _extract_dependencies_from_html(html: str) -> list[str]:
 
 
 def _read_source_lines(file_path: str | Path, line_start: int, line_end: int) -> str:
-    """Read specific lines from a source file."""
+    """Read specific lines from a source file.
+
+    If the extracted text is just an attribute (like @[to_additive]), extends
+    the range to include the full declaration.
+    """
     file_path = Path(file_path)
     with open(file_path, encoding="utf-8") as f:
         lines = f.readlines()
-        if line_start <= len(lines) and line_end <= len(lines):
-            return "".join(lines[line_start - 1 : line_end])
-        raise ValueError(
-            f"Line range {line_start}-{line_end} out of bounds for {file_path}"
-        )
+        if line_start > len(lines) or line_end > len(lines):
+            raise ValueError(
+                f"Line range {line_start}-{line_end} out of bounds for {file_path}"
+            )
+
+        result = "".join(lines[line_start - 1 : line_end])
+
+        # If result starts with an attribute, extend to get the full declaration
+        stripped = result.strip()
+        if stripped.startswith("@["):
+            extended_end = line_end
+            while extended_end < len(lines):
+                extended_end += 1
+                extended_result = "".join(lines[line_start - 1 : extended_end])
+                if any(
+                    kw in extended_result
+                    for kw in [
+                        " def ",
+                        " theorem ",
+                        " lemma ",
+                        " instance ",
+                        " class ",
+                        " structure ",
+                        " inductive ",
+                        " abbrev ",
+                        ":=",
+                    ]
+                ):
+                    return extended_result.rstrip()
+            return "".join(lines[line_start - 1 : extended_end]).rstrip()
+
+        return result
 
 
 def _extract_source_text(
@@ -197,8 +228,10 @@ def _parse_declarations_from_files(
             module_name = data["name"]
 
             # Only extract modules matching the allowed prefixes for this workspace
+            # Use prefix + "." to avoid "Lean" matching "LeanSearchClient"
             matches_prefix = any(
-                module_name.startswith(prefix) for prefix in allowed_module_prefixes
+                module_name == prefix or module_name.startswith(prefix + ".")
+                for prefix in allowed_module_prefixes
             )
             if not matches_prefix:
                 progress.update(task, advance=1)

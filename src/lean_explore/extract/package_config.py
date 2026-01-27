@@ -53,8 +53,14 @@ class PackageConfig:
         return base_path / self.name
 
     def should_include_module(self, module_name: str) -> bool:
-        """Check if a module belongs to this package based on prefixes."""
-        return any(module_name.startswith(prefix) for prefix in self.module_prefixes)
+        """Check if a module belongs to this package based on prefixes.
+
+        Uses exact match or prefix + "." to avoid "Lean" matching "LeanSearchClient".
+        """
+        return any(
+            module_name == prefix or module_name.startswith(prefix + ".")
+            for prefix in self.module_prefixes
+        )
 
 
 # =============================================================================

@@ -210,45 +210,79 @@ async def _get_declarations_needing_embeddings(
     return list(result.scalars().all())
 
 
+async def _apply_cache_to_declarations(
+    session: AsyncSession,
+    declarations: list[Declaration],
+    caches: EmbeddingCaches,
+    commit_batch_size: int = 1000,
+) -> tuple[int, list[Declaration]]:
+    """Apply cached embeddings to declarations.
+
+    This is a fast first pass that applies all cache hits before generating
+    new embeddings, allowing the user to see exactly how many need generation.
+
+    Args:
+        session: Async database session
+        declarations: List of declarations to check against cache
+        caches: Embedding caches from cross-database loading
+        commit_batch_size: Number of updates to batch before committing
+
+    Returns:
+        Tuple of (cache_hits_count, list of declarations still needing generation)
+    """
+    cache_hits = 0
+    remaining: list[Declaration] = []
+    batch_count = 0
+
+    for declaration in declarations:
+        if not declaration.informalization:
+            continue
+
+        if declaration.informalization in caches.by_informalization:
+            declaration.informalization_embedding = _deserialize_embedding(
+                caches.by_informalization[declaration.informalization]
+            )
+            cache_hits += 1
+            batch_count += 1
+
+            if batch_count >= commit_batch_size:
+                await session.commit()
+                batch_count = 0
+        else:
+            remaining.append(declaration)
+
+    if batch_count > 0:
+        await session.commit()
+
+    return cache_hits, remaining
+
+
 async def _process_batch(
     session: AsyncSession,
     declarations: list[Declaration],
     client: EmbeddingClient,
-    caches: EmbeddingCaches,
 ) -> int:
     """Process a batch of declarations and generate informalization embeddings.
 
     Args:
         session: Async database session
-        declarations: List of declarations to process
+        declarations: List of declarations to process (already filtered, no cache)
         client: Embedding client for generating embeddings
-        caches: Embedding caches from cross-database loading
 
     Returns:
         Number of embeddings generated
     """
     texts_to_embed = []
     declarations_to_embed = []
-    cached_count = 0
 
     for declaration in declarations:
-        # Skip if no informalization or already has embedding
         if not declaration.informalization:
             continue
         if declaration.informalization_embedding is not None:
             continue
+        texts_to_embed.append(declaration.informalization)
+        declarations_to_embed.append(declaration)
 
-        # Check cache first
-        if declaration.informalization in caches.by_informalization:
-            declaration.informalization_embedding = _deserialize_embedding(
-                caches.by_informalization[declaration.informalization]
-            )
-            cached_count += 1
-        else:
-            texts_to_embed.append(declaration.informalization)
-            declarations_to_embed.append(declaration)
-
-    # Generate embeddings for texts not found in cache
     if texts_to_embed:
         response = await client.embed(texts_to_embed)
 
@@ -256,9 +290,6 @@ async def _process_batch(
             declaration.informalization_embedding = embedding
 
     await session.commit()
-
-    if cached_count > 0:
-        logger.debug(f"Reused {cached_count} embeddings from cache")
 
     return len(texts_to_embed)
 
@@ -280,25 +311,41 @@ async def generate_embeddings(
         max_seq_length: Maximum sequence length for tokenization (default 512).
             Lower values reduce memory usage but may truncate long texts.
     """
-    client = EmbeddingClient(model_name=model_name, max_length=max_seq_length)
-    logger.info(
-        f"Starting embedding generation with {client.model_name} on {client.device}"
-    )
-
-    # Discover and load embedding caches from all existinig databases
+    # Discover and load embedding caches from all existing databases
     logger.info("Discovering existing databases for embedding cache...")
     database_files = _discover_database_files()
     caches = _load_embedding_caches(database_files)
 
     async with AsyncSession(engine, expire_on_commit=False) as session:
         declarations = await _get_declarations_needing_embeddings(session, limit)
-        total = len(declarations)
-        logger.info(f"Found {total} declarations needing embeddings")
+        logger.info(f"Found {len(declarations)} declarations needing embeddings")
 
         if not declarations:
             logger.info("No declarations to process")
             return
 
+        # Phase 1: Apply all cache hits first
+        logger.info("Phase 1: Applying cached embeddings...")
+        cache_hits, remaining = await _apply_cache_to_declarations(
+            session, declarations, caches
+        )
+        logger.info(
+            f"Applied {cache_hits} embeddings from cache, "
+            f"{len(remaining)} remaining need generation"
+        )
+
+        if not remaining:
+            logger.info("All embeddings served from cache, no generation needed")
+            return
+
+        # Phase 2: Generate embeddings for remaining declarations
+        logger.info("Phase 2: Generating embeddings for remaining declarations...")
+        client = EmbeddingClient(model_name=model_name, max_length=max_seq_length)
+        logger.info(
+            f"Using {client.model_name} on {client.device}"
+        )
+
+        total = len(remaining)
         total_embeddings = 0
         rate_column = RateColumn(window_seconds=60)
         with Progress(
@@ -312,10 +359,13 @@ async def generate_embeddings(
             task = progress.add_task("Generating embeddings", total=total)
 
             for i in range(0, total, batch_size):
-                batch = declarations[i : i + batch_size]
-                count = await _process_batch(session, batch, client, caches)
+                batch = remaining[i : i + batch_size]
+                count = await _process_batch(session, batch, client)
                 total_embeddings += count
                 rate_column.add_count(count)
                 progress.update(task, advance=len(batch))
 
-        logger.info(f"Generated {total_embeddings} embeddings for {total} declarations")
+        logger.info(
+            f"Generated {total_embeddings} new embeddings "
+            f"({cache_hits} from cache, {total_embeddings} generated)"
+        )
