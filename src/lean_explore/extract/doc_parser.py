@@ -20,54 +20,65 @@ from rich.progress import (
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from lean_explore.config import Config
 from lean_explore.extract.types import Declaration
 from lean_explore.models import Declaration as DBDeclaration
 
 logger = logging.getLogger(__name__)
 
 
-def _build_package_cache(lean_root: str | Path) -> dict[str, Path]:
+def _build_package_cache(
+    lean_root: str | Path, workspace_name: str | None = None
+) -> dict[str, Path]:
     """Build a cache of package names to their actual directories.
 
-    Includes both Lake packages from .lake/packages and the Lean 4 toolchain
-    from the elan installation.
+    When workspace_name is provided, only includes packages from that specific
+    workspace's .lake/packages directory. This ensures source files are resolved
+    from the correct workspace, avoiding version mismatches between workspaces.
 
     Args:
-        lean_root: Root directory of the Lean project.
+        lean_root: Root directory containing package workspaces.
+        workspace_name: If provided, only include packages from this workspace.
+            If None, includes packages from all workspaces (legacy behavior).
 
     Returns:
         Dictionary mapping lowercase package names to their directory paths.
-
-    Example:
-        >>> cache = _build_package_cache("lean")
-        >>> cache
-        {"mathlib4": Path("lean/.lake/packages/mathlib4"),
-         "qq": Path("lean/.lake/packages/Qq"),
-         "lean4": Path("~/.elan/toolchains/leanprover--lean4---v4.23.0/src/lean")}
     """
+    from lean_explore.extract.package_config import get_extraction_order
+
     lean_root = Path(lean_root)
     cache = {}
 
-    packages_directory = lean_root / ".lake" / "packages"
-    if packages_directory.exists():
-        for package_directory in packages_directory.iterdir():
-            if package_directory.is_dir():
-                cache[package_directory.name.lower()] = package_directory
+    # Determine which workspaces to scan
+    workspaces = [workspace_name] if workspace_name else get_extraction_order()
 
-    toolchain_file = lean_root / "lean-toolchain"
-    if toolchain_file.exists():
-        version = toolchain_file.read_text().strip().split(":")[-1]
-        toolchain_path = (
-            Path.home()
-            / ".elan"
-            / "toolchains"
-            / f"leanprover--lean4---{version}"
-            / "src"
-            / "lean"
-        )
-        if toolchain_path.exists():
-            cache["lean4"] = toolchain_path
+    # Collect packages from workspace(s)
+    for ws_name in workspaces:
+        packages_directory = lean_root / ws_name / ".lake" / "packages"
+        if packages_directory.exists():
+            for package_directory in packages_directory.iterdir():
+                if package_directory.is_dir():
+                    cache[package_directory.name.lower()] = package_directory
+
+    # Add toolchain - use specified workspace or find first available
+    if workspace_name:
+        toolchain_workspaces = [workspace_name]
+    else:
+        toolchain_workspaces = get_extraction_order()
+    for ws_name in toolchain_workspaces:
+        toolchain_file = lean_root / ws_name / "lean-toolchain"
+        if toolchain_file.exists():
+            version = toolchain_file.read_text().strip().split(":")[-1]
+            toolchain_path = (
+                Path.home()
+                / ".elan"
+                / "toolchains"
+                / f"leanprover--lean4---{version}"
+                / "src"
+                / "lean"
+            )
+            if toolchain_path.exists():
+                cache["lean4"] = toolchain_path
+                break
 
     return cache
 
@@ -88,15 +99,46 @@ def _extract_dependencies_from_html(html: str) -> list[str]:
 
 
 def _read_source_lines(file_path: str | Path, line_start: int, line_end: int) -> str:
-    """Read specific lines from a source file."""
+    """Read specific lines from a source file.
+
+    If the extracted text is just an attribute (like @[to_additive]), extends
+    the range to include the full declaration.
+    """
     file_path = Path(file_path)
     with open(file_path, encoding="utf-8") as f:
         lines = f.readlines()
-        if line_start <= len(lines) and line_end <= len(lines):
-            return "".join(lines[line_start - 1 : line_end])
-        raise ValueError(
-            f"Line range {line_start}-{line_end} out of bounds for {file_path}"
-        )
+        if line_start > len(lines) or line_end > len(lines):
+            raise ValueError(
+                f"Line range {line_start}-{line_end} out of bounds for {file_path}"
+            )
+
+        result = "".join(lines[line_start - 1 : line_end])
+
+        # If result starts with an attribute, extend to get the full declaration
+        stripped = result.strip()
+        if stripped.startswith("@["):
+            extended_end = line_end
+            while extended_end < len(lines):
+                extended_end += 1
+                extended_result = "".join(lines[line_start - 1 : extended_end])
+                if any(
+                    kw in extended_result
+                    for kw in [
+                        " def ",
+                        " theorem ",
+                        " lemma ",
+                        " instance ",
+                        " class ",
+                        " structure ",
+                        " inductive ",
+                        " abbrev ",
+                        ":=",
+                    ]
+                ):
+                    return extended_result.rstrip()
+            return "".join(lines[line_start - 1 : extended_end]).rstrip()
+
+        return result
 
 
 def _extract_source_text(
@@ -152,7 +194,10 @@ def _extract_source_text(
 
 
 def _parse_declarations_from_files(
-    bmp_files: list[Path], lean_root: Path, package_cache: dict[str, Path]
+    bmp_files: list[Path],
+    lean_root: Path,
+    package_cache: dict[str, Path],
+    allowed_module_prefixes: list[str],
 ) -> list[Declaration]:
     """Parse declarations from doc-gen4 BMP files.
 
@@ -160,6 +205,7 @@ def _parse_declarations_from_files(
         bmp_files: List of paths to BMP files containing declaration data.
         lean_root: Root directory of the Lean project.
         package_cache: Dictionary mapping package names to their directories.
+        allowed_module_prefixes: Module prefixes to extract (e.g., ["Mathlib"]).
 
     Returns:
         List of parsed Declaration objects.
@@ -181,11 +227,13 @@ def _parse_declarations_from_files(
 
             module_name = data["name"]
 
-            top_level_module = module_name.split(".")[0]
-
-            if top_level_module.lower() not in {
-                p.lower() for p in Config.EXTRACT_PACKAGES
-            }:
+            # Only extract modules matching the allowed prefixes for this workspace
+            # Use prefix + "." to avoid "Lean" matching "LeanSearchClient"
+            matches_prefix = any(
+                module_name == prefix or module_name.startswith(prefix + ".")
+                for prefix in allowed_module_prefixes
+            )
+            if not matches_prefix:
                 progress.update(task, advance=1)
                 continue
 
@@ -284,38 +332,63 @@ async def _insert_declarations_batch(
 async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> None:
     """Extract all declarations from doc-gen4 data and load into database.
 
-    Automatically finds the lean/.lake directory from the root.
-    Extracts all declarations, then inserts them into the database.
+    Looks for BMP files in each package's .lake/build/doc-data directory.
+    Extracts only declarations matching the package's configured module_prefixes,
+    ensuring each package's declarations come from its own workspace.
 
     Args:
         engine: SQLAlchemy async engine for database connection.
         batch_size: Number of declarations to insert per database transaction.
     """
-    lean_root = Path("lean")
-    # Documentation is now generated in the docbuild subdirectory
-    documentation_data_directory = (
-        lean_root / "docbuild" / ".lake" / "build" / "doc-data"
+    from lean_explore.extract.package_config import (
+        PACKAGE_REGISTRY,
+        get_extraction_order,
     )
 
-    if not documentation_data_directory.exists():
-        raise FileNotFoundError(
-            f"Doc-data directory not found: {documentation_data_directory}"
+    lean_root = Path("lean")
+    all_declarations = []
+
+    # Process each workspace separately with its own package cache
+    for package_name in get_extraction_order():
+        package_config = PACKAGE_REGISTRY[package_name]
+        doc_data_dir = lean_root / package_name / ".lake" / "build" / "doc-data"
+
+        if not doc_data_dir.exists():
+            logger.warning(f"No doc-data directory for {package_name}: {doc_data_dir}")
+            continue
+
+        bmp_files = sorted(doc_data_dir.glob("**/*.bmp"))
+        logger.info(f"Found {len(bmp_files)} BMP files in {package_name}")
+
+        if not bmp_files:
+            continue
+
+        # Build workspace-specific package cache to avoid version mismatches
+        package_cache = _build_package_cache(lean_root, package_name)
+        logger.info(
+            f"Built package cache for {package_name} with {len(package_cache)} packages"
         )
 
-    bmp_files = sorted(documentation_data_directory.glob("**/*.bmp"))
+        declarations = _parse_declarations_from_files(
+            bmp_files, lean_root, package_cache, package_config.module_prefixes
+        )
+        logger.info(
+            f"Extracted {len(declarations)} declarations from {package_name} "
+            f"(prefixes: {package_config.module_prefixes})"
+        )
+        all_declarations.extend(declarations)
 
-    package_cache = _build_package_cache(lean_root)
-    logger.info(f"Found {len(package_cache)} packages: {list(package_cache.keys())}")
+    if not all_declarations:
+        raise FileNotFoundError("No declarations extracted from any package workspace")
 
-    declarations = _parse_declarations_from_files(bmp_files, lean_root, package_cache)
-    logger.info(f"Found {len(declarations)} declarations from allowed packages")
+    logger.info(f"Total declarations extracted: {len(all_declarations)}")
 
     async with AsyncSession(engine) as session:
         inserted_count = await _insert_declarations_batch(
-            session, declarations, batch_size
+            session, all_declarations, batch_size
         )
 
-    skipped = len(declarations) - inserted_count
+    skipped = len(all_declarations) - inserted_count
     logger.info(
         f"Inserted {inserted_count} new declarations into database "
         f"(skipped {skipped} duplicates)"

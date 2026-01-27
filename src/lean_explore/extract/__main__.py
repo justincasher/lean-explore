@@ -8,14 +8,13 @@ This module provides functions to coordinate the complete data extraction pipeli
 """
 
 import asyncio
-import importlib
 import logging
 import os
+from pathlib import Path
 
 import click
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-import lean_explore.config
 from lean_explore.config import Config
 from lean_explore.models import Base
 from lean_explore.util.logging import setup_logging
@@ -95,17 +94,23 @@ async def _run_embeddings_step(
     logger.info("Embedding generation complete")
 
 
-async def _run_index_step(engine: AsyncEngine) -> None:
-    """Build FAISS indices from embeddings."""
+async def _run_index_step(engine: AsyncEngine, extraction_path: Path) -> None:
+    """Build FAISS indices from embeddings.
+
+    Args:
+        engine: SQLAlchemy async engine instance.
+        extraction_path: Directory to save indices (same as database location).
+    """
     from lean_explore.extract.index import build_faiss_indices
 
     logger.info("Step 4: Building FAISS indices...")
-    await build_faiss_indices(engine)
+    await build_faiss_indices(engine, output_directory=extraction_path)
     logger.info("FAISS index building complete")
 
 
 async def run_pipeline(
     database_url: str,
+    extraction_path: Path,
     run_doc_gen4: bool = False,
     parse_docs: bool = True,
     informalize: bool = True,
@@ -125,6 +130,7 @@ async def run_pipeline(
 
     Args:
         database_url: SQLite database URL (e.g., sqlite+aiosqlite:///path/to/db)
+        extraction_path: Directory containing the extraction (for saving indices).
         run_doc_gen4: Run doc-gen4 to generate documentation before parsing
         parse_docs: Run doc-gen4 parsing step
         informalize: Run informalization step
@@ -195,7 +201,7 @@ async def run_pipeline(
             )
 
         if index:
-            await _run_index_step(engine)
+            await _run_index_step(engine, extraction_path)
 
         logger.info("Pipeline completed successfully!")
 
@@ -205,14 +211,6 @@ async def run_pipeline(
 
 @click.command()
 @click.option(
-    "--lean-version",
-    envvar="LEAN_EXPLORE_LEAN_VERSION",
-    help=(
-        "Lean version for database (e.g., 4.23.0). "
-        "Uses config default if not specified."
-    ),
-)
-@click.option(
     "--run-doc-gen4",
     is_flag=True,
     help="Run doc-gen4 to generate documentation before parsing",
@@ -220,22 +218,22 @@ async def run_pipeline(
 @click.option(
     "--parse-docs/--no-parse-docs",
     default=None,
-    help="Run doc-gen4 parsing step",
+    help="Run doc-gen4 parsing step (creates new timestamped directory)",
 )
 @click.option(
     "--informalize/--no-informalize",
     default=None,
-    help="Run informalization step",
+    help="Run informalization step (uses latest extraction)",
 )
 @click.option(
     "--embeddings/--no-embeddings",
     default=None,
-    help="Run embeddings generation step",
+    help="Run embeddings generation step (uses latest extraction)",
 )
 @click.option(
     "--index/--no-index",
     default=None,
-    help="Run FAISS index building step",
+    help="Run FAISS index building step (uses latest extraction)",
 )
 @click.option(
     "--informalize-model",
@@ -279,7 +277,6 @@ async def run_pipeline(
 )
 @click.option("--verbose", is_flag=True, help="Enable verbose logging")
 def main(
-    lean_version: str | None,
     run_doc_gen4: bool,
     parse_docs: bool | None,
     informalize: bool | None,
@@ -294,7 +291,11 @@ def main(
     embedding_max_seq_length: int,
     verbose: bool,
 ) -> None:
-    """Run the Lean declaration extraction and enrichment pipeline."""
+    """Run the Lean declaration extraction and enrichment pipeline.
+
+    Extraction creates timestamped directories (YYYYMMDD_HHMMSS format).
+    Subsequent steps (informalize, embeddings, index) use the latest extraction.
+    """
     # Determine if any flags were explicitly set (including --run-doc-gen4)
     step_flags = [run_doc_gen4, parse_docs, informalize, embeddings, index]
     any_flag_explicitly_set = run_doc_gen4 or any(
@@ -311,23 +312,27 @@ def main(
         embeddings = embeddings if embeddings is not None else False
         index = index if index is not None else False
 
-    if lean_version:
-        os.environ["LEAN_EXPLORE_LEAN_VERSION"] = lean_version
-        importlib.reload(lean_explore.config)
-        from lean_explore.config import Config as ReloadedConfig
-
-        database_url = ReloadedConfig.EXTRACTION_DATABASE_URL
-        data_directory = ReloadedConfig.ACTIVE_DATA_PATH
+    # Determine extraction directory
+    if parse_docs:
+        # Create new timestamped directory for fresh extraction
+        extraction_path = Config.create_timestamped_extraction_path()
+        logger.info(f"Created new extraction directory: {extraction_path}")
     else:
-        database_url = Config.EXTRACTION_DATABASE_URL
-        data_directory = Config.ACTIVE_DATA_PATH
+        # Use latest existing extraction for subsequent steps
+        extraction_path = Config.get_latest_extraction_path()
+        if extraction_path is None:
+            raise click.ClickException(
+                "No existing extraction found. Run with --parse-docs first."
+            )
+        logger.info(f"Using existing extraction: {extraction_path}")
 
-    data_directory.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Extraction output directory: {data_directory}")
+    database_path = extraction_path / "lean_explore.db"
+    database_url = f"sqlite+aiosqlite:///{database_path}"
 
     asyncio.run(
         run_pipeline(
             database_url=database_url,
+            extraction_path=extraction_path,
             run_doc_gen4=run_doc_gen4,
             parse_docs=parse_docs,
             informalize=informalize,

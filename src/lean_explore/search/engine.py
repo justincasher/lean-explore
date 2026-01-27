@@ -499,6 +499,41 @@ class SearchEngine:
                     break
         return results
 
+    def _extract_package(self, module: str) -> str:
+        """Extract package name from module path.
+
+        Args:
+            module: Full module path (e.g., "Mathlib.Algebra.Group").
+
+        Returns:
+            Package name (first component of module path).
+        """
+        return module.split(".")[0] if module else ""
+
+    def _filter_by_packages(
+        self,
+        declarations_map: dict[int, Declaration],
+        packages: list[str],
+    ) -> dict[int, Declaration]:
+        """Filter declarations to only include specified packages.
+
+        Args:
+            declarations_map: Map of declaration ID to Declaration.
+            packages: List of package names to include.
+
+        Returns:
+            Filtered declarations map.
+        """
+        if not packages:
+            return declarations_map
+
+        package_set = set(packages)
+        return {
+            cid: decl
+            for cid, decl in declarations_map.items()
+            if self._extract_package(decl.module) in package_set
+        }
+
     async def search(
         self,
         query: str,
@@ -506,6 +541,7 @@ class SearchEngine:
         faiss_k: int = 1000,
         bm25_k: int = 1000,
         rerank_top: int | None = 25,
+        packages: list[str] | None = None,
     ) -> list[SearchResult]:
         """Search for Lean declarations using Reciprocal Rank Fusion.
 
@@ -524,6 +560,8 @@ class SearchEngine:
             bm25_k: Number of candidates from BM25 index. Defaults to 1000.
             rerank_top: If set, apply cross-encoder reranking to top N candidates.
                 Set to 0 or None to skip reranking.
+            packages: Optional list of package names to filter by. If provided,
+                only declarations from these packages will be returned.
 
         Returns:
             List of SearchResult objects, ranked by combined score.
@@ -541,6 +579,17 @@ class SearchEngine:
         boosted_scores, declarations_map = await self._apply_dependency_boost(
             rrf_scores
         )
+
+        # Apply package filtering if specified
+        if packages:
+            declarations_map = self._filter_by_packages(declarations_map, packages)
+            # Filter boosted_scores to only include filtered declarations
+            boosted_scores = [
+                (cid, score)
+                for cid, score in boosted_scores
+                if cid in declarations_map
+            ]
+            logger.info(f"Filtered to {len(declarations_map)} in {packages}")
 
         top_n = rerank_top if rerank_top and rerank_top > 0 else limit
 

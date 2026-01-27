@@ -27,28 +27,33 @@ class TestPackageCache:
     """Tests for package cache building."""
 
     def test_build_package_cache_with_packages(self, temp_directory):
-        """Test building package cache from .lake/packages directory."""
+        """Test building package cache from workspace .lake/packages directories."""
         lean_root = temp_directory / "lean"
-        packages_directory = lean_root / ".lake" / "packages"
-        packages_directory.mkdir(parents=True)
 
-        (packages_directory / "mathlib4").mkdir()
-        (packages_directory / "Qq").mkdir()
-        (packages_directory / "batteries").mkdir()
+        # Create packages in the mathlib workspace (as the new code expects)
+        mathlib_packages_directory = lean_root / "mathlib" / ".lake" / "packages"
+        mathlib_packages_directory.mkdir(parents=True)
+
+        (mathlib_packages_directory / "mathlib4").mkdir()
+        (mathlib_packages_directory / "Qq").mkdir()
+        (mathlib_packages_directory / "batteries").mkdir()
 
         cache = _build_package_cache(lean_root)
 
         assert "mathlib4" in cache
         assert "qq" in cache  # Lowercase
         assert "batteries" in cache
-        assert cache["mathlib4"] == packages_directory / "mathlib4"
+        assert cache["mathlib4"] == mathlib_packages_directory / "mathlib4"
 
     def test_build_package_cache_with_lean4_toolchain(self, temp_directory):
         """Test that Lean 4 toolchain is included in cache."""
         lean_root = temp_directory / "lean"
-        lean_root.mkdir()
 
-        toolchain_file = lean_root / "lean-toolchain"
+        # Create toolchain in a workspace directory
+        mathlib_dir = lean_root / "mathlib"
+        mathlib_dir.mkdir(parents=True)
+
+        toolchain_file = mathlib_dir / "lean-toolchain"
         toolchain_file.write_text("leanprover/lean4:v4.24.0")
 
         cache = _build_package_cache(lean_root)
@@ -90,8 +95,10 @@ class TestSourceExtraction:
     def test_extract_source_text_from_package(self, temp_directory):
         """Test extracting source text using package cache."""
         lean_root = temp_directory / "lean"
-        packages_directory = lean_root / ".lake" / "packages"
-        mathlib_directory = packages_directory / "mathlib4"
+
+        # Create packages in the mathlib workspace (as the new code expects)
+        mathlib_packages_directory = lean_root / "mathlib" / ".lake" / "packages"
+        mathlib_directory = mathlib_packages_directory / "mathlib4"
         mathlib_directory.mkdir(parents=True)
 
         source_file = mathlib_directory / "Mathlib" / "Data" / "List" / "Basic.lean"
@@ -191,11 +198,12 @@ class TestDeclarationParsing:
     def test_parse_declarations_from_files(self, temp_directory):
         """Test parsing declarations from BMP files."""
         lean_root = temp_directory / "lean"
-        doc_data_directory = lean_root / ".lake" / "build" / "doc-data"
+        doc_data_directory = lean_root / "mathlib" / ".lake" / "build" / "doc-data"
         doc_data_directory.mkdir(parents=True)
 
-        # Create package directory structure
-        mathlib_directory = lean_root / ".lake" / "packages" / "mathlib4"
+        # Create package directory structure in the mathlib workspace
+        mathlib_packages_directory = lean_root / "mathlib" / ".lake" / "packages"
+        mathlib_directory = mathlib_packages_directory / "mathlib4"
         mathlib_directory.mkdir(parents=True)
         source_file = mathlib_directory / "Mathlib" / "Init" / "Data" / "Nat.lean"
         source_file.parent.mkdir(parents=True)
@@ -220,11 +228,10 @@ class TestDeclarationParsing:
 
         package_cache = _build_package_cache(lean_root)
 
-        with patch("lean_explore.extract.doc_parser.Config") as mock_config:
-            mock_config.EXTRACT_PACKAGES = {"mathlib"}
-            declarations = _parse_declarations_from_files(
-                [bmp_file], lean_root, package_cache
-            )
+        # Now uses allowed_module_prefixes parameter instead of Config
+        declarations = _parse_declarations_from_files(
+            [bmp_file], lean_root, package_cache, allowed_module_prefixes=["Mathlib"]
+        )
 
         assert len(declarations) == 1
         assert declarations[0].name == "Nat.add"
@@ -234,12 +241,12 @@ class TestDeclarationParsing:
         assert declarations[0].dependencies == ["Nat"]
 
     def test_parse_declarations_filters_packages(self, temp_directory):
-        """Test that declarations from non-configured packages are filtered."""
+        """Test that declarations from non-configured prefixes are filtered."""
         lean_root = temp_directory / "lean"
-        doc_data_directory = lean_root / ".lake" / "build" / "doc-data"
+        doc_data_directory = lean_root / "mathlib" / ".lake" / "build" / "doc-data"
         doc_data_directory.mkdir(parents=True)
 
-        # Create BMP file for a package not in EXTRACT_PACKAGES
+        # Create BMP file for a module not matching allowed prefixes
         bmp_file = doc_data_directory / "SomeOtherPackage.Basic.bmp"
         bmp_data = {
             "name": "SomeOtherPackage.Basic",
@@ -257,11 +264,10 @@ class TestDeclarationParsing:
 
         package_cache = _build_package_cache(lean_root)
 
-        with patch("lean_explore.extract.doc_parser.Config") as mock_config:
-            mock_config.EXTRACT_PACKAGES = {"mathlib"}
-            declarations = _parse_declarations_from_files(
-                [bmp_file], lean_root, package_cache
-            )
+        # Only allow "Mathlib" prefix - should filter out "SomeOtherPackage"
+        declarations = _parse_declarations_from_files(
+            [bmp_file], lean_root, package_cache, allowed_module_prefixes=["Mathlib"]
+        )
 
         assert len(declarations) == 0
 
