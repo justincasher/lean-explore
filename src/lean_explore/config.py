@@ -10,6 +10,28 @@ import os
 import pathlib
 
 
+def _get_active_cache_version() -> str:
+    """Get the active cache version from the version file or environment.
+
+    The version is determined by (in order of priority):
+    1. LEAN_EXPLORE_VERSION environment variable
+    2. Contents of ~/.lean_explore/active_version file (set by data fetch)
+    3. Default fallback version
+
+    Returns:
+        The active version string (e.g., "2025.01.27" or "v4.24.0").
+    """
+    env_version = os.getenv("LEAN_EXPLORE_VERSION")
+    if env_version:
+        return env_version
+
+    version_file = pathlib.Path.home() / ".lean_explore" / "active_version"
+    if version_file.exists():
+        return version_file.read_text().strip()
+
+    return "v4.24.0"
+
+
 class Config:
     """Application-wide configuration settings."""
 
@@ -40,8 +62,12 @@ class Config:
     DEFAULT_LEAN_VERSION: str = "4.24.0"
     """Lean version for database naming and dependency resolution."""
 
-    ACTIVE_VERSION: str = f"v{DEFAULT_LEAN_VERSION}"
-    """Active version identifier (e.g., v4.24.0)."""
+    ACTIVE_VERSION: str = _get_active_cache_version()
+    """Active version identifier for cached data (e.g., "2025.01.27").
+
+    Determined by LEAN_EXPLORE_VERSION env var, ~/.lean_explore/active_version
+    file, or defaults to v4.24.0.
+    """
 
     ACTIVE_CACHE_PATH: pathlib.Path = CACHE_DIRECTORY / ACTIVE_VERSION
     """Directory for the active version's cached data files."""

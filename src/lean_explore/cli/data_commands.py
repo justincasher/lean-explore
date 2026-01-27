@@ -86,11 +86,24 @@ def _build_file_registry(version_info: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _write_active_version(version: str) -> None:
+    """Write the active version to the version file.
+
+    Args:
+        version: The version string to write.
+    """
+    version_file = Config.CACHE_DIRECTORY.parent / "active_version"
+    version_file.parent.mkdir(parents=True, exist_ok=True)
+    version_file.write_text(version)
+    logger.info("Set active version to: %s", version)
+
+
 def _install_toolchain(version: str | None = None) -> None:
     """Installs the data toolchain for the specified version.
 
     Downloads and verifies all required data files (database, FAISS index, etc.)
     using Pooch. Files are automatically decompressed and cached locally.
+    After successful installation, sets this version as the active version.
 
     Args:
         version: The version to install. If None, uses the default version.
@@ -131,6 +144,9 @@ def _install_toolchain(version: str | None = None) -> None:
             file_downloader.fetch(
                 remote_name, processor=pooch.Decompress(name=local_name)
             )
+
+    # Set this version as the active version
+    _write_active_version(resolved_version)
 
     console.print(f"[green]Installed data for version {resolved_version}[/green]")
 
