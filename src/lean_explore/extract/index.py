@@ -1,14 +1,19 @@
-"""Build FAISS index from declaration embeddings.
+"""Build search indices from declaration data.
 
-This module creates a FAISS IVF index for semantic search from embeddings
-stored in the database. IVF (Inverted File) uses k-means clustering for
-efficient approximate nearest neighbor search with controllable recall.
+This module creates:
+1. FAISS IVF index for semantic search from embeddings
+2. BM25 indices for lexical search on declaration names
+
+IVF (Inverted File) uses k-means clustering for efficient approximate
+nearest neighbor search with controllable recall.
 """
 
 import json
 import logging
+import re
 from pathlib import Path
 
+import bm25s
 import faiss
 import numpy as np
 from sqlalchemy import create_engine, select
@@ -178,3 +183,135 @@ async def build_faiss_indices(
 
     sync_engine.dispose()
     logger.info("All FAISS indices built successfully")
+
+
+def _tokenize_spaced(text: str) -> list[str]:
+    """Tokenize text with spacing on dots, underscores, and camelCase.
+
+    Args:
+        text: Input text to tokenize.
+
+    Returns:
+        List of lowercase word tokens.
+    """
+    if not text:
+        return []
+    text = text.replace(".", " ").replace("_", " ")
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
+    return re.findall(r"\w+", text.lower())
+
+
+def _tokenize_raw(text: str) -> list[str]:
+    """Tokenize text as single token (preserves dots).
+
+    Args:
+        text: Input text to tokenize.
+
+    Returns:
+        List with the full text as a single lowercase token.
+    """
+    if not text:
+        return []
+    return [text.lower()]
+
+
+def _load_declaration_names(session: Session) -> tuple[list[int], list[str]]:
+    """Load all declaration IDs and names from the database.
+
+    Args:
+        session: Sync database session.
+
+    Returns:
+        Tuple of (declaration_ids, declaration_names).
+    """
+    stmt = select(Declaration.id, Declaration.name)
+    result = session.execute(stmt)
+    rows = list(result.all())
+
+    declaration_ids = [row.id for row in rows]
+    declaration_names = [row.name or "" for row in rows]
+
+    logger.info(f"Loaded {len(declaration_ids)} declarations for BM25 indexing")
+    return declaration_ids, declaration_names
+
+
+def _build_bm25_indices(
+    declaration_names: list[str],
+) -> tuple[bm25s.BM25, bm25s.BM25]:
+    """Build BM25 indices over declaration names.
+
+    Creates two indices:
+    1. Spaced tokenization (splits on dots, underscores, camelCase)
+    2. Raw tokenization (full name as single token)
+
+    Args:
+        declaration_names: List of declaration names.
+
+    Returns:
+        Tuple of (bm25_spaced, bm25_raw) indices.
+    """
+    logger.info("Building BM25 indices over declaration names...")
+
+    corpus_spaced = [list(set(_tokenize_spaced(n))) for n in declaration_names]
+    corpus_raw = [list(set(_tokenize_raw(n))) for n in declaration_names]
+
+    bm25_spaced = bm25s.BM25(method="bm25+")
+    bm25_spaced.index(corpus_spaced)
+    logger.info("Built BM25 spaced index")
+
+    bm25_raw = bm25s.BM25(method="bm25+")
+    bm25_raw.index(corpus_raw)
+    logger.info("Built BM25 raw index")
+
+    return bm25_spaced, bm25_raw
+
+
+async def build_bm25_indices(
+    engine: AsyncEngine,
+    output_directory: Path | None = None,
+) -> None:
+    """Build BM25 indices for declaration name search.
+
+    This function creates BM25 indices for lexical search on declaration
+    names and saves them to disk along with ID mappings.
+
+    Args:
+        engine: Async database engine (URL extracted for sync access).
+        output_directory: Directory to save indices. Defaults to active data path.
+    """
+    if output_directory is None:
+        output_directory = Config.ACTIVE_DATA_PATH
+
+    output_directory.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Saving BM25 indices to {output_directory}")
+
+    sync_url = str(engine.url).replace("sqlite+aiosqlite", "sqlite")
+    sync_engine = create_engine(sync_url)
+
+    with Session(sync_engine) as session:
+        declaration_ids, declaration_names = _load_declaration_names(session)
+
+    if not declaration_ids:
+        logger.warning("No declarations found for BM25 indexing")
+        sync_engine.dispose()
+        return
+
+    bm25_spaced, bm25_raw = _build_bm25_indices(declaration_names)
+
+    # Save BM25 indices
+    bm25_spaced_path = output_directory / "bm25_name_spaced"
+    bm25_spaced.save(str(bm25_spaced_path))
+    logger.info(f"Saved BM25 spaced index to {bm25_spaced_path}")
+
+    bm25_raw_path = output_directory / "bm25_name_raw"
+    bm25_raw.save(str(bm25_raw_path))
+    logger.info(f"Saved BM25 raw index to {bm25_raw_path}")
+
+    # Save ID mapping (shared by both indices)
+    ids_map_path = output_directory / "bm25_ids_map.json"
+    with open(ids_map_path, "w") as file:
+        json.dump(declaration_ids, file)
+    logger.info(f"Saved BM25 ID mapping to {ids_map_path}")
+
+    sync_engine.dispose()
+    logger.info("All BM25 indices built successfully")

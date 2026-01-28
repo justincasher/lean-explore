@@ -9,7 +9,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from lean_explore.cli.main import _get_console, app, search_command
+from lean_explore.cli.main import _get_console, _search_async, app
 from lean_explore.models import SearchResponse, SearchResult
 
 runner = CliRunner()
@@ -64,8 +64,8 @@ class TestSearchCommand:
         with patch(
             "lean_explore.cli.main.ApiClient", return_value=mock_api_client
         ), patch("lean_explore.cli.main.display_search_results"):
-            # Test the async function directly
-            await search_command(query_string="test query", limit=5)
+            # Test the async implementation directly
+            await _search_async(query_string="test query", limit=5)
             mock_api_client.search.assert_called_once_with(
                 query="test query", limit=5
             )
@@ -75,7 +75,7 @@ class TestSearchCommand:
         with patch(
             "lean_explore.cli.main.ApiClient", return_value=mock_api_client
         ), patch("lean_explore.cli.main.display_search_results"):
-            await search_command(query_string="test query", limit=10)
+            await _search_async(query_string="test query", limit=10)
             mock_api_client.search.assert_called_once_with(
                 query="test query", limit=10
             )
@@ -87,7 +87,7 @@ class TestSearchCommand:
             side_effect=ValueError("API key required"),
         ):
             with pytest.raises(typer.Exit) as exc_info:
-                await search_command(query_string="test query", limit=5)
+                await _search_async(query_string="test query", limit=5)
             assert exc_info.value.exit_code == 1
 
 

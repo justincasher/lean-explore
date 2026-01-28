@@ -148,20 +148,28 @@ class TestEmbeddingsStep:
 
 
 class TestIndexStep:
-    """Tests for FAISS index building step."""
+    """Tests for search index building step."""
 
     async def test_run_index_step(self, async_db_engine, temp_directory):
-        """Test FAISS index building step."""
+        """Test search index building step (FAISS and BM25)."""
         with patch(
             "lean_explore.extract.index.build_faiss_indices"
-        ) as mock_index:
-            mock_index.return_value = AsyncMock()
+        ) as mock_faiss:
+            mock_faiss.return_value = AsyncMock()
 
-            await _run_index_step(async_db_engine, temp_directory)
+            with patch(
+                "lean_explore.extract.index.build_bm25_indices"
+            ) as mock_bm25:
+                mock_bm25.return_value = AsyncMock()
 
-            mock_index.assert_called_once_with(
-                async_db_engine, output_directory=temp_directory
-            )
+                await _run_index_step(async_db_engine, temp_directory)
+
+                mock_faiss.assert_called_once_with(
+                    async_db_engine, output_directory=temp_directory
+                )
+                mock_bm25.assert_called_once_with(
+                    async_db_engine, output_directory=temp_directory
+                )
 
 
 class TestFullPipeline:
@@ -190,26 +198,33 @@ class TestFullPipeline:
 
                     with patch(
                         "lean_explore.extract.index.build_faiss_indices"
-                    ) as mock_index:
-                        mock_index.return_value = AsyncMock()
+                    ) as mock_faiss:
+                        mock_faiss.return_value = AsyncMock()
 
-                        with patch("lean_explore.extract.__main__.setup_logging"):
-                            os.environ["OPENROUTER_API_KEY"] = "test-key"
+                        with patch(
+                            "lean_explore.extract.index.build_bm25_indices"
+                        ) as mock_bm25:
+                            mock_bm25.return_value = AsyncMock()
 
-                            await run_pipeline(
-                                database_url=database_url,
-                                run_doc_gen4=False,
-                                parse_docs=True,
-                                informalize=True,
-                                embeddings=True,
-                                index=True,
-                            )
+                            with patch("lean_explore.extract.__main__.setup_logging"):
+                                os.environ["OPENROUTER_API_KEY"] = "test-key"
 
-                            # Verify all steps were called
-                            mock_extract.assert_called_once()
-                            mock_informalize.assert_called_once()
-                            mock_embeddings.assert_called_once()
-                            mock_index.assert_called_once()
+                                await run_pipeline(
+                                    database_url=database_url,
+                                    extraction_path=temp_directory,
+                                    run_doc_gen4=False,
+                                    parse_docs=True,
+                                    informalize=True,
+                                    embeddings=True,
+                                    index=True,
+                                )
+
+                                # Verify all steps were called
+                                mock_extract.assert_called_once()
+                                mock_informalize.assert_called_once()
+                                mock_embeddings.assert_called_once()
+                                mock_faiss.assert_called_once()
+                                mock_bm25.assert_called_once()
 
     @pytest.mark.integration
     async def test_run_pipeline_selective_steps(self, temp_directory):
@@ -225,6 +240,7 @@ class TestFullPipeline:
                 # Only run parse step
                 await run_pipeline(
                     database_url=database_url,
+                    extraction_path=temp_directory,
                     run_doc_gen4=False,
                     parse_docs=True,
                     informalize=False,
@@ -247,6 +263,7 @@ class TestFullPipeline:
             with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY not set"):
                 await run_pipeline(
                     database_url=database_url,
+                    extraction_path=temp_directory,
                     run_doc_gen4=False,
                     parse_docs=False,
                     informalize=True,  # Requires API key
@@ -276,6 +293,7 @@ class TestFullPipeline:
 
                             await run_pipeline(
                                 database_url=database_url,
+                                extraction_path=temp_directory,
                                 run_doc_gen4=False,
                                 parse_docs=False,
                                 informalize=True,
@@ -307,6 +325,7 @@ class TestFullPipeline:
         with patch("lean_explore.extract.__main__.setup_logging"):
             await run_pipeline(
                 database_url=database_url,
+                extraction_path=temp_directory,
                 run_doc_gen4=False,
                 parse_docs=False,
                 informalize=False,
@@ -328,6 +347,7 @@ class TestFullPipeline:
             # (disposal is tested by verifying no file handle issues)
             await run_pipeline(
                 database_url=database_url,
+                extraction_path=temp_directory,
                 run_doc_gen4=False,
                 parse_docs=False,
                 informalize=False,
@@ -358,6 +378,7 @@ class TestFullPipeline:
                     with pytest.raises(Exception, match="Database error"):
                         await run_pipeline(
                             database_url=database_url,
+                            extraction_path=temp_directory,
                             run_doc_gen4=False,
                             parse_docs=False,
                             informalize=False,

@@ -99,17 +99,18 @@ async def _run_embeddings_step(
 
 
 async def _run_index_step(engine: AsyncEngine, extraction_path: Path) -> None:
-    """Build FAISS indices from embeddings.
+    """Build search indices (FAISS and BM25).
 
     Args:
         engine: SQLAlchemy async engine instance.
         extraction_path: Directory to save indices (same as database location).
     """
-    from lean_explore.extract.index import build_faiss_indices
+    from lean_explore.extract.index import build_bm25_indices, build_faiss_indices
 
-    logger.info("Step 4: Building FAISS indices...")
+    logger.info("Step 4: Building search indices...")
     await build_faiss_indices(engine, output_directory=extraction_path)
-    logger.info("FAISS index building complete")
+    await build_bm25_indices(engine, output_directory=extraction_path)
+    logger.info("Index building complete")
 
 
 async def run_pipeline(
