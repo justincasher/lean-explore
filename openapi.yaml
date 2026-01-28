@@ -24,7 +24,7 @@ tags:
     description: Endpoints for retrieving specific declarations by ID.
 
 servers:
-  - url: https://www.leanexplore.com/api/v1
+  - url: https://www.leanexplore.com/api/v2
     description: Production LeanExplore API Server
 
 components:
