@@ -11,23 +11,19 @@ N/A
 
 ## [1.0.0] - 2025-01-27
 
-Complete architectural rewrite. The external interface remains similar, but the
-entire codebase has been rebuilt from scratch with a new data model, search
-algorithm, and local-first architecture.
+Complete architectural rewrite with a new extraction pipeline that enables
+nightly data updates and dynamic package indexing.
+
+### Added
+- **Extraction pipeline**: Automated pipeline for processing doc-gen4 output, enabling nightly data refreshes
+- **Cross-encoder reranking**: Uses sentence transformers for improved search result quality
 
 ### Changed
-- **Hybrid search**: Combines BM25 lexical search with FAISS semantic vector search (previously FAISS-only)
-- **Cross-encoder reranking**: Uses sentence transformers for improved result quality
-- **Nightly updates**: Data toolchain fetched from remote manifest with SHA256 verification
 - **Expanded package support**: Now indexes 9 packages (Batteries, CSLib, FLT, FormalConjectures, Init, Lean, Mathlib, PhysLean, Std)
 - New data model: `Declaration` replaces `StatementGroup`
 - New field names: `name`, `module`, `source_text`, `source_link`, `informalization`
 - Simplified API: `SearchEngine`, `Service`, `SearchResult`, `SearchResponse`
 - Remote API endpoints: `/declarations/{id}` replaces `/statement_groups/{id}`
-
-### Added
-- LLM-generated natural language descriptions (informalizations) for declarations
-- New extraction pipeline for processing doc-gen4 output
 
 ## [0.3.0] - 2025-06-09
 
