@@ -11,25 +11,28 @@ N/A
 
 ## [1.0.0] - 2025-01-27
 
-### Changed
-- Complete rewrite of the search engine with hybrid BM25 + semantic search
-- New local search backend using FAISS for vector similarity search
-- Cross-encoder reranking for improved result quality
-- Simplified API with `SearchEngine` and `Service` classes
-- MCP server for AI assistant integration
-- CLI commands for data management (`lean-explore data fetch`, `lean-explore data clean`)
+Complete architectural rewrite. The external interface remains similar, but the
+entire codebase has been rebuilt from scratch with a new data model, search
+algorithm, and local-first architecture.
+
+### Architecture
+- **Local-first design**: Search runs entirely on your machine using downloaded data
+- **Hybrid search**: Combines BM25 lexical search with FAISS semantic vector search
+- **Cross-encoder reranking**: Uses sentence transformers for result quality
+- **Nightly updates**: Data toolchain fetched from remote manifest with SHA256 verification
+
+### New Features
+- `lean-explore data fetch` / `lean-explore data clean` CLI commands
+- MCP (Model Context Protocol) server for AI assistant integration
+- Support for 9 indexed packages: Batteries, CSLib, FLT, FormalConjectures, Init, Lean, Mathlib, PhysLean, Std
+- LLM-generated natural language descriptions (informalizations) for declarations
 - Extraction pipeline for processing doc-gen4 output
-- Support for multiple Lean packages (Mathlib, PhysLean, FLT, etc.)
 
-### Added
-- TypedDict definitions for improved type safety
-- Nightly data updates via remote manifest
-- Informalization generation using LLMs
-- Embedding generation using sentence transformers
-
-### Removed
-- Legacy API client (replaced with local-first architecture)
-- Old batch processing methods
+### Breaking Changes
+- New data model: `Declaration` replaces `StatementGroup`
+- New field names: `name`, `module`, `source_text`, `source_link`, `informalization`
+- Simplified API: `SearchEngine`, `Service`, `SearchResult`, `SearchResponse`
+- Remote API endpoints changed: `/declarations/{id}` replaces `/statement_groups/{id}`
 
 ## [0.3.0] - 2025-06-09
 
