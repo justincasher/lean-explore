@@ -43,7 +43,7 @@ def _build_package_cache(
     Returns:
         Dictionary mapping lowercase package names to their directory paths.
     """
-    from lean_explore.extract.package_config import get_extraction_order
+    from lean_explore.extract.package_utils import get_extraction_order
 
     lean_root = Path(lean_root)
     cache = {}
@@ -340,10 +340,8 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
         engine: SQLAlchemy async engine for database connection.
         batch_size: Number of declarations to insert per database transaction.
     """
-    from lean_explore.extract.package_config import (
-        PACKAGE_REGISTRY,
-        get_extraction_order,
-    )
+    from lean_explore.extract.package_registry import PACKAGE_REGISTRY
+    from lean_explore.extract.package_utils import get_extraction_order
 
     lean_root = Path("lean")
     all_declarations = []

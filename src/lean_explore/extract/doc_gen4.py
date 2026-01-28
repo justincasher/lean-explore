@@ -11,9 +11,9 @@ import subprocess
 from pathlib import Path
 
 from lean_explore.extract.github import extract_lean_version
-from lean_explore.extract.package_config import (
-    PACKAGE_REGISTRY,
-    PackageConfig,
+from lean_explore.extract.package_config import PackageConfig
+from lean_explore.extract.package_registry import PACKAGE_REGISTRY
+from lean_explore.extract.package_utils import (
     get_extraction_order,
     get_package_toolchain,
     update_lakefile_docgen_version,
