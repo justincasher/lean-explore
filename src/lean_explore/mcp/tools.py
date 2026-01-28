@@ -2,12 +2,34 @@
 
 import asyncio
 import logging
-from typing import Any
+from typing import TypedDict
 
 from mcp.server.fastmcp import Context as MCPContext
 
 from lean_explore.mcp.app import AppContext, BackendServiceType, mcp_app
 from lean_explore.models import SearchResponse, SearchResult
+
+
+class SearchResultDict(TypedDict, total=False):
+    """Serialized SearchResult for MCP tool responses."""
+
+    id: int
+    name: str
+    module: str
+    docstring: str | None
+    source_text: str
+    source_link: str
+    dependencies: str | None
+    informalization: str | None
+
+
+class SearchResponseDict(TypedDict, total=False):
+    """Serialized SearchResponse for MCP tool responses."""
+
+    query: str
+    results: list[SearchResultDict]
+    count: int
+    processing_time_ms: int | None
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +60,7 @@ async def search(
     query: str,
     limit: int = 10,
     rerank_top: int | None = 50,
-) -> dict[str, Any]:
+) -> SearchResponseDict:
     """Searches Lean declarations by a query string.
 
     Args:
@@ -79,7 +101,7 @@ async def search(
 async def get_by_id(
     ctx: MCPContext,
     declaration_id: int,
-) -> dict[str, Any] | None:
+) -> SearchResultDict | None:
     """Retrieves a specific declaration by its unique identifier.
 
     Args:

@@ -8,7 +8,7 @@ FAISS index, etc.) from remote storage using Pooch for checksums and caching.
 
 import logging
 import shutil
-from typing import Any
+from typing import TypedDict
 
 import pooch
 import requests
@@ -16,6 +16,28 @@ import typer
 from rich.console import Console
 
 from lean_explore.config import Config
+
+
+class ManifestFileEntry(TypedDict):
+    """A file entry in the manifest's toolchain version."""
+
+    remote_name: str
+    local_name: str
+    sha256: str
+
+
+class ToolchainVersionInfo(TypedDict):
+    """Version information for a specific toolchain in the manifest."""
+
+    assets_base_path_r2: str
+    files: list[ManifestFileEntry]
+
+
+class Manifest(TypedDict):
+    """Remote data manifest structure."""
+
+    default_toolchain: str
+    toolchains: dict[str, ToolchainVersionInfo]
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +54,7 @@ def _get_console() -> Console:
     return Console()
 
 
-def _fetch_manifest() -> dict[str, Any] | None:
+def _fetch_manifest() -> Manifest | None:
     """Fetches the remote data manifest.
 
     Returns:
@@ -49,7 +71,7 @@ def _fetch_manifest() -> dict[str, Any] | None:
         return None
 
 
-def _resolve_version(manifest: dict[str, Any], version: str | None) -> str:
+def _resolve_version(manifest: Manifest, version: str | None) -> str:
     """Resolves the version string to an actual toolchain version.
 
     Args:
@@ -70,7 +92,7 @@ def _resolve_version(manifest: dict[str, Any], version: str | None) -> str:
     return version
 
 
-def _build_file_registry(version_info: dict[str, Any]) -> dict[str, str]:
+def _build_file_registry(version_info: ToolchainVersionInfo) -> dict[str, str]:
     """Builds a Pooch registry from version info.
 
     Args:
