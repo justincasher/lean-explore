@@ -101,8 +101,8 @@ markers = [
 # Set the maximum line length.
 line-length = 88
 
-# Set based on your `requires-python = ">=3.8"`.
-target-version = "py38"
+# Set based on requires-python = ">=3.10".
+target-version = "py310"
 
 # Define the patterns for files Ruff should lint.
 include = [

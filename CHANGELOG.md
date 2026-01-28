@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 N/A
 
+## [1.0.0] - 2025-01-27
+
+### Changed
+- Complete rewrite of the search engine with hybrid BM25 + semantic search
+- New local search backend using FAISS for vector similarity search
+- Cross-encoder reranking for improved result quality
+- Simplified API with `SearchEngine` and `Service` classes
+- MCP server for AI assistant integration
+- CLI commands for data management (`lean-explore data fetch`, `lean-explore data clean`)
+- Extraction pipeline for processing doc-gen4 output
+- Support for multiple Lean packages (Mathlib, PhysLean, FLT, etc.)
+
+### Added
+- TypedDict definitions for improved type safety
+- Nightly data updates via remote manifest
+- Informalization generation using LLMs
+- Embedding generation using sentence transformers
+
+### Removed
+- Legacy API client (replaced with local-first architecture)
+- Old batch processing methods
+
 ## [0.3.0] - 2025-06-09
 
 ### Added

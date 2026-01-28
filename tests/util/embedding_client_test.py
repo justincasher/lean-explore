@@ -35,6 +35,7 @@ class TestEmbeddingClientInit:
         """Test device selection falls back to CPU."""
         with patch("lean_explore.util.embedding_client.torch") as mock_torch:
             mock_torch.cuda.is_available.return_value = False
+            mock_torch.backends.mps.is_available.return_value = False
 
             with patch(
                 "lean_explore.util.embedding_client.SentenceTransformer"
