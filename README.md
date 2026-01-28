@@ -28,8 +28,11 @@ A search engine for Lean 4 declarations. This project provides tools and resourc
 The current indexed projects include:
 
 * Batteries
-* Lean
+* Cslib
+* FLT (Fermat's Last Theorem)
+* FormalConjectures
 * Init
+* Lean
 * Mathlib
 * PhysLean
 * Std
