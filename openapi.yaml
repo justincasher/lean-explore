@@ -4,14 +4,11 @@ info:
   version: v1.0.0
   description: >-
     The LeanExplore API provides programmatic access to search and retrieve
-    information about Lean 4 statement groups, their definitions, docstrings,
-    and dependencies from various Lean projects, including Mathlib.
+    Lean 4 declarations from indexed projects including Mathlib, PhysLean,
+    FLT, and more.
 
-    Authentication is required via an API key. The key can be provided either
-    as a Bearer token in the 'Authorization' header or via an 'X-API-Key' header.
-
-    Rate limits are applied to API endpoints. Exceeding these limits
-    will result in a 429 Too Many Requests error.
+    Authentication is required via an API key provided as a Bearer token
+    in the Authorization header.
   contact:
     name: Justin Asher
     email: justinchadwickasher@gmail.com
@@ -20,222 +17,153 @@ info:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
 
-# Defines tags used for grouping operations in API documentation tools.
 tags:
   - name: Search
-    description: Endpoints for searching Lean statement groups.
-  - name: Statement Groups
-    description: Endpoints for retrieving specific statement groups and their properties (like dependencies).
+    description: Endpoints for searching Lean declarations.
+  - name: Declarations
+    description: Endpoints for retrieving specific declarations by ID.
 
 servers:
   - url: https://www.leanexplore.com/api/v1
     description: Production LeanExplore API Server
-  # - url: http://localhost:5000/api/v1 # Example placeholder for a local development server.
-  #   description: Local Development Server
 
-# Reusable building blocks for the API specification.
 components:
   securitySchemes:
-    # Defines Bearer Token authentication method.
     BearerAuth:
       type: http
       scheme: bearer
       description: >-
         API key provided as a Bearer token.
         Example: `Authorization: Bearer YOUR_API_KEY`
-    # Defines API Key in header authentication method.
-    ApiKeyHeaderAuth:
-      type: apiKey
-      in: header
-      name: X-API-Key
-      description: >-
-        API key provided in the X-API-Key header.
-        Example: `X-API-Key: YOUR_API_KEY`
 
-  # Data models used in request and response bodies.
   schemas:
-    APIPrimaryDeclarationInfo:
+    SearchResult:
       type: object
-      description: Minimal information about a primary declaration.
-      properties:
-        lean_name:
-          type: string
-          nullable: true
-          description: The full Lean name of the primary declaration (e.g., "Nat.add").
-          example: "Nat.add"
-
-    APISearchResultItem:
-      type: object
-      description: Represents a single statement group item.
+      description: A Lean declaration returned from search or retrieval.
       required:
         - id
-        - primary_declaration
-        - source_file
-        - range_start_line
-        - statement_text
+        - name
+        - module
+        - source_text
+        - source_link
       properties:
         id:
           type: integer
-          format: int64 # Specifies the integer as a 64-bit number.
-          description: Unique identifier for the statement group.
-          example: 10243
-        primary_declaration:
-          $ref: '#/components/schemas/APIPrimaryDeclarationInfo'
-        source_file:
+          format: int64
+          description: Unique identifier for the declaration.
+          example: 12345
+        name:
           type: string
-          description: The source file path for the statement group.
-          example: "Mathlib/Data/Nat/Basic.lean"
-        range_start_line:
-          type: integer
-          description: Start line of the statement group in its source file.
-          example: 78
-        display_statement_text:
+          description: Fully qualified Lean name.
+          example: "Nat.add_comm"
+        module:
           type: string
-          nullable: true
-          description: A display-optimized version of the statement text.
-          example: "theorem Nat.add_comm (n m : Nat) : n + m = m + n"
-        statement_text:
-          type: string
-          description: The full canonical Lean code text of the statement group.
-          example: "theorem Nat.add_comm (n m : Nat) : n + m = m + n := by simp [Nat.add_assoc]"
+          description: Module containing the declaration.
+          example: "Mathlib.Data.Nat.Basic"
         docstring:
           type: string
           nullable: true
-          description: The docstring associated with the statement group.
+          description: Documentation string from source code.
           example: "Addition of natural numbers is commutative."
-        informal_description:
+        source_text:
+          type: string
+          description: The Lean source code for this declaration.
+          example: "theorem Nat.add_comm (n m : Nat) : n + m = m + n := by omega"
+        source_link:
+          type: string
+          description: GitHub URL to the declaration source.
+          example: "https://github.com/leanprover-community/mathlib4/blob/master/Mathlib/Data/Nat/Basic.lean#L42"
+        dependencies:
           type: string
           nullable: true
-          description: An informal, human-readable description of the statement group.
-          example: "This theorem states that for any two natural numbers n and m, n + m is equal to m + n."
+          description: JSON array of declaration names this declaration depends on.
+          example: "[\"Nat.add\", \"Nat.zero\"]"
+        informalization:
+          type: string
+          nullable: true
+          description: Natural language description of the declaration.
+          example: "The sum of two natural numbers is the same regardless of order."
 
-    APISearchResponse:
+    SearchResponse:
       type: object
-      description: Response structure for a search API call.
+      description: Response from a search operation.
       required:
         - query
         - results
         - count
-        - total_candidates_considered
-        - processing_time_ms
       properties:
         query:
           type: string
           description: The original search query string.
-          example: "commutative monoid"
-        packages_applied:
-          type: array
-          items:
-            type: string
-          nullable: true
-          description: List of package names applied to the search. Can be empty or null.
-          example: ["Mathlib", "Std"]
+          example: "commutative addition"
         results:
           type: array
           items:
-            $ref: '#/components/schemas/APISearchResultItem'
-          description: A list of search result items.
+            $ref: '#/components/schemas/SearchResult'
+          description: List of matching declarations.
         count:
           type: integer
-          description: The number of results returned in this response.
+          description: Number of results returned.
           example: 10
-        total_candidates_considered:
-          type: integer
-          description: Total candidate results before truncation by any server-side limit.
-          example: 152
         processing_time_ms:
           type: integer
-          description: Server-side processing time for the search in milliseconds.
-          example: 120
-
-    APICitationsResponse:
-      type: object
-      description: Response for a dependencies (citations) API call.
-      required:
-        - source_group_id
-        - citations
-        - count
-      properties:
-        source_group_id:
-          type: integer
-          format: int64
-          description: The ID of the statement group whose citations are listed.
-          example: 10243
-        citations:
-          type: array
-          items:
-            $ref: '#/components/schemas/APISearchResultItem'
-          description: A list of statement groups cited by the source group.
-        count:
-          type: integer
-          description: The number of citations provided.
-          example: 5
+          nullable: true
+          description: Server-side processing time in milliseconds.
+          example: 45
 
     ApiError:
       type: object
-      description: Standard error response structure for client and server errors.
+      description: Error response.
       required:
         - msg
       properties:
         msg:
           type: string
-          description: A human-readable error message.
-          example: "Invalid or inactive API key"
+          description: Human-readable error message.
+          example: "Invalid or missing API key"
 
-# Global security definition:
-# Specifies that EITHER BearerAuth OR ApiKeyHeaderAuth can be used for authentication
-# for operations that require security. A client must satisfy one of these schemes.
 security:
   - BearerAuth: []
-  - ApiKeyHeaderAuth: []
 
-# Defines the available API paths and their operations.
 paths:
   /search:
     get:
-      summary: Search Statement Groups
-      description: >-
-        Performs a search for Lean statement groups based on a query string
-        and optional package filters. Requires API key authentication.
-      operationId: searchStatementGroups # Unique ID for this operation.
+      summary: Search Declarations
+      description: Search for Lean declarations using natural language or Lean syntax.
+      operationId: searchDeclarations
       tags:
         - Search
       parameters:
         - name: q
           in: query
           required: true
-          description: The natural language search query string.
+          description: The search query string.
           schema:
             type: string
-          example: "isomorphism"
-        - name: pkg
+          example: "prime number theorem"
+        - name: limit
           in: query
           required: false
-          description: >-
-            Package names to filter by. Specify multiple times for multiple packages
-            (e.g., "pkg=Mathlib&pkg=Std").
+          description: Maximum number of results to return (default 20).
           schema:
-            type: array
-            items:
-              type: string
-          style: form # Default style for query parameters.
-          explode: true # For array type, results in pkg=val1&pkg=val2... matching Flask's getlist().
-          example: ["Mathlib", "Std"]
+            type: integer
+            default: 20
+          example: 10
       responses:
         '200':
-          description: Successful search operation.
+          description: Successful search.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APISearchResponse'
+                $ref: '#/components/schemas/SearchResponse'
         '400':
-          description: Bad Request - Invalid or missing search query.
+          description: Bad Request - Invalid or missing query.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '401':
-          description: Unauthorized - API key is missing, invalid, or inactive.
+          description: Unauthorized - Invalid or missing API key.
           content:
             application/json:
               schema:
@@ -248,48 +176,42 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '500':
           description: Internal Server Error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '503':
-          description: Service Unavailable.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
-  /statement_groups/{group_id}:
+  /declarations/{declaration_id}:
     get:
-      summary: Get Statement Group by ID
-      description: Retrieves detailed information for a specific statement group using its unique ID. Requires API key authentication.
-      operationId: getStatementGroupById
+      summary: Get Declaration by ID
+      description: Retrieve a specific declaration by its unique ID.
+      operationId: getDeclarationById
       tags:
-        - Statement Groups
+        - Declarations
       parameters:
-        - name: group_id
+        - name: declaration_id
           in: path
           required: true
-          description: The unique integer ID of the statement group.
+          description: The unique declaration ID.
           schema:
             type: integer
             format: int64
-          example: 10243
+          example: 12345
       responses:
         '200':
-          description: Successfully retrieved the statement group.
+          description: Successfully retrieved declaration.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/APISearchResultItem'
+                $ref: '#/components/schemas/SearchResult'
         '401':
-          description: Unauthorized - API key is missing, invalid, or inactive.
+          description: Unauthorized - Invalid or missing API key.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '404':
-          description: Not Found - The statement group with the specified ID does not exist.
+          description: Not Found - Declaration does not exist.
           content:
             application/json:
               schema:
@@ -302,68 +224,6 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '500':
           description: Internal Server Error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '503':
-          description: Service Unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-
-  /statement_groups/{group_id}/dependencies:
-    get:
-      summary: Get Statement Group Dependencies
-      description: >-
-        Retrieves the direct dependencies for a given statement group ID.
-        Requires API key authentication.
-      operationId: getStatementGroupDependencies
-      tags:
-        - Statement Groups
-      parameters:
-        - name: group_id
-          in: path
-          required: true
-          description: The unique integer ID of the source statement group.
-          schema:
-            type: integer
-            format: int64
-          example: 10243
-      responses:
-        '200':
-          description: Successfully retrieved the list of dependencies.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APICitationsResponse'
-        '401':
-          description: Unauthorized - API key is missing, invalid, or inactive.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '404':
-          description: Not Found - The source statement group with the specified ID does not exist.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '429':
-          description: Too Many Requests - Rate limit exceeded.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '500':
-          description: Internal Server Error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '503':
-          description: Service Unavailable.
           content:
             application/json:
               schema:
