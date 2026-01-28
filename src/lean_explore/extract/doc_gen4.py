@@ -6,6 +6,7 @@ to generate Lean documentation data for the extraction pipeline.
 
 import logging
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -19,6 +20,30 @@ from lean_explore.extract.package_config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _clear_workspace_cache(workspace_path: Path) -> None:
+    """Clear entire Lake cache to force complete rebuild.
+
+    Removes the .lake/ directory and lake-manifest.json to ensure:
+    1. Fresh dependency resolution (latest compatible versions)
+    2. Fresh doc-gen4 output (regenerated BMP files)
+    3. No stale build artifacts
+
+    Use this for nightly updates to get a clean build from scratch.
+
+    Args:
+        workspace_path: Path to the package workspace.
+    """
+    manifest = workspace_path / "lake-manifest.json"
+    if manifest.exists():
+        logger.info(f"Removing {manifest}")
+        manifest.unlink()
+
+    lake_dir = workspace_path / ".lake"
+    if lake_dir.exists():
+        logger.info(f"Removing {lake_dir} to force complete rebuild")
+        shutil.rmtree(lake_dir)
 
 
 def _get_doc_lib_names(package_name: str) -> list[str]:
@@ -134,6 +159,7 @@ def _run_lake_for_package(package_name: str, verbose: bool = False) -> None:
 async def run_doc_gen4(
     packages: list[str] | None = None,
     setup: bool = True,
+    fresh: bool = False,
     verbose: bool = False,
 ) -> None:
     """Run doc-gen4 for each package to generate documentation data.
@@ -142,6 +168,8 @@ async def run_doc_gen4(
         packages: List of package names to process. If None, processes all packages
             in dependency order.
         setup: Whether to fetch toolchain and update lakefile before building.
+        fresh: Clear cached dependencies to force fresh resolution. Use this for
+            nightly updates to get the latest compatible versions of all packages.
         verbose: Enable verbose logging.
 
     Raises:
@@ -157,7 +185,11 @@ async def run_doc_gen4(
             raise ValueError(f"Unknown package: {package_name}")
 
         config = PACKAGE_REGISTRY[package_name]
+        workspace_path = Path("lean") / package_name
         logger.info(f"\n{'='*50}\nPackage: {package_name}\n{'='*50}")
+
+        if fresh:
+            _clear_workspace_cache(workspace_path)
 
         if setup:
             toolchain, ref = _setup_workspace(config)
