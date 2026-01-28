@@ -93,6 +93,15 @@ class Config:
     )
     """Path to FAISS ID mapping file in cache."""
 
+    BM25_SPACED_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "bm25_name_spaced"
+    """Path to BM25 spaced tokenization index directory in cache."""
+
+    BM25_RAW_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "bm25_name_raw"
+    """Path to BM25 raw tokenization index directory in cache."""
+
+    BM25_IDS_MAP_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "bm25_ids_map.json"
+    """Path to BM25 ID mapping file in cache."""
+
     DATABASE_URL: str = f"sqlite+aiosqlite:///{DATABASE_PATH}"
     """Async SQLAlchemy database URL for SQLite (used by search engine)."""
 

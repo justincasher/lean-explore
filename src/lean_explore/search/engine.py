@@ -98,8 +98,10 @@ class SearchEngine:
         self._faiss_informal_index: faiss.Index | None = None
         self._faiss_informal_id_map: list[int] | None = None
 
+        self._bm25_spaced_path = base_path / "bm25_name_spaced"
+        self._bm25_raw_path = base_path / "bm25_name_raw"
+        self._bm25_ids_map_path = base_path / "bm25_ids_map.json"
         self._all_declaration_ids: list[int] | None = None
-        self._all_declaration_names: list[str] | None = None
         self._bm25_name_spaced: bm25s.BM25 | None = None
         self._bm25_name_raw: bm25s.BM25 | None = None
 
@@ -107,7 +109,14 @@ class SearchEngine:
 
     def _validate_paths(self) -> None:
         """Validate that required data files exist."""
-        for path in [self._faiss_informal_path, self._faiss_informal_ids_path]:
+        required_paths = [
+            self._faiss_informal_path,
+            self._faiss_informal_ids_path,
+            self._bm25_spaced_path,
+            self._bm25_raw_path,
+            self._bm25_ids_map_path,
+        ]
+        for path in required_paths:
             if not path.exists():
                 raise FileNotFoundError(
                     f"Required file not found at {path}. "
@@ -162,35 +171,22 @@ class SearchEngine:
         self._ensure_faiss_loaded()
         return self._faiss_informal_id_map  # type: ignore[return-value]
 
-    async def _ensure_bm25_loaded(self) -> None:
-        """Load BM25 indices over all declaration names."""
+    def _ensure_bm25_loaded(self) -> None:
+        """Load pre-built BM25 indices from disk."""
         if self._bm25_name_spaced is not None:
             return
 
-        logger.info("Loading all declarations for BM25 indices...")
-        async with AsyncSession(self.engine) as session:
-            stmt = select(Declaration.id, Declaration.name)
-            result = await session.execute(stmt)
-            rows = result.all()
+        logger.info(f"Loading BM25 indices from {self._bm25_spaced_path.parent}")
 
-        self._all_declaration_ids = [row[0] for row in rows]
-        self._all_declaration_names = [row[1] or "" for row in rows]
+        self._bm25_name_spaced = bm25s.BM25.load(str(self._bm25_spaced_path))
+        self._bm25_name_raw = bm25s.BM25.load(str(self._bm25_raw_path))
 
-        names = self._all_declaration_names
-        corpus_name_spaced = [list(set(tokenize_spaced(n))) for n in names]
-        corpus_name_raw = [list(set(tokenize_raw(n))) for n in names]
+        with open(self._bm25_ids_map_path) as f:
+            self._all_declaration_ids = json.load(f)
 
-        self._bm25_name_spaced = bm25s.BM25(method="bm25+")
-        self._bm25_name_spaced.index(corpus_name_spaced)
+        logger.info(f"BM25 indices loaded ({len(self._all_declaration_ids)} decls)")
 
-        self._bm25_name_raw = bm25s.BM25(method="bm25+")
-        self._bm25_name_raw.index(corpus_name_raw)
-
-        logger.info(f"BM25 indices built over {len(self._all_declaration_ids)} decls")
-
-    async def _retrieve_bm25_candidates(
-        self, query: str, bm25_k: int
-    ) -> dict[int, float]:
+    def _retrieve_bm25_candidates(self, query: str, bm25_k: int) -> dict[int, float]:
         """Retrieve candidates using BM25 on declaration names.
 
         Args:
@@ -200,7 +196,7 @@ class SearchEngine:
         Returns:
             Map of declaration ID to BM25 score.
         """
-        await self._ensure_bm25_loaded()
+        self._ensure_bm25_loaded()
 
         query_tokens_spaced = tokenize_spaced(query)
         query_tokens_raw = tokenize_raw(query)
@@ -569,7 +565,7 @@ class SearchEngine:
         if not query.strip():
             return []
 
-        bm25_map = await self._retrieve_bm25_candidates(query, bm25_k)
+        bm25_map = self._retrieve_bm25_candidates(query, bm25_k)
         semantic_map = await self._retrieve_semantic_candidates(query, faiss_k)
         rrf_scores = self._compute_rrf_scores(bm25_map, semantic_map)
 
