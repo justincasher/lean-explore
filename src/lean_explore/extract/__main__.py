@@ -34,12 +34,16 @@ async def _create_database_schema(engine: AsyncEngine) -> None:
     logger.info("Database schema created successfully")
 
 
-async def _run_doc_gen4_step() -> None:
-    """Run doc-gen4 to generate documentation."""
+async def _run_doc_gen4_step(fresh: bool = False) -> None:
+    """Run doc-gen4 to generate documentation.
+
+    Args:
+        fresh: Clear cached dependencies to force fresh resolution.
+    """
     from lean_explore.extract.doc_gen4 import run_doc_gen4
 
     logger.info("Running doc-gen4...")
-    await run_doc_gen4()
+    await run_doc_gen4(fresh=fresh)
     logger.info("doc-gen4 complete")
 
 
@@ -112,6 +116,7 @@ async def run_pipeline(
     database_url: str,
     extraction_path: Path,
     run_doc_gen4: bool = False,
+    fresh: bool = False,
     parse_docs: bool = True,
     informalize: bool = True,
     embeddings: bool = True,
@@ -132,6 +137,7 @@ async def run_pipeline(
         database_url: SQLite database URL (e.g., sqlite+aiosqlite:///path/to/db)
         extraction_path: Directory containing the extraction (for saving indices).
         run_doc_gen4: Run doc-gen4 to generate documentation before parsing
+        fresh: Clear cached dependencies to force fresh resolution (for nightly updates)
         parse_docs: Run doc-gen4 parsing step
         informalize: Run informalization step
         embeddings: Run embeddings generation step
@@ -177,7 +183,7 @@ async def run_pipeline(
         await _create_database_schema(engine)
 
         if run_doc_gen4:
-            await _run_doc_gen4_step()
+            await _run_doc_gen4_step(fresh=fresh)
 
         if parse_docs:
             await _run_extract_step(engine)
@@ -214,6 +220,11 @@ async def run_pipeline(
     "--run-doc-gen4",
     is_flag=True,
     help="Run doc-gen4 to generate documentation before parsing",
+)
+@click.option(
+    "--fresh",
+    is_flag=True,
+    help="Clear cached dependencies to fetch latest versions (use for nightly updates)",
 )
 @click.option(
     "--parse-docs/--no-parse-docs",
@@ -278,6 +289,7 @@ async def run_pipeline(
 @click.option("--verbose", is_flag=True, help="Enable verbose logging")
 def main(
     run_doc_gen4: bool,
+    fresh: bool,
     parse_docs: bool | None,
     informalize: bool | None,
     embeddings: bool | None,
@@ -334,6 +346,7 @@ def main(
             database_url=database_url,
             extraction_path=extraction_path,
             run_doc_gen4=run_doc_gen4,
+            fresh=fresh,
             parse_docs=parse_docs,
             informalize=informalize,
             embeddings=embeddings,
