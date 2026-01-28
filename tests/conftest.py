@@ -1,8 +1,8 @@
 """Shared test fixtures and configuration for lean-explore test suite."""
 
 import tempfile
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
-from typing import AsyncGenerator, Generator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -148,18 +148,6 @@ def mock_embedding_client() -> MagicMock:
     mock_response.embeddings = [[0.1] * 768 for _ in range(10)]
     mock_client.embed = AsyncMock(return_value=mock_response)
     return mock_client
-
-
-@pytest.fixture
-def empty_embedding_caches():
-    """Create empty embedding caches for testing.
-
-    Returns:
-        EmbeddingCaches: Empty caches with no pre-loaded embeddings.
-    """
-    from lean_explore.extract.embeddings import EmbeddingCaches
-
-    return EmbeddingCaches(by_informalization={})
 
 
 @pytest.fixture

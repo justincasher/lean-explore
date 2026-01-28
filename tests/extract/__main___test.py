@@ -150,16 +150,18 @@ class TestEmbeddingsStep:
 class TestIndexStep:
     """Tests for FAISS index building step."""
 
-    async def test_run_index_step(self, async_db_engine):
+    async def test_run_index_step(self, async_db_engine, temp_directory):
         """Test FAISS index building step."""
         with patch(
             "lean_explore.extract.index.build_faiss_indices"
         ) as mock_index:
             mock_index.return_value = AsyncMock()
 
-            await _run_index_step(async_db_engine)
+            await _run_index_step(async_db_engine, temp_directory)
 
-            mock_index.assert_called_once_with(async_db_engine)
+            mock_index.assert_called_once_with(
+                async_db_engine, output_directory=temp_directory
+            )
 
 
 class TestFullPipeline:

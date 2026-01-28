@@ -21,14 +21,6 @@
   </a>
 </p>
 
-> [!WARNING]
-> LeanExplore is currently being rewritten to support the following:
-> - Nightly updates of the search index.
-> - The ability to index arbitrary repositories.
-> - A more straightforward API.
-> 
-> This is being done on the main branch, and will be complete in the next week or two. For those needing to use the old package, look at a tagged version, like [v0.3.0](https://github.com/justincasher/lean-explore/tree/v0.3.0).
-
 A search engine for Lean 4 declarations. This project provides tools and resources for exploring the Lean 4 ecosystem.
 
 **For full documentation, please visit: [https://www.leanexplore.com/docs](https://www.leanexplore.com/docs)**

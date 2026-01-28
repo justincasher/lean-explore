@@ -309,7 +309,7 @@ class TestProcessingFunctions:
             model="test-model",
             prompt_template=prompt_template,
             informalizations_by_name={},
-            cache_by_source_text={},
+            cache={},
             semaphore=semaphore,
         )
 
@@ -330,7 +330,9 @@ class TestProcessingFunctions:
 
         semaphore = asyncio.Semaphore(5)
         prompt_template = "Name: {name}"
-        cache = {declaration_data.source_text: "Cached informalization"}
+        # Cache key is now (name, source_text) tuple
+        cache_key = (declaration_data.name, declaration_data.source_text)
+        cache = {cache_key: "Cached informalization"}
 
         # Use mock client - shouldn't be called due to cache
         result = await _process_one_declaration(
@@ -339,7 +341,7 @@ class TestProcessingFunctions:
             model="test-model",
             prompt_template=prompt_template,
             informalizations_by_name={},
-            cache_by_source_text=cache,
+            cache=cache,
             semaphore=semaphore,
         )
 
@@ -369,7 +371,7 @@ class TestProcessingFunctions:
             model="test-model",
             prompt_template="",
             informalizations_by_name={},
-            cache_by_source_text={},
+            cache={},
             semaphore=semaphore,
         )
 

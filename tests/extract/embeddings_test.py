@@ -109,7 +109,7 @@ class TestBatchProcessing:
     """Tests for batch embedding generation."""
 
     async def test_process_batch_generates_embedding(
-        self, async_db_session, mock_embedding_client, empty_embedding_caches
+        self, async_db_session, mock_embedding_client
     ):
         """Test processing batch generates informalization embedding."""
         declaration = Declaration(
@@ -126,7 +126,6 @@ class TestBatchProcessing:
             async_db_session,
             [declaration],
             mock_embedding_client,
-            empty_embedding_caches,
         )
 
         # Should generate embedding for informalization
@@ -141,7 +140,7 @@ class TestBatchProcessing:
         assert updated.informalization_embedding is not None
 
     async def test_process_batch_skips_existing(
-        self, async_db_session, mock_embedding_client, empty_embedding_caches
+        self, async_db_session, mock_embedding_client
     ):
         """Test processing batch skips declarations with existing embeddings."""
         declaration = Declaration(
@@ -159,14 +158,13 @@ class TestBatchProcessing:
             async_db_session,
             [declaration],
             mock_embedding_client,
-            empty_embedding_caches,
         )
 
         # Should skip since embedding already exists
         assert count == 0
 
     async def test_process_batch_skips_no_informalization(
-        self, async_db_session, mock_embedding_client, empty_embedding_caches
+        self, async_db_session, mock_embedding_client
     ):
         """Test processing declarations without informalization."""
         declaration = Declaration(
@@ -183,14 +181,13 @@ class TestBatchProcessing:
             async_db_session,
             [declaration],
             mock_embedding_client,
-            empty_embedding_caches,
         )
 
         # Should skip since no informalization to embed
         assert count == 0
 
     async def test_process_batch_multiple_declarations(
-        self, async_db_session, mock_embedding_client, empty_embedding_caches
+        self, async_db_session, mock_embedding_client
     ):
         """Test processing multiple declarations in one batch."""
         declarations = []
@@ -210,7 +207,6 @@ class TestBatchProcessing:
             async_db_session,
             declarations,
             mock_embedding_client,
-            empty_embedding_caches,
         )
 
         # Each declaration has informalization: 3 embeddings
@@ -222,13 +218,9 @@ class TestBatchProcessing:
         for declaration in all_declarations:
             assert declaration.informalization_embedding is not None
 
-    async def test_process_batch_empty(
-        self, async_db_session, mock_embedding_client, empty_embedding_caches
-    ):
+    async def test_process_batch_empty(self, async_db_session, mock_embedding_client):
         """Test processing empty batch."""
-        count = await _process_batch(
-            async_db_session, [], mock_embedding_client, empty_embedding_caches
-        )
+        count = await _process_batch(async_db_session, [], mock_embedding_client)
 
         assert count == 0
 
