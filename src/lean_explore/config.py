@@ -32,6 +32,56 @@ def _get_active_cache_version() -> str:
     return "v4.24.0"
 
 
+def _get_data_directory() -> pathlib.Path:
+    """Get the data directory path."""
+    return pathlib.Path(
+        os.getenv(
+            "LEAN_EXPLORE_DATA_DIR",
+            pathlib.Path(__file__).parent.parent.parent / "data",
+        )
+    )
+
+
+def _get_timestamped_directories(data_directory: pathlib.Path) -> list[pathlib.Path]:
+    """Get all timestamped extraction directories sorted by name descending."""
+    import re
+
+    if not data_directory.exists():
+        return []
+
+    timestamp_pattern = re.compile(r"^\d{8}_\d{6}$")
+    timestamped_directories = [
+        directory
+        for directory in data_directory.iterdir()
+        if directory.is_dir() and timestamp_pattern.match(directory.name)
+    ]
+
+    timestamped_directories.sort(key=lambda d: d.name, reverse=True)
+    return timestamped_directories
+
+
+def _resolve_active_data_path(
+    data_directory: pathlib.Path, active_version: str
+) -> pathlib.Path:
+    """Resolve the active data path using the best available source.
+
+    Priority:
+    1. DATA_DIRECTORY if it contains lean_explore.db directly
+    2. Most recent timestamped extraction directory (YYYYMMDD_HHMMSS)
+    3. DATA_DIRECTORY / ACTIVE_VERSION as fallback
+    """
+    if (data_directory / "lean_explore.db").exists():
+        return data_directory
+
+    timestamped_dirs = _get_timestamped_directories(data_directory)
+    if timestamped_dirs:
+        latest = timestamped_dirs[0]
+        if (latest / "lean_explore.db").exists():
+            return latest
+
+    return data_directory / active_version
+
+
 class Config:
     """Application-wide configuration settings."""
 
@@ -47,12 +97,7 @@ class Config:
     Default: ~/.lean_explore/cache
     """
 
-    DATA_DIRECTORY: pathlib.Path = pathlib.Path(
-        os.getenv(
-            "LEAN_EXPLORE_DATA_DIR",
-            pathlib.Path(__file__).parent.parent.parent / "data",
-        )
-    )
+    DATA_DIRECTORY: pathlib.Path = _get_data_directory()
     """Local data directory for extraction pipeline output.
 
     Can be overridden with LEAN_EXPLORE_DATA_DIR environment variable.
@@ -72,15 +117,37 @@ class Config:
     ACTIVE_CACHE_PATH: pathlib.Path = CACHE_DIRECTORY / ACTIVE_VERSION
     """Directory for the active version's cached data files."""
 
-    # Resolve ACTIVE_DATA_PATH: if DATA_DIRECTORY contains lean_explore.db directly
-    # (e.g., pointing to a timestamped extraction folder), use it directly.
-    # Otherwise, append the version subdirectory.
-    ACTIVE_DATA_PATH: pathlib.Path = (
-        DATA_DIRECTORY
-        if (DATA_DIRECTORY / "lean_explore.db").exists()
-        else DATA_DIRECTORY / ACTIVE_VERSION
+    ACTIVE_DATA_PATH: pathlib.Path = _resolve_active_data_path(
+        DATA_DIRECTORY, ACTIVE_VERSION
     )
-    """Directory for the active version's local data files."""
+    """Directory for the active version's local data files.
+
+    Resolved using (in priority order):
+    1. DATA_DIRECTORY if it contains lean_explore.db directly
+    2. Most recent timestamped extraction directory (YYYYMMDD_HHMMSS)
+    3. DATA_DIRECTORY / ACTIVE_VERSION as fallback
+    """
+
+    # =========================================================================
+    # Timestamped Extraction Directory Methods
+    # =========================================================================
+
+    @staticmethod
+    def _get_timestamped_directories() -> list[pathlib.Path]:
+        """Get all timestamped extraction directories sorted by name descending."""
+        return _get_timestamped_directories(Config.DATA_DIRECTORY)
+
+    @staticmethod
+    def get_latest_extraction_path() -> pathlib.Path | None:
+        """Get the most recent timestamped extraction directory.
+
+        Looks for directories matching YYYYMMDD_HHMMSS pattern in DATA_DIRECTORY.
+
+        Returns:
+            Path to most recent extraction directory, or None if none exist.
+        """
+        timestamped_directories = Config._get_timestamped_directories()
+        return timestamped_directories[0] if timestamped_directories else None
 
     DATABASE_PATH: pathlib.Path = ACTIVE_CACHE_PATH / "lean_explore.db"
     """Path to SQLite database file in cache (used by search engine)."""
@@ -110,41 +177,6 @@ class Config:
 
     EXTRACTION_DATABASE_URL: str = f"sqlite+aiosqlite:///{EXTRACTION_DATABASE_PATH}"
     """Async SQLAlchemy database URL for extraction pipeline."""
-
-    # =========================================================================
-    # Timestamped Extraction Directory Methods
-    # =========================================================================
-
-    @staticmethod
-    def _get_timestamped_directories() -> list[pathlib.Path]:
-        """Get all timestamped extraction directories sorted by name descending."""
-        import re
-
-        data_directory = Config.DATA_DIRECTORY
-        if not data_directory.exists():
-            return []
-
-        timestamp_pattern = re.compile(r"^\d{8}_\d{6}$")
-        timestamped_directories = [
-            directory
-            for directory in data_directory.iterdir()
-            if directory.is_dir() and timestamp_pattern.match(directory.name)
-        ]
-
-        timestamped_directories.sort(key=lambda d: d.name, reverse=True)
-        return timestamped_directories
-
-    @staticmethod
-    def get_latest_extraction_path() -> pathlib.Path | None:
-        """Get the most recent timestamped extraction directory.
-
-        Looks for directories matching YYYYMMDD_HHMMSS pattern in DATA_DIRECTORY.
-
-        Returns:
-            Path to most recent extraction directory, or None if none exist.
-        """
-        timestamped_directories = Config._get_timestamped_directories()
-        return timestamped_directories[0] if timestamped_directories else None
 
     @staticmethod
     def get_latest_database_path() -> pathlib.Path | None:
