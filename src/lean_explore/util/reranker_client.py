@@ -164,9 +164,9 @@ class RerankerClient:
         if not documents:
             return RerankerResponse(query=query, scores=[], model=self.model_name)
 
-        # Default batch size: 128 on GPU (can handle it), 32 on CPU
+        # Default batch size: 16 on GPU (fits 8GB VRAM), 32 on CPU
         if batch_size is None:
-            batch_size = 128 if self.device == "cuda" else 32
+            batch_size = 16 if self.device == "cuda" else 32
 
         # For small batches, run synchronously to avoid executor overhead
         if len(documents) <= batch_size:
