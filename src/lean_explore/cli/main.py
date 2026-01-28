@@ -4,6 +4,7 @@ Provides commands to search for Lean declarations via the remote API,
 interact with AI agents, and manage local data.
 """
 
+import asyncio
 import logging
 import os
 import subprocess
@@ -50,13 +51,18 @@ def _get_console(use_stderr: bool = False) -> Console:
 
 
 @app.command("search")
-async def search_command(
+def search_command(
     query_string: str = typer.Argument(..., help="The search query string."),
     limit: int = typer.Option(
         5, "--limit", "-n", help="Number of search results to display."
     ),
 ):
     """Search for Lean declarations using the Lean Explore API."""
+    asyncio.run(_search_async(query_string, limit))
+
+
+async def _search_async(query_string: str, limit: int) -> None:
+    """Async implementation of search command."""
     console = _get_console()
     error_console = _get_console(use_stderr=True)
 
