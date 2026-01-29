@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lean-explore"
-version = "1.1.0"
+version = "1.0.1"
 authors = [
     { name = "Justin Asher", email = "justinchadwickasher@gmail.com" },
 ]
