@@ -8,10 +8,32 @@ from mcp.server.fastmcp import Context as MCPContext
 
 from lean_explore.mcp.app import AppContext, BackendServiceType, mcp_app
 from lean_explore.models import SearchResponse, SearchResult
+from lean_explore.models.search_types import (
+    SearchResultSummary,
+    SearchSummaryResponse,
+    extract_bold_description,
+)
+
+
+class SearchResultSummaryDict(TypedDict, total=False):
+    """Serialized SearchResultSummary for slim MCP search responses."""
+
+    id: int
+    name: str
+    description: str | None
+
+
+class SearchSummaryResponseDict(TypedDict, total=False):
+    """Serialized SearchSummaryResponse for slim MCP search responses."""
+
+    query: str
+    results: list[SearchResultSummaryDict]
+    count: int
+    processing_time_ms: int | None
 
 
 class SearchResultDict(TypedDict, total=False):
-    """Serialized SearchResult for MCP tool responses."""
+    """Serialized SearchResult for verbose MCP tool responses."""
 
     id: int
     name: str
@@ -24,7 +46,7 @@ class SearchResultDict(TypedDict, total=False):
 
 
 class SearchResponseDict(TypedDict, total=False):
-    """Serialized SearchResponse for MCP tool responses."""
+    """Serialized SearchResponse for verbose MCP tool responses."""
 
     query: str
     results: list[SearchResultDict]
@@ -55,6 +77,41 @@ async def _get_backend_from_context(ctx: MCPContext) -> BackendServiceType:
     return backend
 
 
+async def _execute_backend_search(
+    backend: BackendServiceType,
+    query: str,
+    limit: int,
+    rerank_top: int | None,
+    packages: list[str] | None,
+) -> SearchResponse:
+    """Execute a search on the backend, handling both async and sync backends.
+
+    Args:
+        backend: The backend service (ApiClient or Service).
+        query: The search query string.
+        limit: Maximum number of results.
+        rerank_top: Number of candidates to rerank with cross-encoder.
+        packages: Optional package filter.
+
+    Returns:
+        The search response from the backend.
+
+    Raises:
+        RuntimeError: If the backend does not support search.
+    """
+    if not hasattr(backend, "search"):
+        logger.error("Backend service does not have a 'search' method.")
+        raise RuntimeError("Search functionality not available on configured backend.")
+
+    if asyncio.iscoroutinefunction(backend.search):
+        return await backend.search(
+            query=query, limit=limit, rerank_top=rerank_top, packages=packages
+        )
+    return backend.search(
+        query=query, limit=limit, rerank_top=rerank_top, packages=packages
+    )
+
+
 @mcp_app.tool()
 async def search(
     ctx: MCPContext,
@@ -62,8 +119,12 @@ async def search(
     limit: int = 10,
     rerank_top: int | None = 50,
     packages: list[str] | None = None,
-) -> SearchResponseDict:
-    """Searches Lean declarations by a query string.
+) -> SearchSummaryResponseDict:
+    """Searches Lean declarations and returns concise results.
+
+    Returns slim results (id, name, short description) to minimize token usage.
+    Use get_by_id to retrieve full details for specific declarations, or
+    search_verbose to get all fields upfront.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
@@ -75,7 +136,7 @@ async def search(
             Defaults to None (all packages).
 
     Returns:
-        A dictionary containing the search response with results.
+        A dictionary containing slim search results with id, name, and description.
     """
     backend = await _get_backend_from_context(ctx)
     logger.info(
@@ -83,21 +144,65 @@ async def search(
         f"rerank_top: {rerank_top}, packages: {packages}"
     )
 
-    if not hasattr(backend, "search"):
-        logger.error("Backend service does not have a 'search' method.")
-        raise RuntimeError("Search functionality not available on configured backend.")
+    response = await _execute_backend_search(
+        backend, query, limit, rerank_top, packages
+    )
 
-    # Call backend search (handle both async and sync)
-    if asyncio.iscoroutinefunction(backend.search):
-        response: SearchResponse = await backend.search(
-            query=query, limit=limit, rerank_top=rerank_top, packages=packages
+    # Convert full results to slim summaries
+    summary_results = [
+        SearchResultSummary(
+            id=result.id,
+            name=result.name,
+            description=extract_bold_description(result.informalization),
         )
-    else:
-        response: SearchResponse = backend.search(
-            query=query, limit=limit, rerank_top=rerank_top, packages=packages
-        )
+        for result in response.results
+    ]
+    summary_response = SearchSummaryResponse(
+        query=response.query,
+        results=summary_results,
+        count=response.count,
+        processing_time_ms=response.processing_time_ms,
+    )
 
-    # Return as dict for MCP
+    return summary_response.model_dump(exclude_none=True)
+
+
+@mcp_app.tool()
+async def search_verbose(
+    ctx: MCPContext,
+    query: str,
+    limit: int = 10,
+    rerank_top: int | None = 50,
+    packages: list[str] | None = None,
+) -> SearchResponseDict:
+    """Searches Lean declarations and returns full results with all fields.
+
+    Returns complete results including source code, dependencies, module info,
+    and full informalization. Use this when you need all details upfront. For
+    a more concise overview, use search instead.
+
+    Args:
+        ctx: The MCP context, providing access to the backend service.
+        query: A search query string, e.g., "continuous function".
+        limit: The maximum number of search results to return. Defaults to 10.
+        rerank_top: Number of candidates to rerank with cross-encoder. Set to 0 or
+            None to skip reranking. Defaults to 50. Only used with local backend.
+        packages: Filter results to specific packages (e.g., ["Mathlib", "Std"]).
+            Defaults to None (all packages).
+
+    Returns:
+        A dictionary containing the full search response with all fields.
+    """
+    backend = await _get_backend_from_context(ctx)
+    logger.info(
+        f"MCP Tool 'search_verbose' called with query: '{query}', limit: {limit}, "
+        f"rerank_top: {rerank_top}, packages: {packages}"
+    )
+
+    response = await _execute_backend_search(
+        backend, query, limit, rerank_top, packages
+    )
+
     return response.model_dump(exclude_none=True)
 
 
@@ -107,6 +212,9 @@ async def get_by_id(
     declaration_id: int,
 ) -> SearchResultDict | None:
     """Retrieves a specific declaration by its unique identifier.
+
+    Returns the full declaration including source code, dependencies, module
+    info, and informalization. Use this to expand results from the search tool.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
