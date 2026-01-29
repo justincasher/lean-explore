@@ -81,7 +81,7 @@ class TestSearchTool:
         await search(mock_ctx, query="test query", limit=10)
 
         mock_backend.search.assert_called_once_with(
-            query="test query", limit=10, rerank_top=50
+            query="test query", limit=10, rerank_top=50, packages=None
         )
 
     async def test_search_returns_dict(self, mock_context_with_backend):
@@ -102,7 +102,17 @@ class TestSearchTool:
         await search(mock_ctx, query="test")
 
         mock_backend.search.assert_called_once_with(
-            query="test", limit=10, rerank_top=50
+            query="test", limit=10, rerank_top=50, packages=None
+        )
+
+    async def test_search_with_packages_filter(self, mock_context_with_backend):
+        """Test search with packages filter."""
+        mock_ctx, mock_backend = mock_context_with_backend
+
+        await search(mock_ctx, query="test", packages=["Mathlib", "Std"])
+
+        mock_backend.search.assert_called_once_with(
+            query="test", limit=10, rerank_top=50, packages=["Mathlib", "Std"]
         )
 
     async def test_search_backend_without_method(self):

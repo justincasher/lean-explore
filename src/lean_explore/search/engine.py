@@ -59,7 +59,7 @@ class SearchEngine:
         reranker_model_name: str = "Qwen/Qwen3-Reranker-0.6B",
         faiss_index_path: Path | None = None,
         faiss_ids_map_path: Path | None = None,
-        use_local_data: bool = True,
+        use_local_data: bool = False,
     ):
         """Initialize the search engine.
 
@@ -71,8 +71,9 @@ class SearchEngine:
             reranker_model_name: Name of the reranker model to use.
             faiss_index_path: Path to FAISS index. Defaults to config path.
             faiss_ids_map_path: Path to FAISS ID mapping. Defaults to config path.
-            use_local_data: If True, use DATA_DIRECTORY paths. If False, use
-                CACHE_DIRECTORY paths (for downloaded remote data).
+            use_local_data: If True, use DATA_DIRECTORY paths (for locally
+                generated data). If False, use CACHE_DIRECTORY paths (for
+                data downloaded via 'lean-explore data fetch').
         """
         self._embedding_client = embedding_client
         self._embedding_model_name = embedding_model_name
@@ -232,9 +233,7 @@ class SearchEngine:
             Map of declaration ID to semantic similarity score.
         """
         embedding_response = await self.embedding_client.embed([query], is_query=True)
-        query_embedding = np.array(
-            [embedding_response.embeddings[0]], dtype=np.float32
-        )
+        query_embedding = np.array([embedding_response.embeddings[0]], dtype=np.float32)
 
         import faiss as faiss_module
 
@@ -581,9 +580,7 @@ class SearchEngine:
             declarations_map = self._filter_by_packages(declarations_map, packages)
             # Filter boosted_scores to only include filtered declarations
             boosted_scores = [
-                (cid, score)
-                for cid, score in boosted_scores
-                if cid in declarations_map
+                (cid, score) for cid, score in boosted_scores if cid in declarations_map
             ]
             logger.info(f"Filtered to {len(declarations_map)} in {packages}")
 

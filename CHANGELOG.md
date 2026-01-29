@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 N/A
 
+## [1.0.2] - 2026-01-29
+
+### Fixed
+- Changed `SearchEngine` default for `use_local_data` from `True` to `False` so that
+  `Service()` works out of the box after running `lean-explore data fetch`.
+
+## [1.0.1] - 2026-01-28
+
+### Fixed
+- Fixed data fetch to use `latest.txt` for version discovery instead of hardcoded file names.
+
 ## [1.0.0] - 2025-01-27
 
 Complete architectural rewrite with a new extraction pipeline that enables

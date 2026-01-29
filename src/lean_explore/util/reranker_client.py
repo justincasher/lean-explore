@@ -86,9 +86,7 @@ class RerankerClient:
             Formatted string for the reranker model.
         """
         return (
-            f"<Instruct>: {self.instruction}\n"
-            f"<Query>: {query}\n"
-            f"<Document>: {document}"
+            f"<Instruct>: {self.instruction}\n<Query>: {query}\n<Document>: {document}"
         )
 
     @torch.no_grad()

@@ -341,9 +341,7 @@ async def generate_embeddings(
         # Phase 2: Generate embeddings for remaining declarations
         logger.info("Phase 2: Generating embeddings for remaining declarations...")
         client = EmbeddingClient(model_name=model_name, max_length=max_seq_length)
-        logger.info(
-            f"Using {client.model_name} on {client.device}"
-        )
+        logger.info(f"Using {client.model_name} on {client.device}")
 
         total = len(remaining)
         total_embeddings = 0

@@ -88,9 +88,7 @@ class TestEmbeddingClientEmbed:
             ) as mock_st:
                 mock_model = MagicMock()
                 # Return numpy arrays like the real model
-                mock_model.encode.return_value = np.array(
-                    [[0.1] * 1024, [0.2] * 1024]
-                )
+                mock_model.encode.return_value = np.array([[0.1] * 1024, [0.2] * 1024])
                 mock_st.return_value = mock_model
 
                 yield EmbeddingClient(model_name="test-model")

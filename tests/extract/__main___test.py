@@ -152,14 +152,10 @@ class TestIndexStep:
 
     async def test_run_index_step(self, async_db_engine, temp_directory):
         """Test search index building step (FAISS and BM25)."""
-        with patch(
-            "lean_explore.extract.index.build_faiss_indices"
-        ) as mock_faiss:
+        with patch("lean_explore.extract.index.build_faiss_indices") as mock_faiss:
             mock_faiss.return_value = AsyncMock()
 
-            with patch(
-                "lean_explore.extract.index.build_bm25_indices"
-            ) as mock_bm25:
+            with patch("lean_explore.extract.index.build_bm25_indices") as mock_bm25:
                 mock_bm25.return_value = AsyncMock()
 
                 await _run_index_step(async_db_engine, temp_directory)

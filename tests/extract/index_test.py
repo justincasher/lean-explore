@@ -347,9 +347,7 @@ class TestBuildFAISSIndices:
                     "lean_explore.extract.index.faiss.write_index"
                 ) as mock_write:
                     with patch("builtins.open", create=True):
-                        await build_faiss_indices(
-                            async_engine, output_directory=None
-                        )
+                        await build_faiss_indices(async_engine, output_directory=None)
 
                         # Should use Config.ACTIVE_DATA_PATH
                         # Verify the path was created

@@ -56,12 +56,17 @@ def search_command(
     limit: int = typer.Option(
         5, "--limit", "-n", help="Number of search results to display."
     ),
+    packages: list[str] | None = typer.Option(
+        None, "--package", "-p", help="Filter by package (e.g., -p Mathlib -p Std)."
+    ),
 ):
     """Search for Lean declarations using the Lean Explore API."""
-    asyncio.run(_search_async(query_string, limit))
+    asyncio.run(_search_async(query_string, limit, packages))
 
 
-async def _search_async(query_string: str, limit: int) -> None:
+async def _search_async(
+    query_string: str, limit: int, packages: list[str] | None
+) -> None:
     """Async implementation of search command."""
     console = _get_console()
     error_console = _get_console(use_stderr=True)
@@ -74,7 +79,7 @@ async def _search_async(query_string: str, limit: int) -> None:
         raise typer.Exit(code=1)
 
     console.print(f"Searching for: '{query_string}'...")
-    response = await client.search(query=query_string, limit=limit)
+    response = await client.search(query=query_string, limit=limit, packages=packages)
     display_search_results(response, display_limit=limit, console=console)
 
 

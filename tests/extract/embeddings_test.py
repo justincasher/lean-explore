@@ -21,9 +21,7 @@ from lean_explore.models import Declaration
 class TestDeclarationQuerying:
     """Tests for finding declarations needing embeddings."""
 
-    async def test_get_declarations_needing_embeddings_missing(
-        self, async_db_session
-    ):
+    async def test_get_declarations_needing_embeddings_missing(self, async_db_session):
         """Test getting declarations with no embeddings."""
         declaration = Declaration(
             name="Test",
@@ -42,9 +40,7 @@ class TestDeclarationQuerying:
         assert len(declarations) == 1
         assert declarations[0].name == "Test"
 
-    async def test_get_declarations_needing_embeddings_complete(
-        self, async_db_session
-    ):
+    async def test_get_declarations_needing_embeddings_complete(self, async_db_session):
         """Test that declarations with embeddings are not returned."""
         declaration = Declaration(
             name="Test",
@@ -64,9 +60,7 @@ class TestDeclarationQuerying:
         # Should not return since embedding present
         assert len(declarations) == 0
 
-    async def test_get_declarations_no_informalization_skipped(
-        self, async_db_session
-    ):
+    async def test_get_declarations_no_informalization_skipped(self, async_db_session):
         """Test that declarations without informalization are not returned."""
         declaration = Declaration(
             name="Test",

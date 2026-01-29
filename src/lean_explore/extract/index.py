@@ -95,8 +95,7 @@ def _build_faiss_index(embeddings: np.ndarray, device: str) -> faiss.Index:
     nlist = max(256, int(np.sqrt(num_vectors)))
 
     logger.info(
-        f"Building FAISS IVF index for {num_vectors} vectors "
-        f"with {nlist} clusters..."
+        f"Building FAISS IVF index for {num_vectors} vectors with {nlist} clusters..."
     )
 
     # Use inner product (cosine similarity on normalized vectors)

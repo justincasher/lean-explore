@@ -25,6 +25,7 @@ class Service:
         query: str,
         limit: int = 20,
         rerank_top: int | None = 50,
+        packages: list[str] | None = None,
     ) -> SearchResponse:
         """Search for Lean declarations.
 
@@ -32,6 +33,7 @@ class Service:
             query: Search query string.
             limit: Maximum number of results to return.
             rerank_top: Number of candidates to rerank with cross-encoder.
+            packages: Filter results to specific packages (e.g., ["Mathlib"]).
 
         Returns:
             SearchResponse containing results and metadata.
@@ -42,6 +44,7 @@ class Service:
             query=query,
             limit=limit,
             rerank_top=rerank_top,
+            packages=packages,
         )
 
         processing_time_ms = int((time.time() - start_time) * 1000)

@@ -186,7 +186,7 @@ async def run_doc_gen4(
 
         config = PACKAGE_REGISTRY[package_name]
         workspace_path = Path("lean") / package_name
-        logger.info(f"\n{'='*50}\nPackage: {package_name}\n{'='*50}")
+        logger.info(f"\n{'=' * 50}\nPackage: {package_name}\n{'=' * 50}")
 
         if fresh:
             _clear_workspace_cache(workspace_path)

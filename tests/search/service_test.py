@@ -67,6 +67,18 @@ class TestService:
             query="test",
             limit=10,
             rerank_top=25,
+            packages=None,
+        )
+
+    async def test_search_passes_packages_filter(self, service, mock_engine):
+        """Test that search passes packages filter to engine."""
+        await service.search("test", limit=10, packages=["Mathlib", "Std"])
+
+        mock_engine.search.assert_called_once_with(
+            query="test",
+            limit=10,
+            rerank_top=50,
+            packages=["Mathlib", "Std"],
         )
 
     async def test_get_by_id_found(self, service, mock_engine):

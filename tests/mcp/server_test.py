@@ -81,9 +81,10 @@ class TestMainFunction:
         """Test that api backend without key exits with error."""
         from lean_explore.mcp.server import main
 
-        with patch.object(
-            sys, "argv", ["server", "--backend", "api"]
-        ), pytest.raises(SystemExit) as exc_info:
+        with (
+            patch.object(sys, "argv", ["server", "--backend", "api"]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
             main()
 
         assert exc_info.value.code == 1
@@ -96,15 +97,13 @@ class TestMainFunction:
         mock_path.exists.return_value = False
         mock_path.resolve.return_value = "/fake/path"
 
-        with patch.object(
-            sys, "argv", ["server", "--backend", "local"]
-        ), patch(
-            "lean_explore.mcp.server.Config.DATABASE_PATH", mock_path
-        ), patch(
-            "lean_explore.mcp.server.Config.ACTIVE_VERSION", "v0.1.0"
-        ), patch(
-            "lean_explore.mcp.server.Config.ACTIVE_CACHE_PATH", mock_path
-        ), pytest.raises(SystemExit) as exc_info:
+        with (
+            patch.object(sys, "argv", ["server", "--backend", "local"]),
+            patch("lean_explore.mcp.server.Config.DATABASE_PATH", mock_path),
+            patch("lean_explore.mcp.server.Config.ACTIVE_VERSION", "v0.1.0"),
+            patch("lean_explore.mcp.server.Config.ACTIVE_CACHE_PATH", mock_path),
+            pytest.raises(SystemExit) as exc_info,
+        ):
             main()
 
         assert exc_info.value.code == 1

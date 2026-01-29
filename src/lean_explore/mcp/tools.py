@@ -31,6 +31,7 @@ class SearchResponseDict(TypedDict, total=False):
     count: int
     processing_time_ms: int | None
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,6 +61,7 @@ async def search(
     query: str,
     limit: int = 10,
     rerank_top: int | None = 50,
+    packages: list[str] | None = None,
 ) -> SearchResponseDict:
     """Searches Lean declarations by a query string.
 
@@ -69,6 +71,8 @@ async def search(
         limit: The maximum number of search results to return. Defaults to 10.
         rerank_top: Number of candidates to rerank with cross-encoder. Set to 0 or
             None to skip reranking. Defaults to 50. Only used with local backend.
+        packages: Filter results to specific packages (e.g., ["Mathlib", "Std"]).
+            Defaults to None (all packages).
 
     Returns:
         A dictionary containing the search response with results.
@@ -76,7 +80,7 @@ async def search(
     backend = await _get_backend_from_context(ctx)
     logger.info(
         f"MCP Tool 'search' called with query: '{query}', limit: {limit}, "
-        f"rerank_top: {rerank_top}"
+        f"rerank_top: {rerank_top}, packages: {packages}"
     )
 
     if not hasattr(backend, "search"):
@@ -86,11 +90,11 @@ async def search(
     # Call backend search (handle both async and sync)
     if asyncio.iscoroutinefunction(backend.search):
         response: SearchResponse = await backend.search(
-            query=query, limit=limit, rerank_top=rerank_top
+            query=query, limit=limit, rerank_top=rerank_top, packages=packages
         )
     else:
         response: SearchResponse = backend.search(
-            query=query, limit=limit, rerank_top=rerank_top
+            query=query, limit=limit, rerank_top=rerank_top, packages=packages
         )
 
     # Return as dict for MCP

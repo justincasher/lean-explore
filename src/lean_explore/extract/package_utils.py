@@ -91,11 +91,11 @@ def update_lakefile_docgen_version(lakefile_path: Path, lean_version: str) -> No
     content = lakefile_path.read_text()
 
     pattern = (
-        r'require «doc-gen4» from git\s+'
+        r"require «doc-gen4» from git\s+"
         r'"https://github\.com/leanprover/doc-gen4"(?:\s+@\s+"[^"]*")?'
     )
     replacement = (
-        f'require «doc-gen4» from git\n'
+        f"require «doc-gen4» from git\n"
         f'  "https://github.com/leanprover/doc-gen4" @ "{lean_version}"'
     )
     new_content = re.sub(pattern, replacement, content)

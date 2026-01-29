@@ -41,6 +41,7 @@ class ApiClient:
         query: str,
         limit: int = 20,
         rerank_top: int | None = None,  # Ignored for API (server handles reranking)
+        packages: list[str] | None = None,
     ) -> SearchResponse:
         """Search for Lean declarations via the API.
 
@@ -48,6 +49,7 @@ class ApiClient:
             query: The search query string.
             limit: Maximum number of results to return.
             rerank_top: Ignored for API backend (included for interface consistency).
+            packages: Filter results to specific packages (e.g., ["Mathlib"]).
 
         Returns:
             SearchResponse containing results and metadata.
@@ -58,7 +60,9 @@ class ApiClient:
         """
         del rerank_top  # Unused - server handles reranking
         endpoint = f"{self.base_url}/search"
-        params = {"q": query, "limit": limit}
+        params: dict[str, str | int] = {"q": query, "limit": limit}
+        if packages:
+            params["packages"] = ",".join(packages)
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.get(endpoint, params=params, headers=self._headers)

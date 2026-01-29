@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: LeanExplore API
-  version: v1.0.0
+  version: v1.0.2
   description: >-
     The LeanExplore API provides programmatic access to search and retrieve
     Lean 4 declarations from indexed projects including Mathlib, PhysLean,

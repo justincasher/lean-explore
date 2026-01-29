@@ -61,23 +61,38 @@ class TestSearchCommand:
 
     async def test_search_command_success(self, mock_api_client):
         """Test successful search command execution."""
-        with patch(
-            "lean_explore.cli.main.ApiClient", return_value=mock_api_client
-        ), patch("lean_explore.cli.main.display_search_results"):
+        with (
+            patch("lean_explore.cli.main.ApiClient", return_value=mock_api_client),
+            patch("lean_explore.cli.main.display_search_results"),
+        ):
             # Test the async implementation directly
-            await _search_async(query_string="test query", limit=5)
+            await _search_async(query_string="test query", limit=5, packages=None)
             mock_api_client.search.assert_called_once_with(
-                query="test query", limit=5
+                query="test query", limit=5, packages=None
             )
 
     async def test_search_command_with_limit(self, mock_api_client):
         """Test search command with custom limit."""
-        with patch(
-            "lean_explore.cli.main.ApiClient", return_value=mock_api_client
-        ), patch("lean_explore.cli.main.display_search_results"):
-            await _search_async(query_string="test query", limit=10)
+        with (
+            patch("lean_explore.cli.main.ApiClient", return_value=mock_api_client),
+            patch("lean_explore.cli.main.display_search_results"),
+        ):
+            await _search_async(query_string="test query", limit=10, packages=None)
             mock_api_client.search.assert_called_once_with(
-                query="test query", limit=10
+                query="test query", limit=10, packages=None
+            )
+
+    async def test_search_command_with_packages(self, mock_api_client):
+        """Test search command with package filter."""
+        with (
+            patch("lean_explore.cli.main.ApiClient", return_value=mock_api_client),
+            patch("lean_explore.cli.main.display_search_results"),
+        ):
+            await _search_async(
+                query_string="test query", limit=5, packages=["Mathlib", "Std"]
+            )
+            mock_api_client.search.assert_called_once_with(
+                query="test query", limit=5, packages=["Mathlib", "Std"]
             )
 
     async def test_search_command_api_key_error(self):
@@ -87,7 +102,7 @@ class TestSearchCommand:
             side_effect=ValueError("API key required"),
         ):
             with pytest.raises(typer.Exit) as exc_info:
-                await _search_async(query_string="test query", limit=5)
+                await _search_async(query_string="test query", limit=5, packages=None)
             assert exc_info.value.exit_code == 1
 
 
@@ -107,9 +122,10 @@ class TestMcpServeCommand:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("os.getenv", return_value="test-api-key"), patch(
-            "subprocess.run", return_value=mock_result
-        ) as mock_run:
+        with (
+            patch("os.getenv", return_value="test-api-key"),
+            patch("subprocess.run", return_value=mock_result) as mock_run,
+        ):
             result = runner.invoke(app, ["mcp", "serve", "--backend", "api"])
             assert result.exit_code == 0
             mock_run.assert_called_once()
@@ -148,8 +164,9 @@ class TestMcpServeCommand:
         mock_result = MagicMock()
         mock_result.returncode = 1
 
-        with patch("os.getenv", return_value="test-api-key"), patch(
-            "subprocess.run", return_value=mock_result
+        with (
+            patch("os.getenv", return_value="test-api-key"),
+            patch("subprocess.run", return_value=mock_result),
         ):
             result = runner.invoke(app, ["mcp", "serve", "--backend", "api"])
             assert result.exit_code == 1
