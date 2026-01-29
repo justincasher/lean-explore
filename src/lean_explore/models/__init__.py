@@ -4,6 +4,20 @@ This package contains database models and type definitions for search results.
 """
 
 from lean_explore.models.search_db import Base, Declaration
-from lean_explore.models.search_types import SearchResponse, SearchResult
+from lean_explore.models.search_types import (
+    SearchResponse,
+    SearchResult,
+    SearchResultSummary,
+    SearchSummaryResponse,
+    extract_bold_description,
+)
 
-__all__ = ["Base", "Declaration", "SearchResult", "SearchResponse"]
+__all__ = [
+    "Base",
+    "Declaration",
+    "SearchResult",
+    "SearchResponse",
+    "SearchResultSummary",
+    "SearchSummaryResponse",
+    "extract_bold_description",
+]
