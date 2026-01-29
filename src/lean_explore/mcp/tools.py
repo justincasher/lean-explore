@@ -119,12 +119,47 @@ async def search(
     limit: int = 10,
     rerank_top: int | None = 50,
     packages: list[str] | None = None,
+) -> SearchResponseDict:
+    """Searches Lean declarations by a query string.
+
+    Args:
+        ctx: The MCP context, providing access to the backend service.
+        query: A search query string, e.g., "continuous function".
+        limit: The maximum number of search results to return. Defaults to 10.
+        rerank_top: Number of candidates to rerank with cross-encoder. Set to 0 or
+            None to skip reranking. Defaults to 50. Only used with local backend.
+        packages: Filter results to specific packages (e.g., ["Mathlib", "Std"]).
+            Defaults to None (all packages).
+
+    Returns:
+        A dictionary containing the full search response with all fields.
+    """
+    backend = await _get_backend_from_context(ctx)
+    logger.info(
+        f"MCP Tool 'search' called with query: '{query}', limit: {limit}, "
+        f"rerank_top: {rerank_top}, packages: {packages}"
+    )
+
+    response = await _execute_backend_search(
+        backend, query, limit, rerank_top, packages
+    )
+
+    return response.model_dump(exclude_none=True)
+
+
+@mcp_app.tool()
+async def search_summary(
+    ctx: MCPContext,
+    query: str,
+    limit: int = 10,
+    rerank_top: int | None = 50,
+    packages: list[str] | None = None,
 ) -> SearchSummaryResponseDict:
     """Searches Lean declarations and returns concise results.
 
     Returns slim results (id, name, short description) to minimize token usage.
     Use get_by_id to retrieve full details for specific declarations, or
-    search_verbose to get all fields upfront.
+    search to get all fields upfront.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
@@ -140,7 +175,7 @@ async def search(
     """
     backend = await _get_backend_from_context(ctx)
     logger.info(
-        f"MCP Tool 'search' called with query: '{query}', limit: {limit}, "
+        f"MCP Tool 'search_summary' called with query: '{query}', limit: {limit}, "
         f"rerank_top: {rerank_top}, packages: {packages}"
     )
 
@@ -165,45 +200,6 @@ async def search(
     )
 
     return summary_response.model_dump(exclude_none=True)
-
-
-@mcp_app.tool()
-async def search_verbose(
-    ctx: MCPContext,
-    query: str,
-    limit: int = 10,
-    rerank_top: int | None = 50,
-    packages: list[str] | None = None,
-) -> SearchResponseDict:
-    """Searches Lean declarations and returns full results with all fields.
-
-    Returns complete results including source code, dependencies, module info,
-    and full informalization. Use this when you need all details upfront. For
-    a more concise overview, use search instead.
-
-    Args:
-        ctx: The MCP context, providing access to the backend service.
-        query: A search query string, e.g., "continuous function".
-        limit: The maximum number of search results to return. Defaults to 10.
-        rerank_top: Number of candidates to rerank with cross-encoder. Set to 0 or
-            None to skip reranking. Defaults to 50. Only used with local backend.
-        packages: Filter results to specific packages (e.g., ["Mathlib", "Std"]).
-            Defaults to None (all packages).
-
-    Returns:
-        A dictionary containing the full search response with all fields.
-    """
-    backend = await _get_backend_from_context(ctx)
-    logger.info(
-        f"MCP Tool 'search_verbose' called with query: '{query}', limit: {limit}, "
-        f"rerank_top: {rerank_top}, packages: {packages}"
-    )
-
-    response = await _execute_backend_search(
-        backend, query, limit, rerank_top, packages
-    )
-
-    return response.model_dump(exclude_none=True)
 
 
 @mcp_app.tool()

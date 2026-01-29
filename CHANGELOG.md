@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 N/A
 
+## [1.1.1] - 2026-01-29
+
+### Changed
+- Renamed `search_verbose` to `search_summary` and restored `search` to return
+  full results for backwards compatibility with existing consumers.
+
 ## [1.1.0] - 2026-01-29
 
 ### Added
-- Slim `search` MCP tool that returns concise results (id, name, short description),
-  reducing token usage by ~87% compared to the previous full-payload search.
-- `search_verbose` MCP tool that returns full results with all fields.
+- `search_summary` MCP tool that returns concise results (id, name, short description),
+  reducing token usage by ~87% compared to the full-payload search.
 - `SearchResultSummary` and `SearchSummaryResponse` models for slim search results.
 - `extract_bold_description` utility for extracting informalization headers.
 
