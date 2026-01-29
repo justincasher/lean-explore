@@ -11,11 +11,11 @@ import pytest
 from typer.testing import CliRunner
 
 from lean_explore.cli.data_commands import (
-    _build_file_registry,
-    _fetch_manifest,
+    _cleanup_old_versions,
+    _fetch_latest_version,
     _get_console,
     _install_toolchain,
-    _resolve_version,
+    _write_active_version,
     app,
 )
 
@@ -31,202 +31,192 @@ class TestGetConsole:
         assert console is not None
 
 
-class TestFetchManifest:
-    """Tests for the _fetch_manifest function."""
+class TestFetchLatestVersion:
+    """Tests for the _fetch_latest_version function."""
 
-    def test_fetch_manifest_success(self):
-        """Test successful manifest fetch."""
+    def test_fetch_latest_version_success(self):
+        """Test successful latest version fetch."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "default_toolchain": "0.1.0",
-            "toolchains": {"0.1.0": {}},
-        }
+        mock_response.text = "20260127_103630\n"
         mock_response.raise_for_status = MagicMock()
 
         with patch("requests.get", return_value=mock_response):
-            result = _fetch_manifest()
-            assert result is not None
-            assert result["default_toolchain"] == "0.1.0"
+            result = _fetch_latest_version()
+            assert result == "20260127_103630"
 
-    def test_fetch_manifest_network_error(self):
-        """Test manifest fetch with network error."""
+    def test_fetch_latest_version_strips_whitespace(self):
+        """Test that version string is stripped of whitespace."""
+        mock_response = MagicMock()
+        mock_response.text = "  20260127_103630  \n"
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("requests.get", return_value=mock_response):
+            result = _fetch_latest_version()
+            assert result == "20260127_103630"
+
+    def test_fetch_latest_version_network_error(self):
+        """Test latest version fetch with network error."""
         import requests
 
         with patch("requests.get", side_effect=requests.exceptions.ConnectionError()):
-            result = _fetch_manifest()
-            assert result is None
+            with pytest.raises(ValueError, match="Failed to fetch latest version"):
+                _fetch_latest_version()
 
-    def test_fetch_manifest_http_error(self):
-        """Test manifest fetch with HTTP error."""
+    def test_fetch_latest_version_http_error(self):
+        """Test latest version fetch with HTTP error."""
         import requests
 
         mock_response = MagicMock()
         mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError()
 
         with patch("requests.get", return_value=mock_response):
-            result = _fetch_manifest()
-            assert result is None
+            with pytest.raises(ValueError, match="Failed to fetch latest version"):
+                _fetch_latest_version()
 
-    def test_fetch_manifest_timeout(self):
-        """Test manifest fetch with timeout."""
+    def test_fetch_latest_version_timeout(self):
+        """Test latest version fetch with timeout."""
         import requests
 
         with patch("requests.get", side_effect=requests.exceptions.Timeout()):
-            result = _fetch_manifest()
-            assert result is None
+            with pytest.raises(ValueError, match="Failed to fetch latest version"):
+                _fetch_latest_version()
 
 
-class TestResolveVersion:
-    """Tests for the _resolve_version function."""
+class TestWriteActiveVersion:
+    """Tests for the _write_active_version function."""
 
-    def test_resolve_version_none_uses_default(self):
-        """Test that None version resolves to default."""
-        manifest = {"default_toolchain": "1.0.0"}
-        result = _resolve_version(manifest, None)
-        assert result == "1.0.0"
+    def test_write_active_version_creates_file(self):
+        """Test that active version is written to file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+            version_file = Path(tmpdir) / "active_version"
 
-    def test_resolve_version_stable_uses_default(self):
-        """Test that 'stable' resolves to default."""
-        manifest = {"default_toolchain": "1.0.0"}
-        result = _resolve_version(manifest, "stable")
-        assert result == "1.0.0"
+            with patch(
+                "lean_explore.cli.data_commands.Config.CACHE_DIRECTORY", cache_dir
+            ):
+                _write_active_version("20260127_103630")
+                assert version_file.exists()
+                assert version_file.read_text() == "20260127_103630"
 
-    def test_resolve_version_stable_case_insensitive(self):
-        """Test that 'STABLE' is case insensitive."""
-        manifest = {"default_toolchain": "1.0.0"}
-        result = _resolve_version(manifest, "STABLE")
-        assert result == "1.0.0"
+    def test_write_active_version_overwrites_existing(self):
+        """Test that active version file is overwritten."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+            version_file = Path(tmpdir) / "active_version"
+            version_file.write_text("old_version")
 
-    def test_resolve_version_specific(self):
-        """Test that specific version is returned as-is."""
-        manifest = {"default_toolchain": "1.0.0"}
-        result = _resolve_version(manifest, "2.0.0")
-        assert result == "2.0.0"
-
-    def test_resolve_version_no_default(self):
-        """Test error when no default and version is None."""
-        manifest = {}
-        with pytest.raises(ValueError, match="No default_toolchain"):
-            _resolve_version(manifest, None)
+            with patch(
+                "lean_explore.cli.data_commands.Config.CACHE_DIRECTORY", cache_dir
+            ):
+                _write_active_version("new_version")
+                assert version_file.read_text() == "new_version"
 
 
-class TestBuildFileRegistry:
-    """Tests for the _build_file_registry function."""
+class TestCleanupOldVersions:
+    """Tests for the _cleanup_old_versions function."""
 
-    def test_build_registry_with_valid_files(self):
-        """Test building registry with valid file entries."""
-        version_info = {
-            "files": [
-                {"remote_name": "file1.gz", "sha256": "abc123", "local_name": "file1"},
-                {"remote_name": "file2.gz", "sha256": "def456", "local_name": "file2"},
-            ]
-        }
-        result = _build_file_registry(version_info)
-        assert result == {
-            "file1.gz": "sha256:abc123",
-            "file2.gz": "sha256:def456",
-        }
+    def test_cleanup_removes_old_versions(self):
+        """Test that old version directories are removed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir)
+            old_version = cache_dir / "old_version"
+            current_version = cache_dir / "current_version"
+            old_version.mkdir()
+            current_version.mkdir()
+            (old_version / "file.txt").touch()
+            (current_version / "file.txt").touch()
 
-    def test_build_registry_skips_incomplete_entries(self):
-        """Test that entries without remote_name or sha256 are skipped."""
-        version_info = {
-            "files": [
-                {"remote_name": "file1.gz", "sha256": "abc123"},
-                {"remote_name": "file2.gz"},  # Missing sha256
-                {"sha256": "def456"},  # Missing remote_name
-            ]
-        }
-        result = _build_file_registry(version_info)
-        assert result == {"file1.gz": "sha256:abc123"}
+            with patch(
+                "lean_explore.cli.data_commands.Config.CACHE_DIRECTORY", cache_dir
+            ):
+                _cleanup_old_versions("current_version")
+                assert not old_version.exists()
+                assert current_version.exists()
 
-    def test_build_registry_empty_files(self):
-        """Test building registry with empty files list."""
-        version_info = {"files": []}
-        result = _build_file_registry(version_info)
-        assert result == {}
-
-    def test_build_registry_no_files_key(self):
-        """Test building registry when files key is missing."""
-        version_info = {}
-        result = _build_file_registry(version_info)
-        assert result == {}
+    def test_cleanup_handles_nonexistent_cache(self):
+        """Test cleanup when cache directory doesn't exist."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nonexistent = Path(tmpdir) / "nonexistent"
+            with patch(
+                "lean_explore.cli.data_commands.Config.CACHE_DIRECTORY", nonexistent
+            ):
+                # Should not raise
+                _cleanup_old_versions("any_version")
 
 
 class TestInstallToolchain:
     """Tests for the _install_toolchain function."""
 
-    def test_install_toolchain_manifest_fetch_fails(self):
-        """Test error when manifest fetch fails."""
+    def test_install_toolchain_version_fetch_fails(self):
+        """Test error when latest version fetch fails."""
         with patch(
-            "lean_explore.cli.data_commands._fetch_manifest", return_value=None
+            "lean_explore.cli.data_commands._fetch_latest_version",
+            side_effect=ValueError("Failed to fetch"),
         ):
-            with pytest.raises(ValueError, match="Failed to fetch manifest"):
+            with pytest.raises(ValueError, match="Failed to fetch"):
                 _install_toolchain()
 
-    def test_install_toolchain_version_not_found(self):
-        """Test error when version is not in manifest."""
-        manifest = {
-            "default_toolchain": "1.0.0",
-            "toolchains": {"1.0.0": {}},
-        }
-        with patch(
-            "lean_explore.cli.data_commands._fetch_manifest", return_value=manifest
-        ):
-            with pytest.raises(ValueError, match="not found"):
-                _install_toolchain("2.0.0")
-
-    def test_install_toolchain_shows_available_versions(self):
-        """Test that error message shows available versions."""
-        manifest = {
-            "default_toolchain": "1.0.0",
-            "toolchains": {"1.0.0": {}, "1.1.0": {}},
-        }
-        with patch(
-            "lean_explore.cli.data_commands._fetch_manifest", return_value=manifest
-        ):
-            with pytest.raises(ValueError) as exc_info:
-                _install_toolchain("2.0.0")
-            assert "1.0.0" in str(exc_info.value) or "Available" in str(exc_info.value)
-
-    @pytest.mark.integration
-    def test_install_toolchain_success(self):
-        """Test successful toolchain installation."""
-        manifest = {
-            "default_toolchain": "1.0.0",
-            "toolchains": {
-                "1.0.0": {
-                    "assets_base_path_r2": "v1",
-                    "files": [
-                        {
-                            "remote_name": "test.gz",
-                            "sha256": "abc123",
-                            "local_name": "test",
-                        }
-                    ],
-                }
-            },
-        }
-
-        mock_pooch = MagicMock()
-        mock_pooch.fetch = MagicMock()
+    def test_install_toolchain_with_explicit_version(self):
+        """Test that explicit version skips latest fetch."""
+        import requests as requests_module
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            manifest_patch = patch(
-                "lean_explore.cli.data_commands._fetch_manifest",
-                return_value=manifest,
-            )
-            pooch_patch = patch("lean_explore.cli.data_commands.pooch.create")
-            config_patch = patch(
-                "lean_explore.cli.data_commands.Config.DATA_DIRECTORY",
-                Path(tmpdir),
-            )
-            with manifest_patch, pooch_patch as mock_create, config_patch:
-                mock_create.return_value = mock_pooch
+            cache_dir = Path(tmpdir) / "cache"
 
-                _install_toolchain("1.0.0")
+            # Mock the download to always fail so we can verify version is used
+            with (
+                patch(
+                    "lean_explore.cli.data_commands.Config.CACHE_DIRECTORY", cache_dir
+                ),
+                patch(
+                    "lean_explore.cli.data_commands._fetch_latest_version"
+                ) as mock_fetch,
+                patch("requests.get") as mock_get,
+            ):
+                mock_response = MagicMock()
+                mock_response.raise_for_status.side_effect = (
+                    requests_module.exceptions.HTTPError("Download fail")
+                )
+                mock_get.return_value = mock_response
 
-                mock_create.assert_called_once()
-                mock_pooch.fetch.assert_called_once()
+                with pytest.raises(ValueError):
+                    _install_toolchain("explicit_version")
+
+                # Should not call fetch latest when version is explicit
+                mock_fetch.assert_not_called()
+
+    @pytest.mark.integration
+    def test_install_toolchain_downloads_all_files(self):
+        """Test that all required files are downloaded."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+
+            downloaded_urls = []
+
+            def mock_get(url, **kwargs):
+                downloaded_urls.append(url)
+                response = MagicMock()
+                response.headers = {"content-length": "100"}
+                response.iter_content = MagicMock(return_value=[b"data"])
+                return response
+
+            with (
+                patch(
+                    "lean_explore.cli.data_commands.Config.CACHE_DIRECTORY", cache_dir
+                ),
+                patch(
+                    "lean_explore.cli.data_commands._fetch_latest_version",
+                    return_value="test_version",
+                ),
+                patch("requests.get", side_effect=mock_get),
+            ):
+                _install_toolchain()
+
+                # Verify key files were requested
+                url_paths = [url.split("/")[-1] for url in downloaded_urls]
+                assert "lean_explore.db" in url_paths
+                assert "informalization_faiss.index" in url_paths
+                assert "bm25_ids_map.json" in url_paths
 
 
 class TestFetchCommand:
@@ -240,19 +230,15 @@ class TestFetchCommand:
 
     def test_fetch_command_calls_install(self):
         """Test that fetch command calls _install_toolchain."""
-        with patch(
-            "lean_explore.cli.data_commands._install_toolchain"
-        ) as mock_install:
+        with patch("lean_explore.cli.data_commands._install_toolchain") as mock_install:
             runner.invoke(app, ["fetch"])
             mock_install.assert_called_once_with(None)
 
     def test_fetch_command_with_version(self):
         """Test fetch command with specific version."""
-        with patch(
-            "lean_explore.cli.data_commands._install_toolchain"
-        ) as mock_install:
-            runner.invoke(app, ["fetch", "--version", "1.0.0"])
-            mock_install.assert_called_once_with("1.0.0")
+        with patch("lean_explore.cli.data_commands._install_toolchain") as mock_install:
+            runner.invoke(app, ["fetch", "--version", "20260127_103630"])
+            mock_install.assert_called_once_with("20260127_103630")
 
 
 class TestCleanCommand:
@@ -298,6 +284,21 @@ class TestCleanCommand:
             ):
                 result = runner.invoke(app, ["clean"], input="y\n")
                 assert not cache_dir.exists()
+                assert "cleared" in result.output.lower()
+
+    def test_clean_command_removes_version_file(self):
+        """Test that clean also removes the active_version file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+            cache_dir.mkdir()
+            version_file = Path(tmpdir) / "active_version"
+            version_file.write_text("some_version")
+
+            with patch(
+                "lean_explore.cli.data_commands.Config.CACHE_DIRECTORY", cache_dir
+            ):
+                result = runner.invoke(app, ["clean"], input="y\n")
+                assert not version_file.exists()
                 assert "cleared" in result.output.lower()
 
 
