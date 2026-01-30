@@ -309,11 +309,10 @@ def main(
     Extraction creates timestamped directories (YYYYMMDD_HHMMSS format).
     Subsequent steps (informalize, embeddings, index) use the latest extraction.
     """
-    # Determine if any pipeline step flags were explicitly set.
-    # --run-doc-gen4 and --fresh are pre-step modifiers that should not
-    # suppress the default "run all steps" behavior.
-    any_flag_explicitly_set = any(
-        flag is not None for flag in [parse_docs, informalize, embeddings, index]
+    # Determine if any flags were explicitly set (including --run-doc-gen4)
+    step_flags = [run_doc_gen4, parse_docs, informalize, embeddings, index]
+    any_flag_explicitly_set = run_doc_gen4 or any(
+        flag is not None for flag in step_flags[1:]
     )
 
     # If no flags were explicitly set, run all pipeline steps by default
