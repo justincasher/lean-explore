@@ -54,6 +54,54 @@ class SearchResponseDict(TypedDict, total=False):
     processing_time_ms: int | None
 
 
+class SourceCodeResultDict(TypedDict):
+    """Result containing declaration id, name, and source code."""
+
+    id: int
+    name: str
+    source_text: str
+
+
+class SourceLinkResultDict(TypedDict):
+    """Result containing declaration id, name, and GitHub source link."""
+
+    id: int
+    name: str
+    source_link: str
+
+
+class DocstringResultDict(TypedDict):
+    """Result containing declaration id, name, and docstring."""
+
+    id: int
+    name: str
+    docstring: str | None
+
+
+class DescriptionResultDict(TypedDict):
+    """Result containing declaration id, name, and informalization."""
+
+    id: int
+    name: str
+    informalization: str | None
+
+
+class ModuleResultDict(TypedDict):
+    """Result containing declaration id, name, and module path."""
+
+    id: int
+    name: str
+    module: str
+
+
+class DependenciesResultDict(TypedDict):
+    """Result containing declaration id, name, and dependencies."""
+
+    id: int
+    name: str
+    dependencies: str | None
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -112,6 +160,33 @@ async def _execute_backend_search(
     )
 
 
+async def _execute_backend_get_by_id(
+    backend: BackendServiceType,
+    declaration_id: int,
+) -> SearchResult | None:
+    """Execute get_by_id on the backend, handling both async and sync backends.
+
+    Args:
+        backend: The backend service (ApiClient or Service).
+        declaration_id: The numeric id of the declaration to retrieve.
+
+    Returns:
+        The SearchResult from the backend, or None if not found.
+
+    Raises:
+        RuntimeError: If the backend does not support get_by_id.
+    """
+    if not hasattr(backend, "get_by_id"):
+        logger.error("Backend service does not have a 'get_by_id' method.")
+        raise RuntimeError(
+            "Get by ID functionality not available on configured backend."
+        )
+
+    if asyncio.iscoroutinefunction(backend.get_by_id):
+        return await backend.get_by_id(declaration_id=declaration_id)
+    return backend.get_by_id(declaration_id=declaration_id)
+
+
 @mcp_app.tool()
 async def search(
     ctx: MCPContext,
@@ -120,11 +195,29 @@ async def search(
     rerank_top: int | None = 50,
     packages: list[str] | None = None,
 ) -> SearchResponseDict:
-    """Searches Lean declarations by a query string.
+    """Search Lean 4 declarations and return full results including source code.
+
+    Accepts two kinds of queries:
+      - By name: a full or partial Lean declaration name, e.g., "List.map",
+        "Nat.Prime", "CategoryTheory.Functor.map".
+      - By meaning: an informal natural language description, e.g.,
+        "continuous function on a compact set", "sum of a geometric series",
+        "a group homomorphism preserving multiplication".
+
+    The search engine handles both styles simultaneously via hybrid retrieval
+    (lexical name matching + semantic similarity), so you do not need to
+    specify which kind of query you are making.
+
+    Returns full results including source code, module, dependencies, and
+    informalization for every hit. If you only need names and short
+    descriptions, prefer search_summary to save tokens, then use the
+    per-field tools (get_source_code, get_docstring, get_description,
+    get_module, get_dependencies) for the entries you care about.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
-        query: A search query string, e.g., "continuous function".
+        query: A Lean declaration name (e.g., "List.filter") or an informal
+            natural language description (e.g., "prime number divisibility").
         limit: The maximum number of search results to return. Defaults to 10.
         rerank_top: Number of candidates to rerank with cross-encoder. Set to 0 or
             None to skip reranking. Defaults to 50. Only used with local backend.
@@ -155,15 +248,29 @@ async def search_summary(
     rerank_top: int | None = 50,
     packages: list[str] | None = None,
 ) -> SearchSummaryResponseDict:
-    """Searches Lean declarations and returns concise results.
+    """Search Lean 4 declarations and return concise results (recommended first step).
 
-    Returns slim results (id, name, short description) to minimize token usage.
-    Use get_by_id to retrieve full details for specific declarations, or
-    search to get all fields upfront.
+    This is the preferred starting point for search. Returns only id, name,
+    and a short natural language description for each hit, keeping token
+    usage low. After reviewing these summaries, use the per-field tools
+    (get_source_code, get_docstring, get_description, get_module,
+    get_dependencies) for the entries you need details on.
+
+    Accepts two kinds of queries:
+      - By name: a full or partial Lean declaration name, e.g., "List.map",
+        "Nat.Prime", "CategoryTheory.Functor.map".
+      - By meaning: an informal natural language description, e.g.,
+        "continuous function on a compact set", "sum of a geometric series",
+        "a group homomorphism preserving multiplication".
+
+    The search engine handles both styles simultaneously via hybrid retrieval
+    (lexical name matching + semantic similarity), so you do not need to
+    specify which kind of query you are making.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
-        query: A search query string, e.g., "continuous function".
+        query: A Lean declaration name (e.g., "List.filter") or an informal
+            natural language description (e.g., "prime number divisibility").
         limit: The maximum number of search results to return. Defaults to 10.
         rerank_top: Number of candidates to rerank with cross-encoder. Set to 0 or
             None to skip reranking. Defaults to 50. Only used with local backend.
@@ -203,38 +310,219 @@ async def search_summary(
 
 
 @mcp_app.tool()
-async def get_by_id(
+async def get_source_code(
     ctx: MCPContext,
     declaration_id: int,
-) -> SearchResultDict | None:
-    """Retrieves a specific declaration by its unique identifier.
+) -> SourceCodeResultDict | None:
+    """Retrieve the Lean source code for a declaration by id.
 
-    Returns the full declaration including source code, dependencies, module
-    info, and informalization. Use this to expand results from the search tool.
+    Returns the declaration name and its Lean 4 source code. Use this after
+    calling search_summary to inspect the actual implementation.
+
+    The id values come from the search or search_summary result lists.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
-        declaration_id: The unique integer identifier of the declaration.
+        declaration_id: The numeric id from a search or search_summary result.
 
     Returns:
-        A dictionary representing the SearchResult, or None if not found.
+        A dictionary with id, name, and source_text, or None if the id
+        does not exist.
     """
     backend = await _get_backend_from_context(ctx)
-    logger.info(f"MCP Tool 'get_by_id' called for declaration_id: {declaration_id}")
+    logger.info(
+        f"MCP Tool 'get_source_code' called for declaration_id: {declaration_id}"
+    )
 
-    if not hasattr(backend, "get_by_id"):
-        logger.error("Backend service does not have a 'get_by_id' method.")
-        raise RuntimeError(
-            "Get by ID functionality not available on configured backend."
-        )
+    result = await _execute_backend_get_by_id(backend, declaration_id)
+    if result is None:
+        return None
 
-    # Call backend get_by_id (handle both async and sync)
-    if asyncio.iscoroutinefunction(backend.get_by_id):
-        result: SearchResult | None = await backend.get_by_id(
-            declaration_id=declaration_id
-        )
-    else:
-        result: SearchResult | None = backend.get_by_id(declaration_id=declaration_id)
+    return SourceCodeResultDict(
+        id=result.id,
+        name=result.name,
+        source_text=result.source_text,
+    )
 
-    # Return as dict for MCP, or None
-    return result.model_dump(exclude_none=True) if result else None
+
+@mcp_app.tool()
+async def get_source_link(
+    ctx: MCPContext,
+    declaration_id: int,
+) -> SourceLinkResultDict | None:
+    """Retrieve the GitHub source link for a declaration by id.
+
+    Returns the declaration name and a URL to the source code on GitHub.
+    Use this when you need to reference or link to the original source.
+
+    The id values come from the search or search_summary result lists.
+
+    Args:
+        ctx: The MCP context, providing access to the backend service.
+        declaration_id: The numeric id from a search or search_summary result.
+
+    Returns:
+        A dictionary with id, name, and source_link, or None if the id
+        does not exist.
+    """
+    backend = await _get_backend_from_context(ctx)
+    logger.info(
+        f"MCP Tool 'get_source_link' called for declaration_id: {declaration_id}"
+    )
+
+    result = await _execute_backend_get_by_id(backend, declaration_id)
+    if result is None:
+        return None
+
+    return SourceLinkResultDict(
+        id=result.id,
+        name=result.name,
+        source_link=result.source_link,
+    )
+
+
+@mcp_app.tool()
+async def get_docstring(
+    ctx: MCPContext,
+    declaration_id: int,
+) -> DocstringResultDict | None:
+    """Retrieve the docstring for a declaration by id.
+
+    Returns the declaration name and its documentation string from the Lean
+    source code. Use this to check what documentation exists without
+    fetching the full source code.
+
+    The id values come from the search or search_summary result lists.
+
+    Args:
+        ctx: The MCP context, providing access to the backend service.
+        declaration_id: The numeric id from a search or search_summary result.
+
+    Returns:
+        A dictionary with id, name, and docstring, or None if the id
+        does not exist.
+    """
+    backend = await _get_backend_from_context(ctx)
+    logger.info(
+        f"MCP Tool 'get_docstring' called for declaration_id: {declaration_id}"
+    )
+
+    result = await _execute_backend_get_by_id(backend, declaration_id)
+    if result is None:
+        return None
+
+    return DocstringResultDict(
+        id=result.id,
+        name=result.name,
+        docstring=result.docstring,
+    )
+
+
+@mcp_app.tool()
+async def get_description(
+    ctx: MCPContext,
+    declaration_id: int,
+) -> DescriptionResultDict | None:
+    """Retrieve the natural language description for a declaration by id.
+
+    Returns the declaration name and its informalization, an AI-generated
+    plain-English explanation of what the declaration states or does.
+
+    The id values come from the search or search_summary result lists.
+
+    Args:
+        ctx: The MCP context, providing access to the backend service.
+        declaration_id: The numeric id from a search or search_summary result.
+
+    Returns:
+        A dictionary with id, name, and informalization, or None if the id
+        does not exist.
+    """
+    backend = await _get_backend_from_context(ctx)
+    logger.info(
+        f"MCP Tool 'get_description' called for declaration_id: {declaration_id}"
+    )
+
+    result = await _execute_backend_get_by_id(backend, declaration_id)
+    if result is None:
+        return None
+
+    return DescriptionResultDict(
+        id=result.id,
+        name=result.name,
+        informalization=result.informalization,
+    )
+
+
+@mcp_app.tool()
+async def get_module(
+    ctx: MCPContext,
+    declaration_id: int,
+) -> ModuleResultDict | None:
+    """Retrieve the module path for a declaration by id.
+
+    Returns the declaration name and the Lean module it belongs to
+    (e.g., 'Mathlib.Data.List.Basic'). Use this to find where a
+    declaration lives in the package structure.
+
+    The id values come from the search or search_summary result lists.
+
+    Args:
+        ctx: The MCP context, providing access to the backend service.
+        declaration_id: The numeric id from a search or search_summary result.
+
+    Returns:
+        A dictionary with id, name, and module, or None if the id does
+        not exist.
+    """
+    backend = await _get_backend_from_context(ctx)
+    logger.info(
+        f"MCP Tool 'get_module' called for declaration_id: {declaration_id}"
+    )
+
+    result = await _execute_backend_get_by_id(backend, declaration_id)
+    if result is None:
+        return None
+
+    return ModuleResultDict(
+        id=result.id,
+        name=result.name,
+        module=result.module,
+    )
+
+
+@mcp_app.tool()
+async def get_dependencies(
+    ctx: MCPContext,
+    declaration_id: int,
+) -> DependenciesResultDict | None:
+    """Retrieve the dependencies for a declaration by id.
+
+    Returns the declaration name and a JSON array of other declaration
+    names that this declaration depends on. Use this to understand what
+    a declaration builds upon.
+
+    The id values come from the search or search_summary result lists.
+
+    Args:
+        ctx: The MCP context, providing access to the backend service.
+        declaration_id: The numeric id from a search or search_summary result.
+
+    Returns:
+        A dictionary with id, name, and dependencies, or None if the id
+        does not exist.
+    """
+    backend = await _get_backend_from_context(ctx)
+    logger.info(
+        f"MCP Tool 'get_dependencies' called for declaration_id: {declaration_id}"
+    )
+
+    result = await _execute_backend_get_by_id(backend, declaration_id)
+    if result is None:
+        return None
+
+    return DependenciesResultDict(
+        id=result.id,
+        name=result.name,
+        dependencies=result.dependencies,
+    )

@@ -69,7 +69,24 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 mcp_app = FastMCP(
     name="LeanExploreMCPServer",
     instructions=(
-        "MCP Server for Lean Explore, providing tools to search Lean declarations."
+        "MCP Server for searching Lean 4 mathematical declarations (theorems, "
+        "definitions, lemmas, instances, etc.) from Mathlib and other Lean "
+        "packages.\n\n"
+        "The search engine is hybrid: it matches by declaration name (e.g., "
+        "'List.map', 'Nat.add') AND by informal natural language meaning (e.g., "
+        "'a continuous function on a compact set', 'prime number divisibility'). "
+        "You can use either style of query.\n\n"
+        "Recommended workflow:\n"
+        "1. Use search_summary to browse results (low token cost).\n"
+        "2. Use per-field tools to fetch only what you need:\n"
+        "   - get_source_code: Lean source code\n"
+        "   - get_source_link: GitHub link to source\n"
+        "   - get_docstring: documentation string\n"
+        "   - get_description: natural language description\n"
+        "   - get_module: module path in the package\n"
+        "   - get_dependencies: declarations this depends on\n"
+        "3. Use search only when you need full details for all results "
+        "at once."
     ),
     lifespan=app_lifespan,
 )
