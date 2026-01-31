@@ -28,7 +28,8 @@ class SearchResultSummary(BaseModel):
     """A slim search result containing only identification and description.
 
     Used by the MCP search tool to return concise results that minimize
-    token usage. Consumers can use the id to fetch full details via get_by_id.
+    token usage. Consumers can use the id to fetch specific fields via the
+    per-field tools (get_source_code, get_docstring, etc.).
     """
 
     id: int
