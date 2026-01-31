@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from lean_explore.extract.github import extract_lean_version
@@ -80,6 +81,56 @@ def _setup_workspace(package_config: PackageConfig) -> tuple[str, str]:
     return lean_toolchain, git_ref
 
 
+def _run_lake_update_with_retry(
+    workspace_path: Path,
+    package_name: str,
+    env: dict[str, str],
+    verbose: bool = False,
+    max_retries: int = 3,
+    base_delay: float = 30.0,
+) -> None:
+    """Run ``lake update`` with retries for transient network failures.
+
+    Large repositories like mathlib4 require cloning several gigabytes of git
+    data. Transient network issues (DNS blips, connection resets, GitHub
+    throttling) can cause the clone to fail with git exit code 128. Retrying
+    with exponential backoff handles these cases.
+
+    Args:
+        workspace_path: Path to the Lake workspace directory.
+        package_name: Name of the package (for log messages).
+        env: Environment variables to pass to the subprocess.
+        verbose: Log stdout from ``lake update``.
+        max_retries: Maximum number of retry attempts after the initial try.
+        base_delay: Seconds to wait before the first retry. Doubles each retry.
+    """
+    for attempt in range(1, max_retries + 2):
+        logger.info(f"[{package_name}] Running lake update (attempt {attempt})...")
+        result = subprocess.run(
+            ["lake", "update"],
+            cwd=workspace_path,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if verbose and result.stdout:
+            logger.info(result.stdout)
+        if result.returncode == 0:
+            return
+
+        if attempt <= max_retries:
+            delay = base_delay * (2 ** (attempt - 1))
+            logger.warning(
+                f"[{package_name}] lake update failed (attempt {attempt}), "
+                f"retrying in {delay:.0f}s..."
+            )
+            logger.warning(f"[{package_name}] stderr: {result.stderr.strip()}")
+            time.sleep(delay)
+        else:
+            logger.error(result.stderr)
+            raise RuntimeError(f"lake update failed for {package_name}")
+
+
 def _run_lake_for_package(package_name: str, verbose: bool = False) -> None:
     """Run lake update, cache get, and doc-gen4 for a package."""
     workspace_path = Path("lean") / package_name
@@ -87,19 +138,7 @@ def _run_lake_for_package(package_name: str, verbose: bool = False) -> None:
     env = os.environ.copy()
     env["MATHLIB_NO_CACHE_ON_UPDATE"] = "1"
 
-    logger.info(f"[{package_name}] Running lake update...")
-    result = subprocess.run(
-        ["lake", "update"],
-        cwd=workspace_path,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    if verbose and result.stdout:
-        logger.info(result.stdout)
-    if result.returncode != 0:
-        logger.error(result.stderr)
-        raise RuntimeError(f"lake update failed for {package_name}")
+    _run_lake_update_with_retry(workspace_path, package_name, env, verbose)
 
     # Fetch mathlib cache for packages that depend on mathlib
     if "mathlib" in package_config.depends_on or package_name == "mathlib":
