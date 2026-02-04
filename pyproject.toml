@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lean-explore"
-version = "1.2.0"
+version = "1.2.1"
 authors = [
     { name = "Justin Asher", email = "justinchadwickasher@gmail.com" },
 ]
@@ -66,10 +66,15 @@ Repository = "https://github.com/justincasher/lean-explore"
 lean-explore = "lean_explore.cli.main:app"
 
 [project.optional-dependencies]
+local = [
+    "sentence-transformers>=2.2.0",
+    "torch>=2.0.0",
+]
+
 extract = [
     "sentence-transformers>=2.2.0",
-    "networkx>=3.0",
     "torch>=2.0.0",
+    "networkx>=3.0",
 ]
 
 dev = [

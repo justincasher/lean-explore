@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 N/A
 
+## [1.2.1] - 2026-02-04
+
+### Added
+- `[local]` optional dependency group (`pip install lean-explore[local]`) for running the
+  local search backend, which requires `torch` and `sentence-transformers`.
+- Installation section in README documenting the different install options.
+
+## [1.2.0] - 2026-02-02
+
+### Added
+- Per-field MCP tools (`get_source_code`, `get_source_link`, `get_docstring`,
+  `get_description`, `get_module`, `get_dependencies`) replacing the monolithic `get_by_id` tool.
+- Improved MCP tool docstrings with recommended workflow guidance.
+- Retry logic for `lake update` to handle transient network failures.
+- Lean package workspaces tracked in version control.
+
+### Removed
+- `get_by_id` MCP tool (replaced by per-field tools).
+
 ## [1.1.1] - 2026-01-29
 
 ### Changed

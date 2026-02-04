@@ -25,6 +25,27 @@ A search engine for Lean 4 declarations. This project provides tools and resourc
 
 **For full documentation, please visit: [https://www.leanexplore.com/docs](https://www.leanexplore.com/docs)**
 
+## Installation
+
+The base package connects to the remote API and does not require heavy ML dependencies:
+
+```bash
+pip install lean-explore
+```
+
+To run the **local** search backend (which uses on-device embedding and reranking models), install the extra ML dependencies:
+
+```bash
+pip install lean-explore[local]
+```
+
+Then fetch the data files and start the local MCP server:
+
+```bash
+lean-explore data fetch
+lean-explore mcp serve --backend local
+```
+
 The current indexed projects include:
 
 * Batteries
