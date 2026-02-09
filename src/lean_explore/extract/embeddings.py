@@ -300,6 +300,7 @@ async def generate_embeddings(
     batch_size: int = 128,
     limit: int | None = None,
     max_seq_length: int = 512,
+    embedding_server_url: str | None = None,
 ) -> None:
     """Generate embeddings for all declarations.
 
@@ -310,6 +311,10 @@ async def generate_embeddings(
         limit: Maximum number of declarations to process (None for all)
         max_seq_length: Maximum sequence length for tokenization (default 512).
             Lower values reduce memory usage but may truncate long texts.
+        embedding_server_url: URL of a running backend server to delegate
+            embedding generation to. When set, uses RemoteEmbeddingClient
+            instead of loading the model locally, avoiding GPU memory
+            conflicts with a co-located backend process.
     """
     # Discover and load embedding caches from all existing databases
     logger.info("Discovering existing databases for embedding cache...")
@@ -340,8 +345,15 @@ async def generate_embeddings(
 
         # Phase 2: Generate embeddings for remaining declarations
         logger.info("Phase 2: Generating embeddings for remaining declarations...")
-        client = EmbeddingClient(model_name=model_name, max_length=max_seq_length)
-        logger.info(f"Using {client.model_name} on {client.device}")
+        if embedding_server_url:
+            from lean_explore.util.remote_embedding_client import (
+                RemoteEmbeddingClient,
+            )
+
+            client = RemoteEmbeddingClient(server_url=embedding_server_url)
+        else:
+            client = EmbeddingClient(model_name=model_name, max_length=max_seq_length)
+        logger.info(f"Using {client.model_name}")
 
         total = len(remaining)
         total_embeddings = 0
