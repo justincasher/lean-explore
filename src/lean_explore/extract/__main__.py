@@ -83,7 +83,6 @@ async def _run_embeddings_step(
     batch_size: int,
     limit: int | None,
     max_seq_length: int,
-    embedding_server_url: str | None = None,
 ) -> None:
     """Generate embeddings for all declaration fields."""
     from lean_explore.extract.embeddings import generate_embeddings
@@ -95,7 +94,6 @@ async def _run_embeddings_step(
         batch_size=batch_size,
         limit=limit,
         max_seq_length=max_seq_length,
-        embedding_server_url=embedding_server_url,
     )
     logger.info("Embedding generation complete")
 
@@ -132,7 +130,6 @@ async def run_pipeline(
     embedding_batch_size: int = 250,
     embedding_limit: int | None = None,
     embedding_max_seq_length: int = 512,
-    embedding_server_url: str | None = None,
     verbose: bool = False,
 ) -> None:
     """Run the Lean declaration extraction and enrichment pipeline.
@@ -154,8 +151,6 @@ async def run_pipeline(
         embedding_batch_size: Batch size for embedding generation
         embedding_limit: Limit number of declarations for embeddings
         embedding_max_seq_length: Max sequence length for embeddings (lower=less mem)
-        embedding_server_url: URL of a running backend to delegate embedding
-            generation to, avoiding local GPU memory usage.
         verbose: Enable verbose logging
     """
     setup_logging(verbose)
@@ -210,7 +205,6 @@ async def run_pipeline(
                 embedding_batch_size,
                 embedding_limit,
                 embedding_max_seq_length,
-                embedding_server_url=embedding_server_url,
             )
 
         if index:
@@ -293,11 +287,6 @@ async def run_pipeline(
     default=512,
     help="Max sequence length for embeddings (lower = less memory, default 512)",
 )
-@click.option(
-    "--embedding-server-url",
-    default=None,
-    help="URL of a running backend server to use for embedding generation (e.g. http://localhost:5001)",
-)
 @click.option("--verbose", is_flag=True, help="Enable verbose logging")
 def main(
     run_doc_gen4: bool,
@@ -313,7 +302,6 @@ def main(
     embedding_batch_size: int,
     embedding_limit: int | None,
     embedding_max_seq_length: int,
-    embedding_server_url: str | None,
     verbose: bool,
 ) -> None:
     """Run the Lean declaration extraction and enrichment pipeline.
@@ -371,7 +359,6 @@ def main(
             embedding_batch_size=embedding_batch_size,
             embedding_limit=embedding_limit,
             embedding_max_seq_length=embedding_max_seq_length,
-            embedding_server_url=embedding_server_url,
             verbose=verbose,
         )
     )
