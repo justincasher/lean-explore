@@ -78,7 +78,7 @@ class EmbeddingClient:
             encode_kwargs = {
                 "show_progress_bar": False,
                 "convert_to_numpy": True,
-                "batch_size": 256,  # Larger batches for GPU utilization
+                "batch_size": 32,
             }
             if is_query:
                 encode_kwargs["prompt_name"] = "query"
