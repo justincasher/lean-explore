@@ -60,6 +60,28 @@ def _get_timestamped_directories(data_directory: pathlib.Path) -> list[pathlib.P
     return timestamped_directories
 
 
+_REQUIRED_EXTRACTION_FILES = [
+    "lean_explore.db",
+    "informalization_faiss.index",
+    "informalization_faiss_ids_map.json",
+    "bm25_ids_map.json",
+    "bm25_name_raw",
+    "bm25_name_spaced",
+]
+
+
+def _is_complete_extraction(directory: pathlib.Path) -> bool:
+    """Check whether an extraction directory contains all required files.
+
+    Args:
+        directory: Path to a timestamped extraction directory.
+
+    Returns:
+        True if all required files and directories are present.
+    """
+    return all((directory / name).exists() for name in _REQUIRED_EXTRACTION_FILES)
+
+
 def _resolve_active_data_path(
     data_directory: pathlib.Path, active_version: str
 ) -> pathlib.Path:
@@ -67,17 +89,20 @@ def _resolve_active_data_path(
 
     Priority:
     1. DATA_DIRECTORY if it contains lean_explore.db directly
-    2. Most recent timestamped extraction directory (YYYYMMDD_HHMMSS)
+    2. Most recent complete timestamped extraction directory (YYYYMMDD_HHMMSS)
     3. DATA_DIRECTORY / ACTIVE_VERSION as fallback
+
+    Only directories that contain all required extraction files are considered
+    complete. Incomplete extractions (e.g. from a failed pipeline run) are
+    skipped.
     """
     if (data_directory / "lean_explore.db").exists():
         return data_directory
 
     timestamped_dirs = _get_timestamped_directories(data_directory)
-    if timestamped_dirs:
-        latest = timestamped_dirs[0]
-        if (latest / "lean_explore.db").exists():
-            return latest
+    for directory in timestamped_dirs:
+        if _is_complete_extraction(directory):
+            return directory
 
     return data_directory / active_version
 
