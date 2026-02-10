@@ -572,7 +572,7 @@ async def informalize_declarations(
     *,
     model: str = "google/gemini-3-flash-preview",
     commit_batch_size: int = 1000,
-    max_concurrent: int = 100,
+    max_concurrent: int = 10,
     limit: int | None = None,
 ) -> None:
     """Generate informalizations for declarations missing them.

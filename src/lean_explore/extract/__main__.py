@@ -261,7 +261,7 @@ async def run_pipeline(
 @click.option(
     "--informalize-max-concurrent",
     type=int,
-    default=100,
+    default=10,
     help="Maximum concurrent informalization requests",
 )
 @click.option(
