@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import TypedDict
+from typing_extensions import TypedDict
 
 from mcp.server.fastmcp import Context as MCPContext
 
