@@ -228,7 +228,18 @@ async def run_doc_gen4(
         logger.info("\n%s\nPackage: %s\n%s", "=" * 50, package_name, "=" * 50)
 
         if fresh:
-            _clear_workspace_cache(workspace_path)
+            # Packages using doc-gen4 >= v4.29 output to a SQLite database
+            # (api-docs.db) which handles incremental updates correctly.
+            # Only packages using the legacy BMP format need a full cache
+            # clear to avoid stale output files.
+            api_docs_db = workspace_path / ".lake" / "build" / "api-docs.db"
+            if api_docs_db.exists():
+                logger.info(
+                    f"[{package_name}] Skipping cache clear "
+                    f"(api-docs.db handles incremental updates)"
+                )
+            else:
+                _clear_workspace_cache(workspace_path)
 
         if setup:
             toolchain, ref = _setup_workspace(config)
