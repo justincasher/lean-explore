@@ -1,12 +1,17 @@
 """Parser for Lean doc-gen4 output files.
 
-This module parses doc-gen4 JSON data and extracts Lean source code
-to produce Declaration objects ready for database insertion.
+This module parses doc-gen4 output and extracts Lean source code to produce
+Declaration objects ready for database insertion.
+
+Supports two doc-gen4 output formats:
+- SQLite database (api-docs.db): Used by doc-gen4 >= v4.29.0-rc1
+- BMP JSON files (.bmp): Used by doc-gen4 < v4.29.0-rc1
 """
 
 import json
 import logging
 import re
+import sqlite3
 from pathlib import Path
 
 from rich.progress import (
@@ -292,6 +297,176 @@ def _extract_source_text(
     )
 
 
+def _construct_source_link(
+    module_source_url: str | None,
+    module_name: str,
+    start_line: int,
+    end_line: int,
+) -> str | None:
+    """Construct a GitHub source link from module URL and line range.
+
+    Args:
+        module_source_url: GitHub URL to the module file from api-docs.db.
+        module_name: Fully qualified module name (e.g., "Mathlib.Algebra.Group").
+        start_line: Start line number in the source file.
+        end_line: End line number in the source file.
+
+    Returns:
+        GitHub URL with line range fragment, or None if no source URL exists.
+    """
+    if not module_source_url:
+        return None
+    return f"{module_source_url}#L{start_line}-L{end_line}"
+
+
+def _parse_declarations_from_sqlite(
+    database_path: Path,
+    lean_root: Path,
+    package_cache: dict[str, Path],
+    allowed_module_prefixes: list[str],
+) -> list[Declaration]:
+    """Parse declarations from a doc-gen4 SQLite database (api-docs.db).
+
+    Doc-gen4 >= v4.29.0-rc1 outputs declaration data to a SQLite database
+    instead of individual BMP JSON files. This function reads that database
+    and produces the same Declaration objects as the BMP parser.
+
+    Args:
+        database_path: Path to the api-docs.db SQLite database.
+        lean_root: Root directory of the Lean project.
+        package_cache: Dictionary mapping package names to their directories.
+        allowed_module_prefixes: Module prefixes to extract (e.g., ["Mathlib"]).
+
+    Returns:
+        List of parsed Declaration objects.
+    """
+    declarations = []
+
+    connection = sqlite3.connect(str(database_path))
+    connection.row_factory = sqlite3.Row
+
+    try:
+        # Query all declarations with their source ranges and docstrings
+        query = """
+            SELECT
+                n.module_name,
+                n.position,
+                n.kind,
+                n.name,
+                r.start_line,
+                r.end_line,
+                d.text AS docstring,
+                m.source_url
+            FROM name_info n
+            JOIN declaration_ranges r
+                ON n.module_name = r.module_name AND n.position = r.position
+            LEFT JOIN declaration_markdown_docstrings d
+                ON n.module_name = d.module_name AND n.position = d.position
+            JOIN modules m
+                ON n.module_name = m.name
+            ORDER BY n.module_name, n.position
+        """
+        rows = connection.execute(query).fetchall()
+
+        logger.info(
+            f"Found {len(rows)} declarations in api-docs.db"
+        )
+
+        skipped_no_source = 0
+        skipped_prefix = 0
+        skipped_constructor = 0
+        source_errors = 0
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+        ) as progress:
+            task = progress.add_task(
+                "[cyan]Parsing api-docs.db...", total=len(rows)
+            )
+
+            for row in rows:
+                module_name = row["module_name"]
+                declaration_name = row["name"]
+
+                # Filter by module prefix
+                matches_prefix = any(
+                    module_name == prefix or module_name.startswith(prefix + ".")
+                    for prefix in allowed_module_prefixes
+                )
+                if not matches_prefix:
+                    skipped_prefix += 1
+                    progress.update(task, advance=1)
+                    continue
+
+                # Skip auto-generated .mk constructors
+                if declaration_name.endswith(".mk"):
+                    skipped_constructor += 1
+                    progress.update(task, advance=1)
+                    continue
+
+                # Skip internal/auto-generated names
+                kind = row["kind"]
+                if kind == "constructor":
+                    progress.update(task, advance=1)
+                    continue
+
+                source_url = row["source_url"]
+                start_line = row["start_line"]
+                end_line = row["end_line"]
+
+                source_link = _construct_source_link(
+                    source_url, module_name, start_line, end_line
+                )
+                if not source_link:
+                    skipped_no_source += 1
+                    progress.update(task, advance=1)
+                    continue
+
+                # Extract source text from local files
+                try:
+                    source_text = _extract_source_text(
+                        source_link, lean_root, package_cache
+                    )
+                except (FileNotFoundError, ValueError) as error:
+                    source_errors += 1
+                    if source_errors <= 10:
+                        logger.debug(
+                            f"Could not extract source for "
+                            f"{declaration_name}: {error}"
+                        )
+                    progress.update(task, advance=1)
+                    continue
+
+                declarations.append(
+                    Declaration(
+                        name=declaration_name,
+                        module=module_name,
+                        docstring=row["docstring"],
+                        source_text=source_text,
+                        source_link=source_link,
+                        dependencies=None,
+                    )
+                )
+
+                progress.update(task, advance=1)
+
+        if skipped_no_source > 0:
+            logger.info("Skipped %d declarations without source URL", skipped_no_source)
+        if source_errors > 0:
+            logger.warning(
+                f"Could not extract source text for {source_errors} declarations"
+            )
+
+    finally:
+        connection.close()
+
+    return declarations
+
+
 def _parse_declarations_from_files(
     bmp_files: list[Path],
     lean_root: Path,
@@ -428,12 +603,36 @@ async def _insert_declarations_batch(
     return inserted_count
 
 
+def _detect_docgen_format(workspace_path: Path) -> str:
+    """Detect which doc-gen4 output format a workspace uses.
+
+    Doc-gen4 >= v4.29.0-rc1 writes to a SQLite database (api-docs.db).
+    Earlier versions write individual BMP JSON files to doc-data/.
+
+    Args:
+        workspace_path: Path to the package workspace (e.g., lean/mathlib).
+
+    Returns:
+        "sqlite" if api-docs.db exists, "bmp" if BMP files exist, "none" otherwise.
+    """
+    api_docs_db = workspace_path / ".lake" / "build" / "api-docs.db"
+    if api_docs_db.exists():
+        return "sqlite"
+
+    doc_data_dir = workspace_path / ".lake" / "build" / "doc-data"
+    if doc_data_dir.exists():
+        bmp_files = list(doc_data_dir.glob("**/*.bmp"))
+        if bmp_files:
+            return "bmp"
+
+    return "none"
+
+
 async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> None:
     """Extract all declarations from doc-gen4 data and load into database.
 
-    Looks for BMP files in each package's .lake/build/doc-data directory.
-    Extracts only declarations matching the package's configured module_prefixes,
-    ensuring each package's declarations come from its own workspace.
+    Automatically detects whether each package uses the newer SQLite format
+    (api-docs.db from doc-gen4 >= v4.29.0-rc1) or the legacy BMP JSON format.
 
     Args:
         engine: SQLAlchemy async engine for database connection.
@@ -445,21 +644,13 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
     lean_root = Path("lean")
     all_declarations = []
 
-    # Process each workspace separately with its own package cache
     for package_name in get_extraction_order():
         package_config = PACKAGE_REGISTRY[package_name]
-        doc_data_dir = lean_root / package_name / ".lake" / "build" / "doc-data"
+        workspace_path = lean_root / package_name
+        docgen_format = _detect_docgen_format(workspace_path)
 
-        if not doc_data_dir.exists():
-            logger.warning(
-                "No doc-data directory for %s: %s", package_name, doc_data_dir
-            )
-            continue
-
-        bmp_files = sorted(doc_data_dir.glob("**/*.bmp"))
-        logger.info("Found %d BMP files in %s", len(bmp_files), package_name)
-
-        if not bmp_files:
+        if docgen_format == "none":
+            logger.warning("No doc-gen4 output found for %s", package_name)
             continue
 
         # Build workspace-specific package cache to avoid version mismatches
@@ -469,9 +660,29 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
             package_name, len(package_cache),
         )
 
-        declarations = _parse_declarations_from_files(
-            bmp_files, lean_root, package_cache, package_config.module_prefixes
-        )
+        if docgen_format == "sqlite":
+            api_docs_path = workspace_path / ".lake" / "build" / "api-docs.db"
+            logger.info(
+                "[%s] Using SQLite format (api-docs.db)", package_name
+            )
+            declarations = _parse_declarations_from_sqlite(
+                api_docs_path,
+                lean_root,
+                package_cache,
+                package_config.module_prefixes,
+            )
+        else:
+            doc_data_dir = workspace_path / ".lake" / "build" / "doc-data"
+            bmp_files = sorted(doc_data_dir.glob("**/*.bmp"))
+            logger.info(
+                "[%s] Using BMP format (%d files)",
+                package_name, len(bmp_files),
+            )
+            declarations = _parse_declarations_from_files(
+                bmp_files, lean_root, package_cache,
+                package_config.module_prefixes,
+            )
+
         logger.info(
             "Extracted %d declarations from %s (prefixes: %s)",
             len(declarations), package_name, package_config.module_prefixes,
@@ -479,7 +690,9 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
         all_declarations.extend(declarations)
 
     if not all_declarations:
-        raise FileNotFoundError("No declarations extracted from any package workspace")
+        raise FileNotFoundError(
+            "No declarations extracted from any package workspace"
+        )
 
     logger.info("Total declarations extracted: %d", len(all_declarations))
 
