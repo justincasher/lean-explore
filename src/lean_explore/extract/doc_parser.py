@@ -408,12 +408,6 @@ def _parse_declarations_from_sqlite(
                     progress.update(task, advance=1)
                     continue
 
-                # Skip internal/auto-generated names
-                kind = row["kind"]
-                if kind == "constructor":
-                    progress.update(task, advance=1)
-                    continue
-
                 source_url = row["source_url"]
                 start_line = row["start_line"]
                 end_line = row["end_line"]
