@@ -446,6 +446,13 @@ def _parse_declarations_from_sqlite(
 
                 progress.update(task, advance=1)
 
+        if skipped_prefix > 0:
+            logger.info(
+                "Skipped %d declarations outside allowed prefixes",
+                skipped_prefix,
+            )
+        if skipped_constructor > 0:
+            logger.info("Skipped %d .mk constructors", skipped_constructor)
         if skipped_no_source > 0:
             logger.info("Skipped %d declarations without source URL", skipped_no_source)
         if source_errors > 0:
