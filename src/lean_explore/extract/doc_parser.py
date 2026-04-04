@@ -299,7 +299,6 @@ def _extract_source_text(
 
 def _construct_source_link(
     module_source_url: str | None,
-    module_name: str,
     start_line: int,
     end_line: int,
 ) -> str | None:
@@ -307,7 +306,6 @@ def _construct_source_link(
 
     Args:
         module_source_url: GitHub URL to the module file from api-docs.db.
-        module_name: Fully qualified module name (e.g., "Mathlib.Algebra.Group").
         start_line: Start line number in the source file.
         end_line: End line number in the source file.
 
@@ -411,7 +409,7 @@ def _parse_declarations_from_sqlite(
                 end_line = row["end_line"]
 
                 source_link = _construct_source_link(
-                    source_url, module_name, start_line, end_line
+                    source_url, start_line, end_line
                 )
                 if not source_link:
                     skipped_no_source += 1
