@@ -50,32 +50,65 @@ class TestDocGen4Step:
     @pytest.mark.external
     async def test_run_doc_gen4_step_success(self, temp_directory):
         """Test successful doc-gen4 execution."""
-        lean_directory = temp_directory / "lean"
-        lean_directory.mkdir()
+        with patch(
+            "lean_explore.extract.doc_gen4.get_extraction_order",
+            return_value=["mathlib"],
+        ):
+            with patch(
+                "lean_explore.extract.doc_gen4._setup_workspace",
+                return_value=("leanprover/lean4:v4.29.0-rc2", "v4.29.0-rc2"),
+            ):
+                with patch(
+                    "lean_explore.extract.doc_gen4.subprocess.run"
+                ) as mock_run:
+                    mock_run.return_value = MagicMock(
+                        returncode=0,
+                        stdout="",
+                        stderr="",
+                    )
+                    with patch(
+                        "lean_explore.extract.doc_gen4.subprocess.Popen"
+                    ) as mock_popen:
+                        mock_process = MagicMock()
+                        mock_process.stdout = iter(["Building...\n", "Complete!\n"])
+                        mock_process.wait.return_value = 0
+                        mock_popen.return_value = mock_process
 
-        # Mock subprocess to avoid actually running lake
-        with patch("lean_explore.extract.doc_gen4.subprocess.Popen") as mock_popen:
-            mock_process = MagicMock()
-            mock_process.stdout = iter(["Building...\n", "Complete!\n"])
-            mock_process.wait.return_value = 0
-            mock_popen.return_value = mock_process
+                        await _run_doc_gen4_step()
 
-            await _run_doc_gen4_step()
-
-            # Called twice: "lake build" and "lake build LeanExtract:docs"
-            assert mock_popen.call_count == 2
+        assert mock_run.call_count == 2
+        # Called twice: "lake build" and "lake build MathExtract:docs"
+        assert mock_popen.call_count == 2
 
     @pytest.mark.external
     async def test_run_doc_gen4_step_failure(self):
         """Test doc-gen4 execution failure."""
-        with patch("lean_explore.extract.doc_gen4.subprocess.Popen") as mock_popen:
-            mock_process = MagicMock()
-            mock_process.stdout = iter(["Error!\n"])
-            mock_process.wait.return_value = 1
-            mock_popen.return_value = mock_process
+        with patch(
+            "lean_explore.extract.doc_gen4.get_extraction_order",
+            return_value=["mathlib"],
+        ):
+            with patch(
+                "lean_explore.extract.doc_gen4._setup_workspace",
+                return_value=("leanprover/lean4:v4.29.0-rc2", "v4.29.0-rc2"),
+            ):
+                with patch(
+                    "lean_explore.extract.doc_gen4.subprocess.run"
+                ) as mock_run:
+                    mock_run.return_value = MagicMock(
+                        returncode=0,
+                        stdout="",
+                        stderr="",
+                    )
+                    with patch(
+                        "lean_explore.extract.doc_gen4.subprocess.Popen"
+                    ) as mock_popen:
+                        mock_process = MagicMock()
+                        mock_process.stdout = iter(["Error!\n"])
+                        mock_process.wait.return_value = 1
+                        mock_popen.return_value = mock_process
 
-            with pytest.raises(RuntimeError, match="failed"):
-                await _run_doc_gen4_step()
+                        with pytest.raises(RuntimeError, match="failed"):
+                            await _run_doc_gen4_step()
 
 
 class TestExtractionStep:
