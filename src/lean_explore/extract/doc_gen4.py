@@ -6,6 +6,7 @@ to generate Lean documentation data for the extraction pipeline.
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -21,6 +22,29 @@ from lean_explore.extract.package_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _uses_sqlite_docgen(lean_version: str) -> bool:
+    """Return whether the matching doc-gen4 release writes api-docs.db.
+
+    Doc-gen4's SQLite output landed after `v4.29.0-rc1` and is present starting
+    with `v4.29.0-rc2`.
+    """
+    match = extract_lean_version(lean_version)
+    version_match = re.match(r"^v(\d+)\.(\d+)\.(\d+)(?:-rc(\d+))?$", match)
+    if version_match is None:
+        return False
+
+    major, minor, patch, rc = version_match.groups()
+    version = (int(major), int(minor), int(patch))
+    if version > (4, 29, 0):
+        return True
+    if version < (4, 29, 0):
+        return False
+
+    if rc is None:
+        return True
+    return int(rc) >= 2
 
 
 def _clear_workspace_cache(workspace_path: Path) -> None:
@@ -227,13 +251,17 @@ async def run_doc_gen4(
         workspace_path = Path("lean") / package_name
         logger.info("\n%s\nPackage: %s\n%s", "=" * 50, package_name, "=" * 50)
 
+        toolchain = None
+        ref = None
         if fresh:
-            # Packages using doc-gen4 >= v4.29 output to a SQLite database
-            # (api-docs.db) which handles incremental updates correctly.
-            # Only packages using the legacy BMP format need a full cache
-            # clear to avoid stale output files.
-            api_docs_db = workspace_path / ".lake" / "build" / "api-docs.db"
-            if api_docs_db.exists():
+            if setup:
+                toolchain, ref = _setup_workspace(config)
+                logger.info("Toolchain: %s, ref: %s", toolchain, ref)
+
+            # Doc-gen4 switched from BMP files to api-docs.db in v4.29.0-rc2.
+            # The SQLite format handles incremental updates, while legacy BMP
+            # output requires a cache clear to avoid stale files.
+            if toolchain and _uses_sqlite_docgen(toolchain):
                 logger.info(
                     "[%s] Skipping cache clear "
                     "(api-docs.db handles incremental updates)",
@@ -243,8 +271,9 @@ async def run_doc_gen4(
                 _clear_workspace_cache(workspace_path)
 
         if setup:
-            toolchain, ref = _setup_workspace(config)
-            logger.info("Toolchain: %s, ref: %s", toolchain, ref)
+            if toolchain is None or ref is None:
+                toolchain, ref = _setup_workspace(config)
+                logger.info("Toolchain: %s, ref: %s", toolchain, ref)
 
         _run_lake_for_package(package_name, verbose)
 
