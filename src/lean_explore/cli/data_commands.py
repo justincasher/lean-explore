@@ -1,5 +1,3 @@
-# src/lean_explore/cli/data_commands.py
-
 """Manages local Lean Explore data toolchains.
 
 Provides CLI commands to download, install, and clean data files (database,

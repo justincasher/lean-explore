@@ -155,7 +155,7 @@ class SearchEngine:
 
         import faiss
 
-        logger.info(f"Loading FAISS index from {self._faiss_informal_path}")
+        logger.info("Loading FAISS index from %s", self._faiss_informal_path)
         self._faiss_informal_index = faiss.read_index(str(self._faiss_informal_path))
         with open(self._faiss_informal_ids_path) as f:
             self._faiss_informal_id_map = json.load(f)
@@ -177,7 +177,7 @@ class SearchEngine:
         if self._bm25_name_spaced is not None:
             return
 
-        logger.info(f"Loading BM25 indices from {self._bm25_spaced_path.parent}")
+        logger.info("Loading BM25 indices from %s", self._bm25_spaced_path.parent)
 
         self._bm25_name_spaced = bm25s.BM25.load(str(self._bm25_spaced_path))
         self._bm25_name_raw = bm25s.BM25.load(str(self._bm25_raw_path))
@@ -185,7 +185,9 @@ class SearchEngine:
         with open(self._bm25_ids_map_path) as f:
             self._all_declaration_ids = json.load(f)
 
-        logger.info(f"BM25 indices loaded ({len(self._all_declaration_ids)} decls)")
+        logger.info(
+            "BM25 indices loaded (%d declarations)", len(self._all_declaration_ids)
+        )
 
     def _retrieve_bm25_candidates(self, query: str, bm25_k: int) -> dict[int, float]:
         """Retrieve candidates using BM25 on declaration names.
@@ -217,7 +219,7 @@ class SearchEngine:
             decl_id = self._all_declaration_ids[idx]
             bm25_map[decl_id] = max(bm25_map.get(decl_id, 0.0), float(score))
 
-        logger.info(f"BM25 name: {len(bm25_map)} candidates")
+        logger.info("BM25 name: %d candidates", len(bm25_map))
         return bm25_map
 
     async def _retrieve_semantic_candidates(
@@ -255,7 +257,7 @@ class SearchEngine:
             similarity = float(dist)
             semantic_map[decl_id] = max(semantic_map.get(decl_id, 0.0), similarity)
 
-        logger.info(f"FAISS informal: {len(semantic_map)} candidates")
+        logger.info("FAISS informal: %d candidates", len(semantic_map))
         return semantic_map
 
     def _compute_rrf_scores(
@@ -273,7 +275,7 @@ class SearchEngine:
             List of (declaration_id, rrf_score) sorted by score descending.
         """
         all_candidate_ids = set(bm25_map.keys()) | set(semantic_map.keys())
-        logger.info(f"Total merged candidates: {len(all_candidate_ids)}")
+        logger.info("Total merged candidates: %d", len(all_candidate_ids))
 
         if not all_candidate_ids:
             return []
@@ -352,7 +354,7 @@ class SearchEngine:
             boosted_scores.append((cid, boosted_score))
 
         boosted_scores.sort(key=lambda x: x[1], reverse=True)
-        logger.info(f"Applied dependency boost to top {top_n} candidates")
+        logger.info("Applied dependency boost to top %d candidates", top_n)
         return boosted_scores, declarations_map
 
     async def _rerank_candidates(
@@ -371,7 +373,7 @@ class SearchEngine:
         Returns:
             List of SearchResult objects after reranking.
         """
-        logger.info(f"Reranking top {len(scored_results)} candidates")
+        logger.info("Reranking top %d candidates", len(scored_results))
 
         documents = [
             f"{decl.name}: {decl.informalization}"
@@ -582,7 +584,7 @@ class SearchEngine:
             boosted_scores = [
                 (cid, score) for cid, score in boosted_scores if cid in declarations_map
             ]
-            logger.info(f"Filtered to {len(declarations_map)} in {packages}")
+            logger.info("Filtered to %d in %s", len(declarations_map), packages)
 
         top_n = rerank_top if rerank_top and rerank_top > 0 else limit
 

@@ -40,13 +40,13 @@ class EmbeddingClient:
         self.model_name = model_name
         self.device = device or self._select_device()
         self.max_length = max_length
-        logger.info(f"Loading embedding model {model_name} on {self.device}")
+        logger.info("Loading embedding model %s on %s", model_name, self.device)
         self.model = SentenceTransformer(model_name, device=self.device)
 
         # Set max sequence length if specified
         if max_length is not None:
             self.model.max_seq_length = max_length
-            logger.info(f"Set max sequence length to {max_length}")
+            logger.info("Set max sequence length to %d", max_length)
 
     def _select_device(self) -> str:
         """Select best available device."""

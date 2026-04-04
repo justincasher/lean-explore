@@ -1,5 +1,3 @@
-# src/lean_explore/mcp/server.py
-
 """Main script to run the Lean Explore MCP (Model Context Protocol) Server.
 
 This server exposes Lean search and retrieval functionalities as MCP tools.
@@ -96,7 +94,7 @@ def _parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     """Main function to initialize and run the MCP server."""
     args = _parse_arguments()
 
@@ -113,7 +111,7 @@ def main():
         force=True,
     )
 
-    logger.info(f"Starting Lean Explore MCP Server with backend: {args.backend}")
+    logger.info("Starting Lean Explore MCP Server with backend: %s", args.backend)
 
     backend_service_instance: BackendServiceType = None
 
@@ -152,34 +150,33 @@ def main():
             engine = SearchEngine(use_local_data=False)
             backend_service_instance = Service(engine=engine)
             logger.info("Local backend service initialized successfully.")
-        except FileNotFoundError as e:
-            # This catch is now for FNFEs raised by LocalService for *other* reasons,
-            # as the primary asset checks are done above.
-            msg = (
-                "LocalService initialization failed due to an unexpected missing file:"
-                f" {e}\n"
-                "This could indicate an issue beyond the core data toolchain files "
-                "or a problem during service initialization that was not caught by"
-                " pre-checks."
+        except FileNotFoundError as error:
+            # This catch is now for FNFEs raised by LocalService for *other*
+            # reasons, as the primary asset checks are done above.
+            message = (
+                "LocalService initialization failed due to an unexpected"
+                f" missing file: {error}\n"
+                "This could indicate an issue beyond the core data toolchain"
+                " files or a problem during service initialization that was"
+                " not caught by pre-checks."
             )
-            _emit_critical_logrecord(msg)
-            logger.critical(msg)
+            _emit_critical_logrecord(message)
+            logger.critical(message)
             sys.exit(1)
             return
-        except (
-            RuntimeError
-        ) as e:  # Catch other specific runtime errors from LocalService
-            msg = f"LocalService initialization failed: {e}"
-            _emit_critical_logrecord(msg)
-            logger.critical(msg)
+        except RuntimeError as error:
+            message = f"LocalService initialization failed: {error}"
+            _emit_critical_logrecord(message)
+            logger.critical(message)
             sys.exit(1)
             return
-        except (
-            Exception
-        ) as e:  # Catch all other unexpected errors during LocalService init
-            msg = f"An unexpected error occurred while initializing LocalService: {e}"
-            _emit_critical_logrecord(msg)
-            logger.critical(msg, exc_info=True)
+        except Exception as error:
+            message = (
+                "An unexpected error occurred while initializing"
+                f" LocalService: {error}"
+            )
+            _emit_critical_logrecord(message)
+            logger.critical(message, exc_info=True)
             sys.exit(1)
             return
 
@@ -193,10 +190,13 @@ def main():
 
             backend_service_instance = ApiClient(api_key=args.api_key)
             logger.info("API client backend initialized successfully.")
-        except Exception as e:
-            msg = f"An unexpected error occurred while initializing APIClient: {e}"
-            _emit_critical_logrecord(msg)
-            logger.critical(msg, exc_info=True)
+        except Exception as error:
+            message = (
+                "An unexpected error occurred while initializing"
+                f" APIClient: {error}"
+            )
+            _emit_critical_logrecord(message)
+            logger.critical(message, exc_info=True)
             sys.exit(1)
             return
 
@@ -213,15 +213,15 @@ def main():
         sys.exit(1)
 
     mcp_app._lean_explore_backend_service = backend_service_instance
-    logger.info(f"Backend service ({args.backend}) attached to MCP app state.")
+    logger.info("Backend service (%s) attached to MCP app state.", args.backend)
 
     try:
         logger.info("Running MCP server with stdio transport...")
         mcp_app.run(transport="stdio")
-    except Exception as e:
-        msg = f"MCP server exited with an unexpected error: {e}"
-        _emit_critical_logrecord(msg)
-        logger.critical(msg, exc_info=True)
+    except Exception as error:
+        message = f"MCP server exited with an unexpected error: {error}"
+        _emit_critical_logrecord(message)
+        logger.critical(message, exc_info=True)
         sys.exit(1)
         return
     finally:

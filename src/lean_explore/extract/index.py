@@ -63,7 +63,7 @@ def _load_embeddings_from_database(
     rows = list(result.all())
 
     if not rows:
-        logger.warning(f"No declarations found with {embedding_field}")
+        logger.warning("No declarations found with %s", embedding_field)
         return [], np.array([])
 
     declaration_ids = [row.id for row in rows]
@@ -71,8 +71,8 @@ def _load_embeddings_from_database(
     embeddings_array = np.array(embeddings_list, dtype=np.float32)
 
     logger.info(
-        f"Loaded {len(declaration_ids)} embeddings with dimension "
-        f"{embeddings_array.shape[1]}"
+        "Loaded %d embeddings with dimension %d",
+        len(declaration_ids), embeddings_array.shape[1],
     )
 
     return declaration_ids, embeddings_array
@@ -95,7 +95,8 @@ def _build_faiss_index(embeddings: np.ndarray, device: str) -> faiss.Index:
     nlist = max(256, int(np.sqrt(num_vectors)))
 
     logger.info(
-        f"Building FAISS IVF index for {num_vectors} vectors with {nlist} clusters..."
+        "Building FAISS IVF index for %d vectors with %d clusters...",
+        num_vectors, nlist,
     )
 
     # Use inner product (cosine similarity on normalized vectors)
@@ -135,7 +136,7 @@ async def build_faiss_indices(
         output_directory = Config.ACTIVE_DATA_PATH
 
     output_directory.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Saving indices to {output_directory}")
+    logger.info("Saving indices to %s", output_directory)
 
     device = _get_device()
 
@@ -150,7 +151,7 @@ async def build_faiss_indices(
     with Session(sync_engine) as session:
         for i, embedding_field in enumerate(embedding_fields, 1):
             logger.info(
-                f"Processing {embedding_field} ({i}/{len(embedding_fields)})..."
+                "Processing %s (%d/%d)...", embedding_field, i, len(embedding_fields)
             )
 
             declaration_ids, embeddings = _load_embeddings_from_database(
@@ -158,7 +159,7 @@ async def build_faiss_indices(
             )
 
             if len(declaration_ids) == 0:
-                logger.warning(f"Skipping {embedding_field} (no data)")
+                logger.warning("Skipping %s (no data)", embedding_field)
                 continue
 
             index = _build_faiss_index(embeddings, device)
@@ -170,7 +171,7 @@ async def build_faiss_indices(
             index_filename = embedding_field.replace("_embedding", "_faiss.index")
             index_path = output_directory / index_filename
             faiss.write_index(index, str(index_path))
-            logger.info(f"Saved FAISS index to {index_path}")
+            logger.info("Saved FAISS index to %s", index_path)
 
             ids_map_filename = embedding_field.replace(
                 "_embedding", "_faiss_ids_map.json"
@@ -178,7 +179,7 @@ async def build_faiss_indices(
             ids_map_path = output_directory / ids_map_filename
             with open(ids_map_path, "w") as file:
                 json.dump(declaration_ids, file)
-            logger.info(f"Saved ID mapping to {ids_map_path}")
+            logger.info("Saved ID mapping to %s", ids_map_path)
 
     sync_engine.dispose()
     logger.info("All FAISS indices built successfully")
@@ -230,7 +231,7 @@ def _load_declaration_names(session: Session) -> tuple[list[int], list[str]]:
     declaration_ids = [row.id for row in rows]
     declaration_names = [row.name or "" for row in rows]
 
-    logger.info(f"Loaded {len(declaration_ids)} declarations for BM25 indexing")
+    logger.info("Loaded %d declarations for BM25 indexing", len(declaration_ids))
     return declaration_ids, declaration_names
 
 
@@ -282,7 +283,7 @@ async def build_bm25_indices(
         output_directory = Config.ACTIVE_DATA_PATH
 
     output_directory.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Saving BM25 indices to {output_directory}")
+    logger.info("Saving BM25 indices to %s", output_directory)
 
     sync_url = str(engine.url).replace("sqlite+aiosqlite", "sqlite")
     sync_engine = create_engine(sync_url)
@@ -300,17 +301,17 @@ async def build_bm25_indices(
     # Save BM25 indices
     bm25_spaced_path = output_directory / "bm25_name_spaced"
     bm25_spaced.save(str(bm25_spaced_path))
-    logger.info(f"Saved BM25 spaced index to {bm25_spaced_path}")
+    logger.info("Saved BM25 spaced index to %s", bm25_spaced_path)
 
     bm25_raw_path = output_directory / "bm25_name_raw"
     bm25_raw.save(str(bm25_raw_path))
-    logger.info(f"Saved BM25 raw index to {bm25_raw_path}")
+    logger.info("Saved BM25 raw index to %s", bm25_raw_path)
 
     # Save ID mapping (shared by both indices)
     ids_map_path = output_directory / "bm25_ids_map.json"
     with open(ids_map_path, "w") as file:
         json.dump(declaration_ids, file)
-    logger.info(f"Saved BM25 ID mapping to {ids_map_path}")
+    logger.info("Saved BM25 ID mapping to %s", ids_map_path)
 
     sync_engine.dispose()
     logger.info("All BM25 indices built successfully")

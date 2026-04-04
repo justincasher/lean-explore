@@ -48,7 +48,7 @@ class RerankerClient:
         self.max_length = max_length
         self.instruction = instruction
 
-        logger.info(f"Loading reranker model {model_name} on {self.device}")
+        logger.info("Loading reranker model %s on %s", model_name, self.device)
 
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name, padding_side="left", trust_remote_code=True
