@@ -368,9 +368,7 @@ def _parse_declarations_from_sqlite(
         """
         rows = connection.execute(query).fetchall()
 
-        logger.info(
-            f"Found {len(rows)} declarations in api-docs.db"
-        )
+        logger.info("Found %d declarations in api-docs.db", len(rows))
 
         skipped_no_source = 0
         skipped_prefix = 0
@@ -429,8 +427,8 @@ def _parse_declarations_from_sqlite(
                     source_errors += 1
                     if source_errors <= 10:
                         logger.debug(
-                            f"Could not extract source for "
-                            f"{declaration_name}: {error}"
+                            "Could not extract source for %s: %s",
+                            declaration_name, error,
                         )
                     progress.update(task, advance=1)
                     continue
@@ -452,7 +450,8 @@ def _parse_declarations_from_sqlite(
             logger.info("Skipped %d declarations without source URL", skipped_no_source)
         if source_errors > 0:
             logger.warning(
-                f"Could not extract source text for {source_errors} declarations"
+                "Could not extract source text for %d declarations",
+                source_errors,
             )
 
     finally:

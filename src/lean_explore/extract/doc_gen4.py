@@ -235,8 +235,9 @@ async def run_doc_gen4(
             api_docs_db = workspace_path / ".lake" / "build" / "api-docs.db"
             if api_docs_db.exists():
                 logger.info(
-                    f"[{package_name}] Skipping cache clear "
-                    f"(api-docs.db handles incremental updates)"
+                    "[%s] Skipping cache clear "
+                    "(api-docs.db handles incremental updates)",
+                    package_name,
                 )
             else:
                 _clear_workspace_cache(workspace_path)
