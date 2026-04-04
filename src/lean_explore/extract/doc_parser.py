@@ -4,8 +4,8 @@ This module parses doc-gen4 output and extracts Lean source code to produce
 Declaration objects ready for database insertion.
 
 Supports two doc-gen4 output formats:
-- SQLite database (api-docs.db): Used by doc-gen4 >= v4.29.0-rc1
-- BMP JSON files (.bmp): Used by doc-gen4 < v4.29.0-rc1
+- SQLite database (api-docs.db): Used by doc-gen4 >= v4.29.0-rc2
+- BMP JSON files (.bmp): Used by doc-gen4 < v4.29.0-rc2
 """
 
 import json
@@ -351,7 +351,7 @@ def _parse_declarations_from_sqlite(
 ) -> list[Declaration]:
     """Parse declarations from a doc-gen4 SQLite database (api-docs.db).
 
-    Doc-gen4 >= v4.29.0-rc1 outputs declaration data to a SQLite database
+    Doc-gen4 >= v4.29.0-rc2 outputs declaration data to a SQLite database
     instead of individual BMP JSON files. This function reads that database
     and produces the same Declaration objects as the BMP parser.
 
@@ -635,7 +635,7 @@ async def _insert_declarations_batch(
 def _detect_docgen_format(workspace_path: Path) -> str:
     """Detect which doc-gen4 output format a workspace uses.
 
-    Doc-gen4 >= v4.29.0-rc1 writes to a SQLite database (api-docs.db).
+    Doc-gen4 >= v4.29.0-rc2 writes to a SQLite database (api-docs.db).
     Earlier versions write individual BMP JSON files to doc-data/.
 
     Args:
@@ -661,7 +661,7 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
     """Extract all declarations from doc-gen4 data and load into database.
 
     Automatically detects whether each package uses the newer SQLite format
-    (api-docs.db from doc-gen4 >= v4.29.0-rc1) or the legacy BMP JSON format.
+    (api-docs.db from doc-gen4 >= v4.29.0-rc2) or the legacy BMP JSON format.
 
     Args:
         engine: SQLAlchemy async engine for database connection.
