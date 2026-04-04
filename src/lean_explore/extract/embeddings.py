@@ -125,7 +125,7 @@ def _discover_database_files() -> list[Path]:
     if cache_dir.exists():
         database_files.extend(cache_dir.rglob("lean_explore.db"))
 
-    logger.info(f"Discovered {len(database_files)} database files")
+    logger.info("Discovered %d database files", len(database_files))
     return database_files
 
 
@@ -148,7 +148,7 @@ def _load_embedding_caches(database_files: list[Path]) -> EmbeddingCaches:
     cache_by_informalization: dict[str, bytes] = {}
 
     for db_path in database_files:
-        logger.info(f"Loading embedding cache from {db_path}")
+        logger.info("Loading embedding cache from %s", db_path)
 
         try:
             connection = sqlite3.connect(db_path)
@@ -175,13 +175,15 @@ def _load_embedding_caches(database_files: list[Path]) -> EmbeddingCaches:
                     )
 
             connection.close()
-            logger.info(f"Loaded {count} declarations from {db_path}")
+            logger.info("Loaded %d declarations from %s", count, db_path)
 
-        except Exception as e:
-            logger.warning(f"Failed to load embedding cache from {db_path}: {e}")
+        except Exception as error:
+            logger.warning("Failed to load embedding cache from %s: %s", db_path, error)
             continue
 
-    logger.info(f"Total cache size - informalization: {len(cache_by_informalization)}")
+    logger.info(
+        "Total cache size - informalization: %d", len(cache_by_informalization)
+    )
 
     return EmbeddingCaches(by_informalization=cache_by_informalization)
 
@@ -323,7 +325,7 @@ async def generate_embeddings(
 
     async with AsyncSession(engine, expire_on_commit=False) as session:
         declarations = await _get_declarations_needing_embeddings(session, limit)
-        logger.info(f"Found {len(declarations)} declarations needing embeddings")
+        logger.info("Found %d declarations needing embeddings", len(declarations))
 
         if not declarations:
             logger.info("No declarations to process")
@@ -335,8 +337,8 @@ async def generate_embeddings(
             session, declarations, caches
         )
         logger.info(
-            f"Applied {cache_hits} embeddings from cache, "
-            f"{len(remaining)} remaining need generation"
+            "Applied %d embeddings from cache, %d remaining need generation",
+            cache_hits, len(remaining),
         )
 
         if not remaining:
@@ -353,7 +355,7 @@ async def generate_embeddings(
             client = RemoteEmbeddingClient(server_url=embedding_server_url)
         else:
             client = EmbeddingClient(model_name=model_name, max_length=max_seq_length)
-        logger.info(f"Using {client.model_name}")
+        logger.info("Using %s", client.model_name)
 
         total = len(remaining)
         total_embeddings = 0
@@ -376,6 +378,6 @@ async def generate_embeddings(
                 progress.update(task, advance=len(batch))
 
         logger.info(
-            f"Generated {total_embeddings} new embeddings "
-            f"({cache_hits} from cache, {total_embeddings} generated)"
+            "Generated %d new embeddings (%d from cache, %d generated)",
+            total_embeddings, cache_hits, total_embeddings,
         )

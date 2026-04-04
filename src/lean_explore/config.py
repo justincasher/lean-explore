@@ -1,5 +1,3 @@
-# src/lean_explore/config.py
-
 """Centralized configuration for lean_explore.
 
 This module provides all configuration settings including paths, URLs,

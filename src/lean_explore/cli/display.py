@@ -1,5 +1,3 @@
-# src/lean_explore/cli/display.py
-
 """Display and formatting utilities for CLI output."""
 
 import textwrap

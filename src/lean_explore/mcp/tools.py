@@ -2,9 +2,9 @@
 
 import asyncio
 import logging
-from typing_extensions import TypedDict
 
 from mcp.server.fastmcp import Context as MCPContext
+from typing_extensions import TypedDict
 
 from lean_explore.mcp.app import AppContext, BackendServiceType, mcp_app
 from lean_explore.models import SearchResponse, SearchResult
@@ -229,8 +229,9 @@ async def search(
     """
     backend = await _get_backend_from_context(ctx)
     logger.info(
-        f"MCP Tool 'search' called with query: '{query}', limit: {limit}, "
-        f"rerank_top: {rerank_top}, packages: {packages}"
+        "MCP Tool 'search' called with query: '%s', limit: %d, "
+        "rerank_top: %s, packages: %s",
+        query, limit, rerank_top, packages,
     )
 
     response = await _execute_backend_search(
@@ -282,8 +283,9 @@ async def search_summary(
     """
     backend = await _get_backend_from_context(ctx)
     logger.info(
-        f"MCP Tool 'search_summary' called with query: '{query}', limit: {limit}, "
-        f"rerank_top: {rerank_top}, packages: {packages}"
+        "MCP Tool 'search_summary' called with query: '%s', limit: %d, "
+        "rerank_top: %s, packages: %s",
+        query, limit, rerank_top, packages,
     )
 
     response = await _execute_backend_search(
@@ -331,7 +333,7 @@ async def get_source_code(
     """
     backend = await _get_backend_from_context(ctx)
     logger.info(
-        f"MCP Tool 'get_source_code' called for declaration_id: {declaration_id}"
+        "MCP Tool 'get_source_code' called for declaration_id: %d", declaration_id
     )
 
     result = await _execute_backend_get_by_id(backend, declaration_id)
@@ -367,7 +369,7 @@ async def get_source_link(
     """
     backend = await _get_backend_from_context(ctx)
     logger.info(
-        f"MCP Tool 'get_source_link' called for declaration_id: {declaration_id}"
+        "MCP Tool 'get_source_link' called for declaration_id: %d", declaration_id
     )
 
     result = await _execute_backend_get_by_id(backend, declaration_id)
@@ -404,7 +406,7 @@ async def get_docstring(
     """
     backend = await _get_backend_from_context(ctx)
     logger.info(
-        f"MCP Tool 'get_docstring' called for declaration_id: {declaration_id}"
+        "MCP Tool 'get_docstring' called for declaration_id: %d", declaration_id
     )
 
     result = await _execute_backend_get_by_id(backend, declaration_id)
@@ -440,7 +442,7 @@ async def get_description(
     """
     backend = await _get_backend_from_context(ctx)
     logger.info(
-        f"MCP Tool 'get_description' called for declaration_id: {declaration_id}"
+        "MCP Tool 'get_description' called for declaration_id: %d", declaration_id
     )
 
     result = await _execute_backend_get_by_id(backend, declaration_id)
@@ -477,7 +479,7 @@ async def get_module(
     """
     backend = await _get_backend_from_context(ctx)
     logger.info(
-        f"MCP Tool 'get_module' called for declaration_id: {declaration_id}"
+        "MCP Tool 'get_module' called for declaration_id: %d", declaration_id
     )
 
     result = await _execute_backend_get_by_id(backend, declaration_id)
@@ -514,7 +516,7 @@ async def get_dependencies(
     """
     backend = await _get_backend_from_context(ctx)
     logger.info(
-        f"MCP Tool 'get_dependencies' called for declaration_id: {declaration_id}"
+        "MCP Tool 'get_dependencies' called for declaration_id: %d", declaration_id
     )
 
     result = await _execute_backend_get_by_id(backend, declaration_id)

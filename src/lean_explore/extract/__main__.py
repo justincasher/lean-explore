@@ -180,8 +180,8 @@ async def run_pipeline(
         steps_enabled.append("index")
 
     logger.info("Starting Lean Explore extraction pipeline")
-    logger.info(f"Database URL: {database_url}")
-    logger.info(f"Steps to run: {', '.join(steps_enabled)}")
+    logger.info("Database URL: %s", database_url)
+    logger.info("Steps to run: %s", ", ".join(steps_enabled))
 
     engine = create_async_engine(database_url, echo=verbose)
 
@@ -341,7 +341,7 @@ def main(
     if parse_docs:
         # Create new timestamped directory for fresh extraction
         extraction_path = Config.create_timestamped_extraction_path()
-        logger.info(f"Created new extraction directory: {extraction_path}")
+        logger.info("Created new extraction directory: %s", extraction_path)
     else:
         # Use latest existing extraction for subsequent steps
         extraction_path = Config.get_latest_extraction_path()
@@ -349,7 +349,7 @@ def main(
             raise click.ClickException(
                 "No existing extraction found. Run with --parse-docs first."
             )
-        logger.info(f"Using existing extraction: {extraction_path}")
+        logger.info("Using existing extraction: %s", extraction_path)
 
     database_path = extraction_path / "lean_explore.db"
     database_url = f"sqlite+aiosqlite:///{database_path}"

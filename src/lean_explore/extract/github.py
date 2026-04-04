@@ -41,13 +41,15 @@ def fetch_lean_toolchain(git_url: str, ref: str = "main") -> str:
         Content of the lean-toolchain file (e.g., 'leanprover/lean4:v4.27.0')
     """
     raw_url = github_url_to_raw(git_url, ref, "lean-toolchain")
-    logger.info(f"Fetching lean-toolchain from {raw_url}")
+    logger.info("Fetching lean-toolchain from %s", raw_url)
 
     try:
         with urllib.request.urlopen(raw_url, timeout=30) as response:
             return response.read().decode("utf-8").strip()
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch lean-toolchain from {raw_url}: {e}")
+    except Exception as error:
+        raise RuntimeError(
+            f"Failed to fetch lean-toolchain from {raw_url}: {error}"
+        )
 
 
 def fetch_latest_tag(git_url: str) -> str:
@@ -65,7 +67,7 @@ def fetch_latest_tag(git_url: str) -> str:
     owner, repo = match.groups()
 
     api_url = f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=100"
-    logger.info(f"Fetching tags from {api_url}")
+    logger.info("Fetching tags from %s", api_url)
 
     try:
         request = urllib.request.Request(
@@ -74,8 +76,8 @@ def fetch_latest_tag(git_url: str) -> str:
         )
         with urllib.request.urlopen(request, timeout=30) as response:
             tags = json.loads(response.read().decode("utf-8"))
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch tags from {api_url}: {e}")
+    except Exception as error:
+        raise RuntimeError(f"Failed to fetch tags from {api_url}: {error}")
 
     if not tags:
         raise RuntimeError(f"No tags found for {git_url}")

@@ -451,11 +451,13 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
         doc_data_dir = lean_root / package_name / ".lake" / "build" / "doc-data"
 
         if not doc_data_dir.exists():
-            logger.warning(f"No doc-data directory for {package_name}: {doc_data_dir}")
+            logger.warning(
+                "No doc-data directory for %s: %s", package_name, doc_data_dir
+            )
             continue
 
         bmp_files = sorted(doc_data_dir.glob("**/*.bmp"))
-        logger.info(f"Found {len(bmp_files)} BMP files in {package_name}")
+        logger.info("Found %d BMP files in %s", len(bmp_files), package_name)
 
         if not bmp_files:
             continue
@@ -463,29 +465,32 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
         # Build workspace-specific package cache to avoid version mismatches
         package_cache = _build_package_cache(lean_root, package_name)
         logger.info(
-            f"Built package cache for {package_name} with {len(package_cache)} packages"
+            "Built package cache for %s with %d packages",
+            package_name, len(package_cache),
         )
 
         declarations = _parse_declarations_from_files(
             bmp_files, lean_root, package_cache, package_config.module_prefixes
         )
         logger.info(
-            f"Extracted {len(declarations)} declarations from {package_name} "
-            f"(prefixes: {package_config.module_prefixes})"
+            "Extracted %d declarations from %s (prefixes: %s)",
+            len(declarations), package_name, package_config.module_prefixes,
         )
         all_declarations.extend(declarations)
 
     if not all_declarations:
         raise FileNotFoundError("No declarations extracted from any package workspace")
 
-    logger.info(f"Total declarations extracted: {len(all_declarations)}")
+    logger.info("Total declarations extracted: %d", len(all_declarations))
 
     # Filter out auto-generated 'to*' projections that share source with parent
     all_declarations, projection_count = _filter_auto_generated_projections(
         all_declarations
     )
     if projection_count > 0:
-        logger.info(f"Filtered {projection_count} auto-generated 'to*' projections")
+        logger.info(
+            "Filtered %d auto-generated 'to*' projections", projection_count
+        )
 
     async with AsyncSession(engine) as session:
         inserted_count = await _insert_declarations_batch(
@@ -494,6 +499,6 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
 
     skipped = len(all_declarations) - inserted_count
     logger.info(
-        f"Inserted {inserted_count} new declarations into database "
-        f"(skipped {skipped} duplicates)"
+        "Inserted %d new declarations into database (skipped %d duplicates)",
+        inserted_count, skipped,
     )

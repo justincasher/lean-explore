@@ -120,7 +120,7 @@ def _build_dependency_layers(
     remaining = [name_to_declaration[name] for name in in_degree if in_degree[name] > 0]
     if remaining:
         logger.warning(
-            f"Found {len(remaining)} declarations in cycles, adding as final layer"
+            "Found %d declarations in cycles, adding as final layer", len(remaining)
         )
         layers.append(remaining)
 
@@ -146,7 +146,7 @@ async def _load_existing_informalizations(
         )
         for declaration in declarations
     ]
-    logger.info(f"Loaded {len(informalizations)} existing informalizations")
+    logger.info("Loaded %d existing informalizations", len(informalizations))
     return informalizations
 
 
@@ -182,7 +182,7 @@ def _discover_database_files() -> list[Path]:
     if cache_dir.exists():
         database_files.extend(cache_dir.rglob("lean_explore.db"))
 
-    logger.info(f"Discovered {len(database_files)} database files")
+    logger.info("Discovered %d database files", len(database_files))
     return database_files
 
 
@@ -204,7 +204,7 @@ async def _load_cache_from_databases(
 
     for db_path in database_files:
         db_url = f"sqlite+aiosqlite:///{db_path}"
-        logger.info(f"Loading cache from {db_path}")
+        logger.info("Loading cache from %s", db_path)
 
         try:
             engine = create_async_engine(db_url)
@@ -221,16 +221,19 @@ async def _load_cache_from_databases(
                         cache[cache_key] = declaration.informalization
 
                 logger.info(
-                    f"Loaded {len(declarations)} informalizations from {db_path}"
+                    "Loaded %d informalizations from %s",
+                    len(declarations), db_path,
                 )
 
             await engine.dispose()
 
-        except Exception as e:
-            logger.warning(f"Failed to load cache from {db_path}: {e}")
+        except Exception as error:
+            logger.warning("Failed to load cache from %s: %s", db_path, error)
             continue
 
-    logger.info(f"Total cache size: {len(cache)} unique (name, source_text) pairs")
+    logger.info(
+        "Total cache size: %d unique (name, source_text) pairs", len(cache)
+    )
     return cache
 
 
@@ -319,7 +322,7 @@ async def _process_one_declaration(
                 informalization=result,
             )
 
-        logger.warning(f"Empty response for declaration {declaration_data.name}")
+        logger.warning("Empty response for declaration %s", declaration_data.name)
         return InformalizationResult(
             declaration_id=declaration_data.id,
             declaration_name=declaration_data.name,
@@ -414,14 +417,14 @@ async def _process_layer(
         if len(pending_updates) >= commit_batch_size:
             await session.execute(update(Declaration), pending_updates)
             await session.commit()
-            logger.info(f"Committed batch of {len(pending_updates)} updates")
+            logger.info("Committed batch of %d updates", len(pending_updates))
             pending_updates.clear()
             progress.reset(batch_task)
 
     if pending_updates:
         await session.execute(update(Declaration), pending_updates)
         await session.commit()
-        logger.info(f"Committed batch of {len(pending_updates)} updates")
+        logger.info("Committed batch of %d updates", len(pending_updates))
         progress.reset(batch_task)
 
     return processed
@@ -478,8 +481,8 @@ async def _process_layers(
 
         for layer_num, layer in enumerate(layers):
             logger.info(
-                f"Processing layer {layer_num + 1}/{len(layers)} "
-                f"({len(layer)} declarations)"
+                "Processing layer %d/%d (%d declarations)",
+                layer_num + 1, len(layers), len(layer),
             )
             layer_processed = await _process_layer(
                 session=session,
@@ -497,8 +500,8 @@ async def _process_layers(
             )
             processed += layer_processed
             logger.info(
-                f"Completed layer {layer_num + 1}: "
-                f"{layer_processed}/{len(layer)} declarations informalized"
+                "Completed layer %d: %d/%d declarations informalized",
+                layer_num + 1, layer_processed, len(layer),
             )
 
     return processed
@@ -541,8 +544,8 @@ async def _apply_cache_to_declarations(
             remaining.append(declaration)
 
     logger.info(
-        f"Cache matching complete: {len(updates_to_apply)} hits, "
-        f"{len(remaining)} misses"
+        "Cache matching complete: %d hits, %d misses",
+        len(updates_to_apply), len(remaining),
     )
 
     # Phase 2: Apply updates in batches using raw SQL for efficiency
@@ -550,8 +553,8 @@ async def _apply_cache_to_declarations(
         num_updates = len(updates_to_apply)
         total_batches = (num_updates + commit_batch_size - 1) // commit_batch_size
         logger.info(
-            f"Applying {len(updates_to_apply)} cached informalizations "
-            f"in {total_batches} batches..."
+            "Applying %d cached informalizations in %d batches...",
+            len(updates_to_apply), total_batches,
         )
         stmt = text("UPDATE declarations SET informalization = :inf WHERE id = :id")
         for i in range(0, len(updates_to_apply), commit_batch_size):
@@ -562,7 +565,7 @@ async def _apply_cache_to_declarations(
             await session.commit()
             batch_num = i // commit_batch_size + 1
             if batch_num % 10 == 0 or batch_num == total_batches:
-                logger.info(f"Committed batch {batch_num}/{total_batches}")
+                logger.info("Committed batch %d/%d", batch_num, total_batches)
 
     return len(updates_to_apply), remaining
 
@@ -587,8 +590,8 @@ async def informalize_declarations(
     prompt_template = (Path(__file__).parent / "prompt.txt").read_text()
     logger.info("Starting informalization process...")
     logger.info(
-        f"Model: {model}, Max concurrent: {max_concurrent}, "
-        f"Commit batch size: {commit_batch_size}"
+        "Model: %s, Max concurrent: %d, Commit batch size: %d",
+        model, max_concurrent, commit_batch_size,
     )
 
     # Discover and load cache from all existing databases
@@ -602,7 +605,9 @@ async def informalize_declarations(
         )
         declarations = await _get_declarations_to_process(search_session, limit)
 
-        logger.info(f"Found {len(declarations)} declarations needing informalization")
+        logger.info(
+            "Found %d declarations needing informalization", len(declarations)
+        )
         if not declarations:
             logger.info("No declarations to process")
             return
@@ -613,8 +618,8 @@ async def informalize_declarations(
             search_session, declarations, cache, commit_batch_size
         )
         logger.info(
-            f"Applied {cache_hits} informalizations from cache, "
-            f"{len(remaining_declarations)} remaining need API calls"
+            "Applied %d informalizations from cache, %d remaining need API calls",
+            cache_hits, len(remaining_declarations),
         )
 
         if not remaining_declarations:
@@ -633,7 +638,7 @@ async def informalize_declarations(
 
         logger.info("Building dependency layers for remaining declarations...")
         layers = _build_dependency_layers(remaining_declarations)
-        logger.info(f"Built {len(layers)} dependency layers")
+        logger.info("Built %d dependency layers", len(layers))
 
         processed = await _process_layers(
             session=search_session,
@@ -648,6 +653,6 @@ async def informalize_declarations(
         )
 
         logger.info(
-            f"Informalization complete. Processed {processed}/"
-            f"{len(remaining_declarations)} remaining declarations via API"
+            "Informalization complete. Processed %d/%d remaining declarations via API",
+            processed, len(remaining_declarations),
         )

@@ -4,8 +4,6 @@ Provides a client class that wraps OpenRouter's API and returns OpenAI SDK-compa
 types for easy integration.
 """
 
-from __future__ import annotations
-
 import os
 
 from openai import AsyncOpenAI

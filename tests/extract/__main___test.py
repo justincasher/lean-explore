@@ -144,6 +144,7 @@ class TestEmbeddingsStep:
                 batch_size=250,
                 limit=None,
                 max_seq_length=512,
+                embedding_server_url=None,
             )
 
 

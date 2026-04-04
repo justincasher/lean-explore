@@ -102,4 +102,6 @@ def update_lakefile_docgen_version(lakefile_path: Path, lean_version: str) -> No
 
     if new_content != content:
         lakefile_path.write_text(new_content)
-        logger.info(f"Updated doc-gen4 version to {lean_version} in {lakefile_path}")
+        logger.info(
+            "Updated doc-gen4 version to %s in %s", lean_version, lakefile_path
+        )

@@ -782,7 +782,7 @@ def collect_modules_recursively(
     if not is_target_package_module(module, package_name):
         return []
 
-    logging.info(f"Processing module: {module.canonical_path}")
+    logging.info("Processing module: %s", module.canonical_path)
     processed.add(module.canonical_path)
 
     modules = [serialize_module(module)]
@@ -810,7 +810,7 @@ def collect_modules_recursively(
 
 def main() -> None:
     """Generates documentation data from Python package and writes to JSON file."""
-    logging.info(f"Starting documentation generation for package: {PACKAGE_PATH}")
+    logging.info("Starting documentation generation for package: %s", PACKAGE_PATH)
 
     loader = GriffeLoader(
         search_paths=[str(PACKAGE_PATH.parent)], docstring_parser="google"
@@ -829,7 +829,7 @@ def main() -> None:
     else:
         raise ValueError(f"Failed to resolve root module for package: {package_name}")
 
-    logging.info(f"Collecting modules from root: {root_module.canonical_path}")
+    logging.info("Collecting modules from root: %s", root_module.canonical_path)
     processed_paths: set[str] = set()
     modules = collect_modules_recursively(root_module, package_name, processed_paths)
 
@@ -839,7 +839,7 @@ def main() -> None:
     with open(OUTPUT_PATH, "w", encoding="utf-8") as file:
         json.dump(output_data, file, indent=2, ensure_ascii=False)
 
-    logging.info(f"Documentation data successfully written to: {OUTPUT_PATH}")
+    logging.info("Documentation data successfully written to: %s", OUTPUT_PATH)
 
 
 if __name__ == "__main__":

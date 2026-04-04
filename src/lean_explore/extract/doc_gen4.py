@@ -38,12 +38,12 @@ def _clear_workspace_cache(workspace_path: Path) -> None:
     """
     manifest = workspace_path / "lake-manifest.json"
     if manifest.exists():
-        logger.info(f"Removing {manifest}")
+        logger.info("Removing %s", manifest)
         manifest.unlink()
 
     lake_dir = workspace_path / ".lake"
     if lake_dir.exists():
-        logger.info(f"Removing {lake_dir} to force complete rebuild")
+        logger.info("Removing %s to force complete rebuild", lake_dir)
         shutil.rmtree(lake_dir)
 
 
@@ -105,7 +105,7 @@ def _run_lake_update_with_retry(
         base_delay: Seconds to wait before the first retry. Doubles each retry.
     """
     for attempt in range(1, max_retries + 2):
-        logger.info(f"[{package_name}] Running lake update (attempt {attempt})...")
+        logger.info("[%s] Running lake update (attempt %d)...", package_name, attempt)
         result = subprocess.run(
             ["lake", "update"],
             cwd=workspace_path,
@@ -121,10 +121,10 @@ def _run_lake_update_with_retry(
         if attempt <= max_retries:
             delay = base_delay * (2 ** (attempt - 1))
             logger.warning(
-                f"[{package_name}] lake update failed (attempt {attempt}), "
-                f"retrying in {delay:.0f}s..."
+                "[%s] lake update failed (attempt %d), retrying in %.0fs...",
+                package_name, attempt, delay,
             )
-            logger.warning(f"[{package_name}] stderr: {result.stderr.strip()}")
+            logger.warning("[%s] stderr: %s", package_name, result.stderr.strip())
             time.sleep(delay)
         else:
             logger.error(result.stderr)
@@ -142,7 +142,7 @@ def _run_lake_for_package(package_name: str, verbose: bool = False) -> None:
 
     # Fetch mathlib cache for packages that depend on mathlib
     if "mathlib" in package_config.depends_on or package_name == "mathlib":
-        logger.info(f"[{package_name}] Fetching mathlib cache...")
+        logger.info("[%s] Fetching mathlib cache...", package_name)
         result = subprocess.run(
             ["lake", "exe", "cache", "get"],
             cwd=workspace_path,
@@ -153,9 +153,9 @@ def _run_lake_for_package(package_name: str, verbose: bool = False) -> None:
         if verbose and result.stdout:
             logger.info(result.stdout)
         if result.returncode != 0:
-            logger.warning(f"[{package_name}] Cache fetch failed (non-fatal)")
+            logger.warning("[%s] Cache fetch failed (non-fatal)", package_name)
 
-    logger.info(f"[{package_name}] Running lake build...")
+    logger.info("[%s] Running lake build...", package_name)
     process = subprocess.Popen(
         ["lake", "build"],
         cwd=workspace_path,
@@ -167,13 +167,13 @@ def _run_lake_for_package(package_name: str, verbose: bool = False) -> None:
     )
     if process.stdout:
         for line in process.stdout:
-            print(line, end="", flush=True)
+            logger.info(line.rstrip())
     if process.wait() != 0:
         raise RuntimeError(f"lake build failed for {package_name}")
 
     lib_names = _get_doc_lib_names(package_name)
     for lib_name in lib_names:
-        logger.info(f"[{package_name}] Running doc-gen4 ({lib_name}:docs)...")
+        logger.info("[%s] Running doc-gen4 (%s:docs)...", package_name, lib_name)
 
         process = subprocess.Popen(
             ["lake", "build", f"{lib_name}:docs"],
@@ -186,12 +186,12 @@ def _run_lake_for_package(package_name: str, verbose: bool = False) -> None:
         )
         if process.stdout:
             for line in process.stdout:
-                print(line, end="", flush=True)
+                logger.info(line.rstrip())
         returncode = process.wait()
         if returncode != 0:
             logger.warning(
-                f"[{package_name}] doc-gen4 had failures for {lib_name} "
-                "(continuing with generated docs)"
+                "[%s] doc-gen4 had failures for %s (continuing with generated docs)",
+                package_name, lib_name,
             )
 
 
@@ -217,7 +217,7 @@ async def run_doc_gen4(
     if packages is None:
         packages = get_extraction_order()
 
-    logger.info(f"Running doc-gen4 for packages: {', '.join(packages)}")
+    logger.info("Running doc-gen4 for packages: %s", ", ".join(packages))
 
     for package_name in packages:
         if package_name not in PACKAGE_REGISTRY:
@@ -225,14 +225,14 @@ async def run_doc_gen4(
 
         config = PACKAGE_REGISTRY[package_name]
         workspace_path = Path("lean") / package_name
-        logger.info(f"\n{'=' * 50}\nPackage: {package_name}\n{'=' * 50}")
+        logger.info("\n%s\nPackage: %s\n%s", "=" * 50, package_name, "=" * 50)
 
         if fresh:
             _clear_workspace_cache(workspace_path)
 
         if setup:
             toolchain, ref = _setup_workspace(config)
-            logger.info(f"Toolchain: {toolchain}, ref: {ref}")
+            logger.info("Toolchain: %s, ref: %s", toolchain, ref)
 
         _run_lake_for_package(package_name, verbose)
 
