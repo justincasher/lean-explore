@@ -275,6 +275,16 @@ def _extract_source_text(
         package_name.replace("-", "").lower(),
     ]:
         if variant in package_cache:
+            if variant == "lean4" and file_path_string.startswith("src/lean/"):
+                adjusted_path = file_path_string[9:]
+                candidates.append(package_cache[variant] / adjusted_path)
+                continue
+            if variant == "lean4" and file_path_string.startswith("src/lake/"):
+                adjusted_path = file_path_string[9:]
+                candidates.append(
+                    package_cache[variant].parent / "lake" / adjusted_path
+                )
+                continue
             if variant == "lean4" and file_path_string.startswith("src/"):
                 adjusted_path = file_path_string[4:]
             else:
@@ -298,6 +308,7 @@ def _extract_source_text(
 
 
 def _construct_source_link(
+    module_name: str,
     module_source_url: str | None,
     start_line: int,
     end_line: int,
@@ -305,6 +316,7 @@ def _construct_source_link(
     """Construct a GitHub source link from module URL and line range.
 
     Args:
+        module_name: Lean module name from api-docs.db.
         module_source_url: GitHub URL to the module file from api-docs.db.
         start_line: Start line number in the source file.
         end_line: End line number in the source file.
@@ -312,9 +324,23 @@ def _construct_source_link(
     Returns:
         GitHub URL with line range fragment, or None if no source URL exists.
     """
-    if not module_source_url:
-        return None
-    return f"{module_source_url}#L{start_line}-L{end_line}"
+    if module_source_url:
+        return f"{module_source_url}#L{start_line}-L{end_line}"
+
+    module_path = module_name.replace(".", "/")
+    root = module_name.split(".", 1)[0]
+    if root in {"Init", "Lean", "Std"}:
+        return (
+            "https://github.com/leanprover/lean4/blob/toolchain/"
+            f"src/lean/{module_path}.lean#L{start_line}-L{end_line}"
+        )
+    if root == "Lake":
+        return (
+            "https://github.com/leanprover/lean4/blob/toolchain/"
+            f"src/lake/{module_path}.lean#L{start_line}-L{end_line}"
+        )
+
+    return None
 
 
 def _parse_declarations_from_sqlite(
@@ -351,6 +377,7 @@ def _parse_declarations_from_sqlite(
                 n.position,
                 n.kind,
                 n.name,
+                n.render,
                 r.start_line,
                 r.end_line,
                 d.text AS docstring,
@@ -409,10 +436,14 @@ def _parse_declarations_from_sqlite(
                 end_line = row["end_line"]
 
                 source_link = _construct_source_link(
-                    source_url, start_line, end_line
+                    module_name, source_url, start_line, end_line
                 )
                 if not source_link:
                     skipped_no_source += 1
+                    progress.update(task, advance=1)
+                    continue
+
+                if not row["render"]:
                     progress.update(task, advance=1)
                     continue
 
