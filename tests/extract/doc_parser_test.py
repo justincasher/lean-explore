@@ -5,6 +5,7 @@ and declaration insertion functionality.
 """
 
 import json
+import sqlite3
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,11 +13,13 @@ from sqlalchemy import select
 
 from lean_explore.extract.doc_parser import (
     _build_package_cache,
+    _construct_source_link,
     _extract_dependencies_from_html,
     _extract_source_text,
     _filter_auto_generated_projections,
     _insert_declarations_batch,
     _parse_declarations_from_files,
+    _parse_declarations_from_sqlite,
     _read_source_lines,
     _strip_lean_comments,
     extract_declarations,
@@ -155,6 +158,51 @@ class TestSourceExtraction:
         with pytest.raises(FileNotFoundError):
             _extract_source_text(source_link, lean_root, package_cache)
 
+    def test_extract_source_text_from_lake_toolchain(self, temp_directory):
+        """Test extracting source text from the Lake toolchain path."""
+        lean_root = temp_directory / "lean"
+        toolchain_root = temp_directory / "toolchain" / "src"
+        lean_source_dir = toolchain_root / "lean"
+        lake_source_dir = toolchain_root / "lake"
+        lean_source_dir.mkdir(parents=True)
+        lake_file = lake_source_dir / "Lake" / "Config" / "Monad.lean"
+        lake_file.parent.mkdir(parents=True)
+        lake_file.write_text("def Lake.Config.Monad.run := 1\n")
+
+        package_cache = {"lean4": lean_source_dir}
+        source_link = (
+            "https://github.com/leanprover/lean4/blob/toolchain/"
+            "src/lake/Lake/Config/Monad.lean#L1-L1"
+        )
+
+        result = _extract_source_text(source_link, lean_root, package_cache)
+
+        assert "Lake.Config.Monad.run" in result
+
+
+class TestSqliteHelpers:
+    """Tests for SQLite-specific parsing helpers."""
+
+    def test_construct_source_link_for_core_module(self):
+        """Test source links for core modules without a stored source URL."""
+        result = _construct_source_link("Init.Data.Nat.Basic", None, 12, 15)
+
+        assert (
+            result
+            == "https://github.com/leanprover/lean4/blob/toolchain/"
+            "src/lean/Init/Data/Nat/Basic.lean#L12-L15"
+        )
+
+    def test_construct_source_link_for_lake_module(self):
+        """Test source links for Lake modules without a stored source URL."""
+        result = _construct_source_link("Lake.Config.Monad", None, 7, 9)
+
+        assert (
+            result
+            == "https://github.com/leanprover/lean4/blob/toolchain/"
+            "src/lake/Lake/Config/Monad.lean#L7-L9"
+        )
+
 
 class TestDependencyExtraction:
     """Tests for dependency extraction from HTML."""
@@ -272,6 +320,207 @@ class TestDeclarationParsing:
         )
 
         assert len(declarations) == 0
+
+    def test_parse_declarations_from_sqlite_filters_non_rendered(
+        self, temp_directory
+    ):
+        """Test SQLite parsing only keeps rendered declarations."""
+        lean_root = temp_directory / "lean"
+        database_path = temp_directory / "api-docs.db"
+
+        source_dir = lean_root / "mathlib" / ".lake" / "packages" / "mathlib4"
+        source_file = source_dir / "Mathlib" / "Data" / "Nat" / "Basic.lean"
+        source_file.parent.mkdir(parents=True)
+        source_file.write_text(
+            "theorem Nat.visible : True := trivial\n"
+            "def Nat.hidden : Nat := 0\n"
+        )
+
+        connection = sqlite3.connect(database_path)
+        connection.executescript(
+            """
+            CREATE TABLE modules (name TEXT PRIMARY KEY, source_url TEXT);
+            CREATE TABLE name_info (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              kind TEXT,
+              name TEXT NOT NULL,
+              type BLOB NOT NULL,
+              sorried INTEGER NOT NULL,
+              render INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_ranges (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              start_line INTEGER NOT NULL,
+              start_column INTEGER NOT NULL,
+              start_utf16 INTEGER NOT NULL,
+              end_line INTEGER NOT NULL,
+              end_column INTEGER NOT NULL,
+              end_utf16 INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_markdown_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              text TEXT NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO modules (name, source_url) VALUES (?, ?)",
+            (
+                "Mathlib.Data.Nat.Basic",
+                "https://github.com/leanprover-community/mathlib4/blob/master/"
+                "Mathlib/Data/Nat/Basic.lean",
+            ),
+        )
+        connection.executemany(
+            """
+            INSERT INTO name_info
+              (module_name, position, kind, name, type, sorried, render)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "Mathlib.Data.Nat.Basic",
+                    1,
+                    "theorem",
+                    "Nat.visible",
+                    b"",
+                    0,
+                    1,
+                ),
+                (
+                    "Mathlib.Data.Nat.Basic",
+                    2,
+                    "definition",
+                    "Nat.hidden",
+                    b"",
+                    0,
+                    0,
+                ),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO declaration_ranges
+              (module_name, position, start_line, start_column, start_utf16,
+               end_line, end_column, end_utf16)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("Mathlib.Data.Nat.Basic", 1, 1, 0, 0, 1, 32, 32),
+                ("Mathlib.Data.Nat.Basic", 2, 2, 0, 0, 2, 22, 22),
+            ],
+        )
+        connection.execute(
+            """
+            INSERT INTO declaration_markdown_docstrings
+              (module_name, position, text)
+            VALUES (?, ?, ?)
+            """,
+            ("Mathlib.Data.Nat.Basic", 1, "Visible theorem"),
+        )
+        connection.commit()
+        connection.close()
+
+        declarations = _parse_declarations_from_sqlite(
+            database_path,
+            lean_root,
+            _build_package_cache(lean_root),
+            allowed_module_prefixes=["Mathlib"],
+        )
+
+        assert [declaration.name for declaration in declarations] == ["Nat.visible"]
+        assert declarations[0].docstring == "Visible theorem"
+
+    def test_parse_declarations_from_sqlite_uses_core_fallback_source_link(
+        self, temp_directory
+    ):
+        """Test SQLite parsing for core modules without a stored source URL."""
+        lean_root = temp_directory / "lean"
+        database_path = temp_directory / "api-docs.db"
+
+        toolchain_root = temp_directory / "toolchain" / "src"
+        lean_source_dir = toolchain_root / "lean"
+        init_file = lean_source_dir / "Init" / "Data" / "Nat" / "Basic.lean"
+        init_file.parent.mkdir(parents=True)
+        init_file.write_text("theorem Nat.core : True := trivial\n")
+
+        connection = sqlite3.connect(database_path)
+        connection.executescript(
+            """
+            CREATE TABLE modules (name TEXT PRIMARY KEY, source_url TEXT);
+            CREATE TABLE name_info (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              kind TEXT,
+              name TEXT NOT NULL,
+              type BLOB NOT NULL,
+              sorried INTEGER NOT NULL,
+              render INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_ranges (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              start_line INTEGER NOT NULL,
+              start_column INTEGER NOT NULL,
+              start_utf16 INTEGER NOT NULL,
+              end_line INTEGER NOT NULL,
+              end_column INTEGER NOT NULL,
+              end_utf16 INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_markdown_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              text TEXT NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO modules (name, source_url) VALUES (?, ?)",
+            ("Init.Data.Nat.Basic", None),
+        )
+        connection.execute(
+            """
+            INSERT INTO name_info
+              (module_name, position, kind, name, type, sorried, render)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("Init.Data.Nat.Basic", 1, "theorem", "Nat.core", b"", 0, 1),
+        )
+        connection.execute(
+            """
+            INSERT INTO declaration_ranges
+              (module_name, position, start_line, start_column, start_utf16,
+               end_line, end_column, end_utf16)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("Init.Data.Nat.Basic", 1, 1, 0, 0, 1, 31, 31),
+        )
+        connection.commit()
+        connection.close()
+
+        declarations = _parse_declarations_from_sqlite(
+            database_path,
+            lean_root,
+            {"lean4": lean_source_dir},
+            allowed_module_prefixes=["Init"],
+        )
+
+        assert len(declarations) == 1
+        assert declarations[0].name == "Nat.core"
+        assert (
+            declarations[0].source_link
+            == "https://github.com/leanprover/lean4/blob/toolchain/"
+            "src/lean/Init/Data/Nat/Basic.lean#L1-L1"
+        )
 
 
 class TestDeclarationInsertion:
