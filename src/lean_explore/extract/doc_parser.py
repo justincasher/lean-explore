@@ -449,11 +449,32 @@ def _extract_source_text(
     )
 
 
+def _read_lean_toolchain_version(workspace_path: Path) -> str | None:
+    """Read the Lean version from a workspace's lean-toolchain file.
+
+    Args:
+        workspace_path: Path to the package workspace (e.g., lean/mathlib).
+
+    Returns:
+        Version string like 'v4.29.0-rc6', or None if not found.
+    """
+    toolchain_file = workspace_path / "lean-toolchain"
+    if not toolchain_file.exists():
+        return None
+    try:
+        content = toolchain_file.read_text().strip()
+        match = re.search(r"v\d+\.\d+\.\d+(?:-rc\d+)?", content)
+        return match.group() if match else None
+    except OSError:
+        return None
+
+
 def _construct_source_link(
     module_name: str,
     module_source_url: str | None,
     start_line: int,
     end_line: int,
+    lean_version: str | None = None,
 ) -> str | None:
     """Construct a GitHub source link from module URL and line range.
 
@@ -462,6 +483,8 @@ def _construct_source_link(
         module_source_url: GitHub URL to the module file from api-docs.db.
         start_line: Start line number in the source file.
         end_line: End line number in the source file.
+        lean_version: Lean toolchain version (e.g., 'v4.29.0-rc6') used as
+            the git ref for core module fallback URLs.
 
     Returns:
         GitHub URL with line range fragment, or None if no source URL exists.
@@ -469,16 +492,17 @@ def _construct_source_link(
     if module_source_url:
         return f"{module_source_url}#L{start_line}-L{end_line}"
 
+    git_ref = lean_version or "master"
     module_path = module_name.replace(".", "/")
     root = module_name.split(".", 1)[0]
     if root in {"Init", "Lean", "Std"}:
         return (
-            "https://github.com/leanprover/lean4/blob/toolchain/"
+            f"https://github.com/leanprover/lean4/blob/{git_ref}/"
             f"src/lean/{module_path}.lean#L{start_line}-L{end_line}"
         )
     if root == "Lake":
         return (
-            "https://github.com/leanprover/lean4/blob/toolchain/"
+            f"https://github.com/leanprover/lean4/blob/{git_ref}/"
             f"src/lake/{module_path}.lean#L{start_line}-L{end_line}"
         )
 
@@ -490,6 +514,7 @@ def _parse_declarations_from_sqlite(
     lean_root: Path,
     package_cache: dict[str, Path],
     allowed_module_prefixes: list[str],
+    lean_version: str | None = None,
 ) -> list[Declaration]:
     """Parse declarations from a doc-gen4 SQLite database (api-docs.db).
 
@@ -502,6 +527,7 @@ def _parse_declarations_from_sqlite(
         lean_root: Root directory of the Lean project.
         package_cache: Dictionary mapping package names to their directories.
         allowed_module_prefixes: Module prefixes to extract (e.g., ["Mathlib"]).
+        lean_version: Lean toolchain version for core module source links.
 
     Returns:
         List of parsed Declaration objects.
@@ -579,7 +605,8 @@ def _parse_declarations_from_sqlite(
                 end_line = row["end_line"]
 
                 source_link = _construct_source_link(
-                    module_name, source_url, start_line, end_line
+                    module_name, source_url, start_line, end_line,
+                    lean_version=lean_version,
                 )
                 if not source_link:
                     skipped_no_source += 1
@@ -848,6 +875,7 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
 
         if docgen_format == "sqlite":
             api_docs_path = workspace_path / ".lake" / "build" / "api-docs.db"
+            lean_version = _read_lean_toolchain_version(workspace_path)
             logger.info(
                 "[%s] Using SQLite format (api-docs.db)", package_name
             )
@@ -856,6 +884,7 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
                 lean_root,
                 package_cache,
                 package_config.module_prefixes,
+                lean_version=lean_version,
             )
         else:
             doc_data_dir = workspace_path / ".lake" / "build" / "doc-data"
