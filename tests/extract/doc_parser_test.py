@@ -12,9 +12,11 @@ import pytest
 from sqlalchemy import select
 
 from lean_explore.extract.doc_parser import (
+    _BlobReader,
     _build_package_cache,
     _construct_source_link,
     _extract_dependencies_from_html,
+    _extract_names_from_rendered_code,
     _extract_source_text,
     _filter_auto_generated_projections,
     _insert_declarations_batch,
@@ -178,6 +180,158 @@ class TestSourceExtraction:
         result = _extract_source_text(source_link, lean_root, package_cache)
 
         assert "Lake.Config.Monad.run" in result
+
+
+def _encode_nat(n: int) -> bytes:
+    """Encode a natural number in leansqlite's variable-length format."""
+    chunks = []
+    while n >= 128:
+        chunks.append((n & 0x7F) | 0x80)
+        n >>= 7
+    chunks.append(n)
+    return bytes(chunks)
+
+
+def _encode_string(s: str) -> bytes:
+    """Encode a string: Nat(utf8_byte_length) + UTF-8 bytes."""
+    encoded = s.encode("utf-8")
+    return _encode_nat(len(encoded)) + encoded
+
+
+def _encode_name(name: str) -> bytes:
+    """Encode a dotted Lean name (e.g. 'Nat.add') into binary."""
+    if not name:
+        return b"\x00"  # anonymous
+    parts = name.split(".")
+    result = b"\x00"  # start with anonymous
+    for part in parts:
+        # Name.str = tag 1 + parent + string
+        result = b"\x01" + result + _encode_string(part)
+    return result
+
+
+def _make_const_tag(name: str) -> bytes:
+    """Build a RenderedCode.Tag.const(name) blob fragment."""
+    return b"\x02" + _encode_name(name)
+
+
+def _make_text_node(s: str) -> bytes:
+    """Build a TaggedText.text(s) blob fragment."""
+    return b"\x00" + _encode_string(s)
+
+
+def _make_tag_node(tag_bytes: bytes, inner: bytes) -> bytes:
+    """Build a TaggedText.tag(tag, inner) blob fragment."""
+    return b"\x01" + tag_bytes + inner
+
+
+def _make_append_node(children: list[bytes]) -> bytes:
+    """Build a TaggedText.append(children) blob fragment."""
+    return b"\x02" + _encode_nat(len(children)) + b"".join(children)
+
+
+class TestRenderedCodeBlobParser:
+    """Tests for RenderedCode BLOB parsing to extract dependency names."""
+
+    def test_extract_single_const(self):
+        """Test extracting a single const name from a type BLOB."""
+        # TaggedText.tag(Tag.const("Nat"), TaggedText.text("Nat"))
+        blob = _make_tag_node(_make_const_tag("Nat"), _make_text_node("Nat"))
+        names = _extract_names_from_rendered_code(blob)
+        assert names == ["Nat"]
+
+    def test_extract_multiple_consts(self):
+        """Test extracting multiple const names from a type BLOB."""
+        # append([tag(const Nat, text Nat), text " → ", tag(const Bool, text Bool)])
+        blob = _make_append_node([
+            _make_tag_node(_make_const_tag("Nat"), _make_text_node("Nat")),
+            _make_text_node(" → "),
+            _make_tag_node(_make_const_tag("Bool"), _make_text_node("Bool")),
+        ])
+        names = _extract_names_from_rendered_code(blob)
+        assert names == ["Nat", "Bool"]
+
+    def test_extract_dotted_name(self):
+        """Test extracting a dotted name like Nat.add."""
+        blob = _make_tag_node(
+            _make_const_tag("Nat.add"), _make_text_node("Nat.add")
+        )
+        names = _extract_names_from_rendered_code(blob)
+        assert names == ["Nat.add"]
+
+    def test_deduplicates_names(self):
+        """Test that duplicate const references are deduplicated."""
+        blob = _make_append_node([
+            _make_tag_node(_make_const_tag("Nat"), _make_text_node("Nat")),
+            _make_text_node(" → "),
+            _make_tag_node(_make_const_tag("Nat"), _make_text_node("Nat")),
+        ])
+        names = _extract_names_from_rendered_code(blob)
+        assert names == ["Nat"]
+
+    def test_skips_non_const_tags(self):
+        """Test that keyword, string, sort, otherExpr tags are skipped."""
+        blob = _make_append_node([
+            _make_tag_node(b"\x00", _make_text_node("def")),       # keyword
+            _make_text_node(" "),
+            _make_tag_node(_make_const_tag("Nat"), _make_text_node("Nat")),
+            _make_tag_node(b"\x07", _make_text_node("x")),         # otherExpr
+        ])
+        names = _extract_names_from_rendered_code(blob)
+        assert names == ["Nat"]
+
+    def test_empty_blob_returns_empty(self):
+        """Test that an empty or invalid BLOB returns empty list."""
+        assert _extract_names_from_rendered_code(b"") == []
+        assert _extract_names_from_rendered_code(b"\xff") == []
+
+    def test_text_only_returns_empty(self):
+        """Test that a BLOB with only text returns no names."""
+        blob = _make_text_node("hello world")
+        names = _extract_names_from_rendered_code(blob)
+        assert names == []
+
+    def test_nested_tagged_text(self):
+        """Test parsing nested tag nodes."""
+        # tag(otherExpr, tag(const("List"), text("List")))
+        inner = _make_tag_node(_make_const_tag("List"), _make_text_node("List"))
+        blob = _make_tag_node(b"\x07", inner)  # otherExpr wrapping
+        names = _extract_names_from_rendered_code(blob)
+        assert names == ["List"]
+
+    def test_blob_reader_nat_encoding(self):
+        """Test that Nat encoding/decoding matches leansqlite format."""
+        reader = _BlobReader(_encode_nat(0))
+        assert reader._read_nat() == 0
+
+        reader = _BlobReader(_encode_nat(127))
+        assert reader._read_nat() == 127
+
+        reader = _BlobReader(_encode_nat(128))
+        assert reader._read_nat() == 128
+
+        reader = _BlobReader(_encode_nat(300))
+        assert reader._read_nat() == 300
+
+        reader = _BlobReader(_encode_nat(100000))
+        assert reader._read_nat() == 100000
+
+    def test_blob_reader_name_roundtrip(self):
+        """Test that Name encoding produces correct dot-separated output."""
+        reader = _BlobReader(_encode_name("Mathlib.Data.Nat.Basic"))
+        assert reader._read_name() == "Mathlib.Data.Nat.Basic"
+
+        reader = _BlobReader(_encode_name(""))
+        assert reader._read_name() == ""
+
+    def test_sort_tags_handled(self):
+        """Test that sort tag variants (3-6) are handled without error."""
+        for sort_byte in [3, 4, 5, 6]:
+            blob = _make_tag_node(
+                bytes([sort_byte]), _make_text_node("Type")
+            )
+            names = _extract_names_from_rendered_code(blob)
+            assert names == []
 
 
 class TestSqliteHelpers:
@@ -389,7 +543,7 @@ class TestDeclarationParsing:
                     1,
                     "theorem",
                     "Nat.visible",
-                    b"",
+                    _make_text_node("True"),
                     0,
                     1,
                 ),
@@ -398,7 +552,7 @@ class TestDeclarationParsing:
                     2,
                     "definition",
                     "Nat.hidden",
-                    b"",
+                    _make_text_node("Nat"),
                     0,
                     0,
                 ),
@@ -436,6 +590,97 @@ class TestDeclarationParsing:
 
         assert [declaration.name for declaration in declarations] == ["Nat.visible"]
         assert declarations[0].docstring == "Visible theorem"
+
+    def test_parse_declarations_from_sqlite_extracts_dependencies(
+        self, temp_directory
+    ):
+        """Test that SQLite parsing extracts dependencies from type BLOBs."""
+        lean_root = temp_directory / "lean"
+        database_path = temp_directory / "api-docs.db"
+
+        source_dir = lean_root / "mathlib" / ".lake" / "packages" / "mathlib4"
+        source_file = source_dir / "Mathlib" / "Data" / "Nat" / "Basic.lean"
+        source_file.parent.mkdir(parents=True)
+        source_file.write_text("def Nat.myFunc (n : Nat) : Bool := true\n")
+
+        # Build a type BLOB: "Nat → Bool"
+        type_blob = _make_append_node([
+            _make_tag_node(_make_const_tag("Nat"), _make_text_node("Nat")),
+            _make_text_node(" → "),
+            _make_tag_node(_make_const_tag("Bool"), _make_text_node("Bool")),
+        ])
+
+        connection = sqlite3.connect(database_path)
+        connection.executescript(
+            """
+            CREATE TABLE modules (name TEXT PRIMARY KEY, source_url TEXT);
+            CREATE TABLE name_info (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              kind TEXT,
+              name TEXT NOT NULL,
+              type BLOB NOT NULL,
+              sorried INTEGER NOT NULL,
+              render INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_ranges (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              start_line INTEGER NOT NULL,
+              start_column INTEGER NOT NULL,
+              start_utf16 INTEGER NOT NULL,
+              end_line INTEGER NOT NULL,
+              end_column INTEGER NOT NULL,
+              end_utf16 INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_markdown_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              text TEXT NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO modules (name, source_url) VALUES (?, ?)",
+            (
+                "Mathlib.Data.Nat.Basic",
+                "https://github.com/leanprover-community/mathlib4/blob/master/"
+                "Mathlib/Data/Nat/Basic.lean",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO name_info
+              (module_name, position, kind, name, type, sorried, render)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("Mathlib.Data.Nat.Basic", 1, "definition", "Nat.myFunc", type_blob, 0, 1),
+        )
+        connection.execute(
+            """
+            INSERT INTO declaration_ranges
+              (module_name, position, start_line, start_column, start_utf16,
+               end_line, end_column, end_utf16)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("Mathlib.Data.Nat.Basic", 1, 1, 0, 0, 1, 40, 40),
+        )
+        connection.commit()
+        connection.close()
+
+        declarations = _parse_declarations_from_sqlite(
+            database_path,
+            lean_root,
+            _build_package_cache(lean_root),
+            allowed_module_prefixes=["Mathlib"],
+        )
+
+        assert len(declarations) == 1
+        assert declarations[0].name == "Nat.myFunc"
+        assert declarations[0].dependencies == ["Nat", "Bool"]
 
     def test_parse_declarations_from_sqlite_uses_core_fallback_source_link(
         self, temp_directory
@@ -493,7 +738,10 @@ class TestDeclarationParsing:
               (module_name, position, kind, name, type, sorried, render)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            ("Init.Data.Nat.Basic", 1, "theorem", "Nat.core", b"", 0, 1),
+            (
+                "Init.Data.Nat.Basic", 1, "theorem", "Nat.core",
+                _make_text_node("True"), 0, 1,
+            ),
         )
         connection.execute(
             """
