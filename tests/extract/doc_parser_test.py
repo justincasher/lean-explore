@@ -22,6 +22,7 @@ from lean_explore.extract.doc_parser import (
     _insert_declarations_batch,
     _parse_declarations_from_files,
     _parse_declarations_from_sqlite,
+    _read_lean_toolchain_version,
     _read_source_lines,
     _strip_lean_comments,
     extract_declarations,
@@ -337,25 +338,75 @@ class TestRenderedCodeBlobParser:
 class TestSqliteHelpers:
     """Tests for SQLite-specific parsing helpers."""
 
-    def test_construct_source_link_for_core_module(self):
-        """Test source links for core modules without a stored source URL."""
-        result = _construct_source_link("Init.Data.Nat.Basic", None, 12, 15)
+    def test_construct_source_link_for_core_module_with_version(self):
+        """Test source links for core modules use the toolchain version."""
+        result = _construct_source_link(
+            "Init.Data.Nat.Basic", None, 12, 15,
+            lean_version="v4.29.0-rc6",
+        )
 
         assert (
             result
-            == "https://github.com/leanprover/lean4/blob/toolchain/"
+            == "https://github.com/leanprover/lean4/blob/v4.29.0-rc6/"
             "src/lean/Init/Data/Nat/Basic.lean#L12-L15"
         )
 
-    def test_construct_source_link_for_lake_module(self):
-        """Test source links for Lake modules without a stored source URL."""
-        result = _construct_source_link("Lake.Config.Monad", None, 7, 9)
+    def test_construct_source_link_for_lake_module_with_version(self):
+        """Test source links for Lake modules use the toolchain version."""
+        result = _construct_source_link(
+            "Lake.Config.Monad", None, 7, 9,
+            lean_version="v4.29.0-rc6",
+        )
 
         assert (
             result
-            == "https://github.com/leanprover/lean4/blob/toolchain/"
+            == "https://github.com/leanprover/lean4/blob/v4.29.0-rc6/"
             "src/lake/Lake/Config/Monad.lean#L7-L9"
         )
+
+    def test_construct_source_link_falls_back_to_master(self):
+        """Test that missing lean_version falls back to 'master'."""
+        result = _construct_source_link(
+            "Init.Data.Nat.Basic", None, 12, 15,
+        )
+
+        assert (
+            result
+            == "https://github.com/leanprover/lean4/blob/master/"
+            "src/lean/Init/Data/Nat/Basic.lean#L12-L15"
+        )
+
+    def test_construct_source_link_prefers_source_url(self):
+        """Test that a non-None source_url is used directly."""
+        url = "https://github.com/leanprover-community/mathlib4/blob/abc123/Foo.lean"
+        result = _construct_source_link("Foo.Bar", url, 1, 10)
+
+        assert result == f"{url}#L1-L10"
+
+    def test_read_lean_toolchain_version(self, temp_directory):
+        """Test reading version from a lean-toolchain file."""
+        workspace = temp_directory / "workspace"
+        workspace.mkdir()
+        toolchain = workspace / "lean-toolchain"
+        toolchain.write_text("leanprover/lean4:v4.29.0-rc6\n")
+
+        assert _read_lean_toolchain_version(workspace) == "v4.29.0-rc6"
+
+    def test_read_lean_toolchain_version_release(self, temp_directory):
+        """Test reading a release version (no -rc suffix)."""
+        workspace = temp_directory / "workspace"
+        workspace.mkdir()
+        toolchain = workspace / "lean-toolchain"
+        toolchain.write_text("leanprover/lean4:v4.29.0\n")
+
+        assert _read_lean_toolchain_version(workspace) == "v4.29.0"
+
+    def test_read_lean_toolchain_version_missing(self, temp_directory):
+        """Test returns None when lean-toolchain doesn't exist."""
+        workspace = temp_directory / "workspace"
+        workspace.mkdir()
+
+        assert _read_lean_toolchain_version(workspace) is None
 
 
 class TestDependencyExtraction:
@@ -760,13 +811,14 @@ class TestDeclarationParsing:
             lean_root,
             {"lean4": lean_source_dir},
             allowed_module_prefixes=["Init"],
+            lean_version="v4.29.0-rc6",
         )
 
         assert len(declarations) == 1
         assert declarations[0].name == "Nat.core"
         assert (
             declarations[0].source_link
-            == "https://github.com/leanprover/lean4/blob/toolchain/"
+            == "https://github.com/leanprover/lean4/blob/v4.29.0-rc6/"
             "src/lean/Init/Data/Nat/Basic.lean#L1-L1"
         )
 
