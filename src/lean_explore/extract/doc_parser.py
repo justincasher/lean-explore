@@ -538,7 +538,10 @@ def _parse_declarations_from_sqlite(
     connection.row_factory = sqlite3.Row
 
     try:
-        # Query all declarations with their source ranges and docstrings
+        # Query declarations with source ranges and both docstring types.
+        # Doc-gen4 stores docstrings as either markdown text or Verso binary
+        # BLOBs (never both). We prefer markdown; Verso BLOBs require a
+        # complex deserializer so we detect but cannot extract them yet.
         query = """
             SELECT
                 n.module_name,
@@ -550,12 +553,15 @@ def _parse_declarations_from_sqlite(
                 r.start_line,
                 r.end_line,
                 d.text AS docstring,
+                v.content AS verso_docstring,
                 m.source_url
             FROM name_info n
             JOIN declaration_ranges r
                 ON n.module_name = r.module_name AND n.position = r.position
             LEFT JOIN declaration_markdown_docstrings d
                 ON n.module_name = d.module_name AND n.position = d.position
+            LEFT JOIN declaration_verso_docstrings v
+                ON n.module_name = v.module_name AND n.position = v.position
             JOIN modules m
                 ON n.module_name = m.name
             ORDER BY n.module_name, n.position
@@ -568,6 +574,7 @@ def _parse_declarations_from_sqlite(
         skipped_prefix = 0
         skipped_constructor = 0
         source_errors = 0
+        verso_only_docstrings = 0
 
         with Progress(
             SpinnerColumn(),
@@ -646,11 +653,16 @@ def _parse_declarations_from_sqlite(
                 else:
                     dependencies = None
 
+                # Use markdown docstring; detect Verso-only cases
+                docstring = row["docstring"]
+                if not docstring and row["verso_docstring"]:
+                    verso_only_docstrings += 1
+
                 declarations.append(
                     Declaration(
                         name=declaration_name,
                         module=module_name,
-                        docstring=row["docstring"],
+                        docstring=docstring,
                         source_text=source_text,
                         source_link=source_link,
                         dependencies=dependencies,
@@ -668,6 +680,12 @@ def _parse_declarations_from_sqlite(
             logger.info("Skipped %d .mk constructors", skipped_constructor)
         if skipped_no_source > 0:
             logger.info("Skipped %d declarations without source URL", skipped_no_source)
+        if verso_only_docstrings > 0:
+            logger.warning(
+                "%d declarations have Verso-only docstrings "
+                "(not yet supported, stored as docstring=None)",
+                verso_only_docstrings,
+            )
         if source_errors > 0:
             logger.warning(
                 "Could not extract source text for %d declarations",
