@@ -7,8 +7,8 @@ package «physlean-extractor» where
 lean_lib «PhysExtract» where
   roots := #[`PhysExtract]
 
+require «doc-gen4» from git
+  "https://github.com/leanprover/doc-gen4" @ "main"
+
 require PhysLean from git
   "https://github.com/HEPLean/PhysLean"
-
-require «doc-gen4» from git
-  "https://github.com/leanprover/doc-gen4" @ "v4.26.0"
