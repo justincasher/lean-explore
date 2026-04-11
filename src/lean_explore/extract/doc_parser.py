@@ -31,6 +31,148 @@ from lean_explore.models import Declaration as DBDeclaration
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# RenderedCode BLOB parser
+#
+# Doc-gen4 stores declaration type signatures in the `name_info.type` column
+# as a binary BLOB using leansqlite's ToBinary serialization format.
+#
+# The type is  RenderedCode = TaggedText RenderedCode.Tag  where:
+#   TaggedText:  text(0) String | tag(1) Tag TaggedText | append(2) Array
+#   Tag:         keyword(0) | string(1) | const(2) Name | sort-none(3)
+#                | sort-type(4) | sort-prop(5) | sort-sort(6) | otherExpr(7)
+#   Name:        anonymous(0) | str(1) Name String | num(2) Name Nat
+#
+# Encoding primitives (big-endian, leansqlite Classes.lean):
+#   Nat  – variable-length 7-bit chunks, high bit = continuation
+#   String – Nat(utf8_byte_length) + raw UTF-8 bytes
+#   Array  – Nat(count) + elements
+# ---------------------------------------------------------------------------
+
+
+class _BlobReader:
+    """Minimal reader for leansqlite ToBinary format."""
+
+    __slots__ = ("_data", "_cursor")
+
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+        self._cursor = 0
+
+    def _read_byte(self) -> int:
+        if self._cursor >= len(self._data):
+            raise ValueError("Unexpected end of BLOB data")
+        value = self._data[self._cursor]
+        self._cursor += 1
+        return value
+
+    def _read_nat(self) -> int:
+        """Read a variable-length natural number (7-bit chunks, MSB = more)."""
+        result = 0
+        shift = 0
+        while True:
+            byte = self._read_byte()
+            if byte >= 128:
+                result |= (byte & 0x7F) << shift
+            else:
+                result |= byte << shift
+                break
+            shift += 7
+        return result
+
+    def _read_string(self) -> str:
+        byte_length = self._read_nat()
+        if self._cursor + byte_length > len(self._data):
+            raise ValueError("String extends past end of BLOB data")
+        raw = self._data[self._cursor : self._cursor + byte_length]
+        self._cursor += byte_length
+        return raw.decode("utf-8")
+
+    def _read_name(self) -> str:
+        """Read a Lean Name and return its dot-separated string form."""
+        tag = self._read_byte()
+        if tag == 0:  # anonymous
+            return ""
+        if tag == 1:  # str parent s
+            parent = self._read_name()
+            component = self._read_string()
+            return f"{parent}.{component}" if parent else component
+        if tag == 2:  # num parent n
+            parent = self._read_name()
+            number = self._read_nat()
+            return f"{parent}.{number}" if parent else str(number)
+        raise ValueError(f"Invalid Name tag: {tag}")
+
+    def _skip_name(self) -> None:
+        """Skip over a Name without allocating strings."""
+        tag = self._read_byte()
+        if tag == 0:
+            return
+        if tag == 1:
+            self._skip_name()
+            byte_length = self._read_nat()
+            self._cursor += byte_length
+            return
+        if tag == 2:
+            self._skip_name()
+            self._read_nat()
+            return
+        raise ValueError(f"Invalid Name tag: {tag}")
+
+
+def _extract_names_from_rendered_code(blob: bytes) -> list[str]:
+    """Extract referenced declaration names from a RenderedCode BLOB.
+
+    Walks the TaggedText tree and collects Lean Names from every
+    RenderedCode.Tag.const node (tag byte 2).
+
+    Args:
+        blob: Raw bytes of the RenderedCode BLOB from name_info.type.
+
+    Returns:
+        De-duplicated list of fully-qualified Lean names referenced in the type.
+    """
+    reader = _BlobReader(blob)
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def walk_tagged_text() -> None:
+        tag = reader._read_byte()
+        if tag == 0:  # text
+            reader._read_string()
+        elif tag == 1:  # tag
+            walk_tag()
+            walk_tagged_text()
+        elif tag == 2:  # append
+            count = reader._read_nat()
+            for _ in range(count):
+                walk_tagged_text()
+        else:
+            raise ValueError(f"Invalid TaggedText tag: {tag}")
+
+    def walk_tag() -> None:
+        tag = reader._read_byte()
+        if tag <= 1 or (3 <= tag <= 7):
+            # keyword(0), string(1), sort-none(3), sort-type(4),
+            # sort-prop(5), sort-sort(6), otherExpr(7) — no payload
+            return
+        if tag == 2:  # const
+            name = reader._read_name()
+            if name and name not in seen:
+                names.append(name)
+                seen.add(name)
+            return
+        raise ValueError(f"Invalid RenderedCode.Tag tag: {tag}")
+
+    try:
+        walk_tagged_text()
+    except (ValueError, IndexError):
+        logger.debug("Failed to parse RenderedCode BLOB (%d bytes)", len(blob))
+        return []
+
+    return names
+
+
 def _strip_lean_comments(source_text: str) -> str:
     """Strip Lean comments from source text for comparison.
 
@@ -377,6 +519,7 @@ def _parse_declarations_from_sqlite(
                 n.position,
                 n.kind,
                 n.name,
+                n.type,
                 n.render,
                 r.start_line,
                 r.end_line,
@@ -462,6 +605,20 @@ def _parse_declarations_from_sqlite(
                     progress.update(task, advance=1)
                     continue
 
+                # Extract dependency names from the type signature BLOB
+                type_blob = row["type"]
+                if type_blob:
+                    dep_names = _extract_names_from_rendered_code(
+                        bytes(type_blob)
+                    )
+                    # Filter out self-references
+                    dep_names = [
+                        d for d in dep_names if d != declaration_name
+                    ]
+                    dependencies = dep_names or None
+                else:
+                    dependencies = None
+
                 declarations.append(
                     Declaration(
                         name=declaration_name,
@@ -469,7 +626,7 @@ def _parse_declarations_from_sqlite(
                         docstring=row["docstring"],
                         source_text=source_text,
                         source_link=source_link,
-                        dependencies=None,
+                        dependencies=dependencies,
                     )
                 )
 
