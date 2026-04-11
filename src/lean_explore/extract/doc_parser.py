@@ -712,6 +712,7 @@ def _parse_declarations_from_files(
         List of parsed Declaration objects.
     """
     declarations = []
+    source_errors = 0
 
     with Progress(
         SpinnerColumn(),
@@ -740,22 +741,32 @@ def _parse_declarations_from_files(
 
             for declaration_data in data.get("declarations", []):
                 information = declaration_data["info"]
-                source_text = _extract_source_text(
-                    information["sourceLink"], lean_root, package_cache
-                )
+                declaration_name = information["name"]
+
+                # Skip auto-generated .mk constructors
+                if declaration_name.endswith(".mk"):
+                    continue
+
+                try:
+                    source_text = _extract_source_text(
+                        information["sourceLink"], lean_root, package_cache
+                    )
+                except (FileNotFoundError, ValueError) as error:
+                    source_errors += 1
+                    if source_errors <= 10:
+                        logger.debug(
+                            "Could not extract source for %s: %s",
+                            declaration_name, error,
+                        )
+                    continue
 
                 header_html = declaration_data.get("header", "")
                 dependencies = _extract_dependencies_from_html(header_html)
 
                 # Filter out self-references from dependencies
-                declaration_name = information["name"]
                 filtered_dependencies = [
                     d for d in dependencies if d != declaration_name
                 ]
-
-                # Skip auto-generated .mk constructors
-                if declaration_name.endswith(".mk"):
-                    continue
 
                 declarations.append(
                     Declaration(
@@ -769,6 +780,12 @@ def _parse_declarations_from_files(
                 )
 
             progress.update(task, advance=1)
+
+    if source_errors > 0:
+        logger.warning(
+            "Could not extract source text for %d declarations",
+            source_errors,
+        )
 
     return declarations
 
