@@ -81,16 +81,17 @@ def get_package_toolchain(package_configuration: PackageConfig) -> tuple[str, st
         return toolchain, latest_tag
 
 
-def strip_lakefile_docgen_version(lakefile_path: Path) -> None:
-    """Pin doc-gen4 to its main branch instead of a specific version tag.
+def update_lakefile_docgen_version(lakefile_path: Path, lean_version: str) -> None:
+    """Update the doc-gen4 version in a lakefile to match the Lean toolchain.
 
-    Doc-gen4's main branch tracks the latest Lean toolchain. Pinning to a
-    specific release tag causes transitive dependency conflicts (e.g. plausible
-    version mismatches) that break ``lake exe cache get``. Using ``@ "main"``
-    lets Lake resolve a compatible version automatically.
+    Doc-gen4 releases are tagged to match Lean toolchain versions, so pinning
+    to the same version ensures compatibility. The doc-gen4 ``require`` must
+    appear before the main package ``require`` so that the main package's
+    transitive dependency versions take precedence during resolution.
 
     Args:
         lakefile_path: Path to lakefile.lean
+        lean_version: Lean version like 'v4.27.0'
     """
     content = lakefile_path.read_text()
 
@@ -99,13 +100,13 @@ def strip_lakefile_docgen_version(lakefile_path: Path) -> None:
         r'"https://github\.com/leanprover/doc-gen4"(?:\s+@\s+"[^"]*")?'
     )
     replacement = (
-        'require «doc-gen4» from git\n'
-        '  "https://github.com/leanprover/doc-gen4" @ "main"'
+        f"require «doc-gen4» from git\n"
+        f'  "https://github.com/leanprover/doc-gen4" @ "{lean_version}"'
     )
     new_content = re.sub(pattern, replacement, content)
 
     if new_content != content:
         lakefile_path.write_text(new_content)
         logger.info(
-            "Pinned doc-gen4 to main branch in %s", lakefile_path
+            "Updated doc-gen4 version to %s in %s", lean_version, lakefile_path
         )
