@@ -572,6 +572,12 @@ class TestDeclarationParsing:
               text TEXT NOT NULL,
               PRIMARY KEY (module_name, position)
             );
+            CREATE TABLE declaration_verso_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              content BLOB NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
             """
         )
         connection.execute(
@@ -692,6 +698,12 @@ class TestDeclarationParsing:
               text TEXT NOT NULL,
               PRIMARY KEY (module_name, position)
             );
+            CREATE TABLE declaration_verso_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              content BLOB NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
             """
         )
         connection.execute(
@@ -732,6 +744,144 @@ class TestDeclarationParsing:
         assert len(declarations) == 1
         assert declarations[0].name == "Nat.myFunc"
         assert declarations[0].dependencies == ["Nat", "Bool"]
+
+    def test_parse_declarations_from_sqlite_detects_verso_docstrings(
+        self, temp_directory, caplog
+    ):
+        """Test that Verso-only docstrings are detected and logged."""
+        lean_root = temp_directory / "lean"
+        database_path = temp_directory / "api-docs.db"
+
+        source_dir = (
+            lean_root / "mathlib" / ".lake" / "packages" / "mathlib4"
+        )
+        source_file = source_dir / "Mathlib" / "Data" / "Nat" / "Basic.lean"
+        source_file.parent.mkdir(parents=True)
+        source_file.write_text(
+            "def Nat.withVerso : Nat := 0\n"
+            "def Nat.withMarkdown : Nat := 1\n"
+        )
+
+        connection = sqlite3.connect(database_path)
+        connection.executescript(
+            """
+            CREATE TABLE modules (name TEXT PRIMARY KEY, source_url TEXT);
+            CREATE TABLE name_info (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              kind TEXT,
+              name TEXT NOT NULL,
+              type BLOB NOT NULL,
+              sorried INTEGER NOT NULL,
+              render INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_ranges (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              start_line INTEGER NOT NULL,
+              start_column INTEGER NOT NULL,
+              start_utf16 INTEGER NOT NULL,
+              end_line INTEGER NOT NULL,
+              end_column INTEGER NOT NULL,
+              end_utf16 INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_markdown_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              text TEXT NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_verso_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              content BLOB NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO modules (name, source_url) VALUES (?, ?)",
+            (
+                "Mathlib.Data.Nat.Basic",
+                "https://github.com/leanprover-community/mathlib4"
+                "/blob/master/Mathlib/Data/Nat/Basic.lean",
+            ),
+        )
+        connection.executemany(
+            """
+            INSERT INTO name_info
+              (module_name, position, kind, name, type, sorried, render)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "Mathlib.Data.Nat.Basic", 1, "definition",
+                    "Nat.withVerso", _make_text_node("Nat"), 0, 1,
+                ),
+                (
+                    "Mathlib.Data.Nat.Basic", 2, "definition",
+                    "Nat.withMarkdown", _make_text_node("Nat"), 0, 1,
+                ),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO declaration_ranges
+              (module_name, position, start_line, start_column,
+               start_utf16, end_line, end_column, end_utf16)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("Mathlib.Data.Nat.Basic", 1, 1, 0, 0, 1, 27, 27),
+                ("Mathlib.Data.Nat.Basic", 2, 2, 0, 0, 2, 30, 30),
+            ],
+        )
+        # Declaration 1: Verso-only docstring (binary BLOB)
+        connection.execute(
+            """
+            INSERT INTO declaration_verso_docstrings
+              (module_name, position, content)
+            VALUES (?, ?, ?)
+            """,
+            ("Mathlib.Data.Nat.Basic", 1, b"\x00\x01\x02"),
+        )
+        # Declaration 2: Markdown docstring
+        connection.execute(
+            """
+            INSERT INTO declaration_markdown_docstrings
+              (module_name, position, text)
+            VALUES (?, ?, ?)
+            """,
+            ("Mathlib.Data.Nat.Basic", 2, "A markdown docstring"),
+        )
+        connection.commit()
+        connection.close()
+
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            declarations = _parse_declarations_from_sqlite(
+                database_path,
+                lean_root,
+                _build_package_cache(lean_root),
+                allowed_module_prefixes=["Mathlib"],
+            )
+
+        assert len(declarations) == 2
+        # Verso-only: docstring is None
+        verso_decl = next(
+            d for d in declarations if d.name == "Nat.withVerso"
+        )
+        assert verso_decl.docstring is None
+        # Markdown: docstring is present
+        md_decl = next(
+            d for d in declarations if d.name == "Nat.withMarkdown"
+        )
+        assert md_decl.docstring == "A markdown docstring"
+        # Warning logged about Verso-only docstrings
+        assert "1 declarations have Verso-only docstrings" in caplog.text
 
     def test_parse_declarations_from_sqlite_uses_core_fallback_source_link(
         self, temp_directory
@@ -775,6 +925,12 @@ class TestDeclarationParsing:
               module_name TEXT NOT NULL,
               position INTEGER NOT NULL,
               text TEXT NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_verso_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              content BLOB NOT NULL,
               PRIMARY KEY (module_name, position)
             );
             """
