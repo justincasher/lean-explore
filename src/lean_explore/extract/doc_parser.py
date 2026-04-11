@@ -834,21 +834,73 @@ async def _insert_declarations_batch(
     return inserted_count
 
 
+_REQUIRED_DOCGEN_TABLES = {"name_info", "declaration_ranges", "modules"}
+
+
+def _validate_docgen_sqlite(database_path: Path) -> bool:
+    """Check that a doc-gen4 api-docs.db is a valid, usable SQLite database.
+
+    Verifies the file is non-empty, opens as SQLite, and contains the tables
+    that the extraction pipeline requires.
+
+    Args:
+        database_path: Path to the api-docs.db file.
+
+    Returns:
+        True if the database is valid and contains the required tables.
+    """
+    if database_path.stat().st_size == 0:
+        logger.warning("api-docs.db exists but is empty: %s", database_path)
+        return False
+
+    try:
+        connection = sqlite3.connect(str(database_path))
+        try:
+            cursor = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+            tables = {row[0] for row in cursor.fetchall()}
+        finally:
+            connection.close()
+    except sqlite3.DatabaseError as error:
+        logger.warning("api-docs.db is not a valid SQLite file: %s", error)
+        return False
+
+    missing = _REQUIRED_DOCGEN_TABLES - tables
+    if missing:
+        logger.warning(
+            "api-docs.db is missing required tables %s: %s",
+            missing, database_path,
+        )
+        return False
+
+    return True
+
+
 def _detect_docgen_format(workspace_path: Path) -> str:
     """Detect which doc-gen4 output format a workspace uses.
 
     Doc-gen4 >= v4.29.0-rc2 writes to a SQLite database (api-docs.db).
     Earlier versions write individual BMP JSON files to doc-data/.
 
+    The SQLite file is validated before returning "sqlite" to guard against
+    zero-byte, corrupt, or incompatible databases left by crashed builds.
+
     Args:
         workspace_path: Path to the package workspace (e.g., lean/mathlib).
 
     Returns:
-        "sqlite" if api-docs.db exists, "bmp" if BMP files exist, "none" otherwise.
+        "sqlite" if a valid api-docs.db exists, "bmp" if BMP files exist,
+        "none" otherwise.
     """
     api_docs_db = workspace_path / ".lake" / "build" / "api-docs.db"
     if api_docs_db.exists():
-        return "sqlite"
+        if _validate_docgen_sqlite(api_docs_db):
+            return "sqlite"
+        logger.warning(
+            "Invalid api-docs.db at %s, checking for BMP fallback",
+            api_docs_db,
+        )
 
     doc_data_dir = workspace_path / ".lake" / "build" / "doc-data"
     if doc_data_dir.exists():
