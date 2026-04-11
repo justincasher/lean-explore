@@ -549,7 +549,6 @@ def _parse_declarations_from_sqlite(
                 n.kind,
                 n.name,
                 n.type,
-                n.render,
                 r.start_line,
                 r.end_line,
                 d.text AS docstring,
@@ -564,6 +563,7 @@ def _parse_declarations_from_sqlite(
                 ON n.module_name = v.module_name AND n.position = v.position
             JOIN modules m
                 ON n.module_name = m.name
+            WHERE n.render = 1
             ORDER BY n.module_name, n.position
         """
         rows = connection.execute(query).fetchall()
@@ -617,10 +617,6 @@ def _parse_declarations_from_sqlite(
                 )
                 if not source_link:
                     skipped_no_source += 1
-                    progress.update(task, advance=1)
-                    continue
-
-                if not row["render"]:
                     progress.update(task, advance=1)
                     continue
 
