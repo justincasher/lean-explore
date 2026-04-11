@@ -18,7 +18,7 @@ from lean_explore.extract.package_registry import PACKAGE_REGISTRY
 from lean_explore.extract.package_utils import (
     get_extraction_order,
     get_package_toolchain,
-    strip_lakefile_docgen_version,
+    update_lakefile_docgen_version,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,8 +97,9 @@ def _setup_workspace(package_config: PackageConfig) -> tuple[str, str]:
     toolchain_file = workspace_path / "lean-toolchain"
 
     lean_toolchain, git_ref = get_package_toolchain(package_config)
+    lean_version = extract_lean_version(lean_toolchain)
 
-    strip_lakefile_docgen_version(lakefile_path)
+    update_lakefile_docgen_version(lakefile_path, lean_version)
     toolchain_file.write_text(lean_toolchain + "\n")
 
     return lean_toolchain, git_ref
