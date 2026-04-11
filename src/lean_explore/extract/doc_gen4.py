@@ -254,14 +254,28 @@ async def run_doc_gen4(
         toolchain = None
         ref = None
         if fresh:
+            # Read the current toolchain before setup potentially overwrites it
+            old_toolchain_file = workspace_path / "lean-toolchain"
+            old_toolchain = None
+            if old_toolchain_file.exists():
+                old_toolchain = old_toolchain_file.read_text().strip()
+
             if setup:
                 toolchain, ref = _setup_workspace(config)
                 logger.info("Toolchain: %s, ref: %s", toolchain, ref)
 
-            # Doc-gen4 switched from BMP files to api-docs.db in v4.29.0-rc2.
-            # The SQLite format handles incremental updates, while legacy BMP
-            # output requires a cache clear to avoid stale files.
-            if toolchain and _uses_sqlite_docgen(toolchain):
+            # Doc-gen4 >= v4.29.0-rc2 writes to api-docs.db which handles
+            # incremental updates, so we can skip the cache clear — but only
+            # if the toolchain hasn't changed. A toolchain change means all
+            # oleans are stale and must be rebuilt from scratch.
+            toolchain_changed = toolchain and toolchain != old_toolchain
+            if toolchain_changed:
+                logger.info(
+                    "[%s] Toolchain changed (%s -> %s), clearing cache",
+                    package_name, old_toolchain, toolchain,
+                )
+                _clear_workspace_cache(workspace_path)
+            elif toolchain and _uses_sqlite_docgen(toolchain):
                 logger.info(
                     "[%s] Skipping cache clear "
                     "(api-docs.db handles incremental updates)",
