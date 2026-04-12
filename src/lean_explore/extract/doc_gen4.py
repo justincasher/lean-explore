@@ -71,8 +71,8 @@ def _clear_workspace_cache(workspace_path: Path) -> None:
         shutil.rmtree(lake_dir)
 
 
-def _get_doc_lib_names(package_name: str) -> list[str]:
-    """Get the library names to run doc-gen4 on for a package.
+def _get_library_names(package_name: str) -> list[str]:
+    """Get the library names to build and run doc-gen4 on for a package.
 
     Some packages have custom extract wrappers, others use upstream libraries directly.
     """
@@ -84,6 +84,57 @@ def _get_doc_lib_names(package_name: str) -> list[str]:
         "cslib": ["CslibExtract"],
     }
     return lib_names.get(package_name, [f"{package_name.title()}Extract"])
+
+
+def _run_lake_build_target(
+    workspace_path: Path,
+    package_name: str,
+    target: str,
+    env: dict[str, str],
+    allow_failure: bool = False,
+) -> bool:
+    """Run ``lake build <target>`` streaming output to the logger.
+
+    Args:
+        workspace_path: Path to the Lake workspace directory.
+        package_name: Name of the package for log messages.
+        target: The Lake build target to run.
+        env: Environment variables to pass to the subprocess.
+        allow_failure: Whether to continue when the target fails.
+
+    Returns:
+        ``True`` if the target built successfully, otherwise ``False``.
+
+    Raises:
+        RuntimeError: If the target fails and ``allow_failure`` is ``False``.
+    """
+    logger.info("[%s] Running lake build %s...", package_name, target)
+    process = subprocess.Popen(
+        ["lake", "build", target],
+        cwd=workspace_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+    if process.stdout:
+        for line in process.stdout:
+            logger.info(line.rstrip())
+
+    returncode = process.wait()
+    if returncode == 0:
+        return True
+
+    if allow_failure:
+        logger.warning(
+            "[%s] lake build %s failed (continuing with generated docs)",
+            package_name,
+            target,
+        )
+        return False
+
+    raise RuntimeError(f"lake build failed for {package_name} target {target}")
 
 
 def _setup_workspace(package_config: PackageConfig) -> tuple[str, str]:
@@ -179,44 +230,18 @@ def _run_lake_for_package(package_name: str, verbose: bool = False) -> None:
         if result.returncode != 0:
             logger.warning("[%s] Cache fetch failed (non-fatal)", package_name)
 
-    logger.info("[%s] Running lake build...", package_name)
-    process = subprocess.Popen(
-        ["lake", "build"],
-        cwd=workspace_path,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        env=env,
-    )
-    if process.stdout:
-        for line in process.stdout:
-            logger.info(line.rstrip())
-    if process.wait() != 0:
-        raise RuntimeError(f"lake build failed for {package_name}")
-
-    lib_names = _get_doc_lib_names(package_name)
+    lib_names = _get_library_names(package_name)
     for lib_name in lib_names:
-        logger.info("[%s] Running doc-gen4 (%s:docs)...", package_name, lib_name)
+        _run_lake_build_target(workspace_path, package_name, lib_name, env)
 
-        process = subprocess.Popen(
-            ["lake", "build", f"{lib_name}:docs"],
-            cwd=workspace_path,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env=env,
+    for lib_name in lib_names:
+        _run_lake_build_target(
+            workspace_path,
+            package_name,
+            f"{lib_name}:docs",
+            env,
+            allow_failure=True,
         )
-        if process.stdout:
-            for line in process.stdout:
-                logger.info(line.rstrip())
-        returncode = process.wait()
-        if returncode != 0:
-            logger.warning(
-                "[%s] doc-gen4 had failures for %s (continuing with generated docs)",
-                package_name, lib_name,
-            )
 
 
 async def run_doc_gen4(

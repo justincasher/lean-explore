@@ -1,8 +1,13 @@
 """Tests for doc-gen4 workspace orchestration."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from lean_explore.extract.doc_gen4 import _uses_sqlite_docgen, run_doc_gen4
+from lean_explore.extract.doc_gen4 import (
+    _run_lake_for_package,
+    _uses_sqlite_docgen,
+    run_doc_gen4,
+)
+from lean_explore.extract.package_registry import PACKAGE_REGISTRY
 
 
 class TestDocGen4VersionDetection:
@@ -60,3 +65,44 @@ class TestRunDocGen4FreshHandling:
 
         mock_clear.assert_not_called()
         mock_run.assert_called_once_with("mathlib", False)
+
+
+class TestLakeBuildTargets:
+    """Tests for explicit Lake build target selection."""
+
+    def test_physlean_builds_wrapper_before_docs(self):
+        """Test that PhysLean builds the wrapper target before doc generation."""
+        with patch("lean_explore.extract.doc_gen4._run_lake_update_with_retry"):
+            with patch("lean_explore.extract.doc_gen4.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout="",
+                    stderr="",
+                )
+                with patch(
+                    "lean_explore.extract.doc_gen4.subprocess.Popen"
+                ) as mock_popen:
+                    mock_process = MagicMock()
+                    mock_process.stdout = iter([])
+                    mock_process.wait.return_value = 0
+                    mock_popen.return_value = mock_process
+
+                    _run_lake_for_package("physlean")
+
+        assert mock_popen.call_args_list[0].args[0] == ["lake", "build", "PhysExtract"]
+        assert mock_popen.call_args_list[1].args[0] == [
+            "lake",
+            "build",
+            "PhysExtract:docs",
+        ]
+
+
+class TestPackageRegistry:
+    """Tests for package registry metadata."""
+
+    def test_physlean_uses_upstream_module_roots(self):
+        """Test that PhysLean filters on the upstream module roots."""
+        assert PACKAGE_REGISTRY["physlean"].module_prefixes == [
+            "Physlib",
+            "QuantumInfo",
+        ]

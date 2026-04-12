@@ -1,1 +1,2 @@
-import PhysLean
+import Physlib
+import QuantumInfo
