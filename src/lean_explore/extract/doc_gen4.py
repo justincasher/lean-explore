@@ -230,12 +230,10 @@ def _run_lake_for_package(package_name: str, verbose: bool = False) -> None:
         if result.returncode != 0:
             logger.warning("[%s] Cache fetch failed (non-fatal)", package_name)
 
+    # The :docs facet transitively depends on :docInfo, which depends on the
+    # library oleans, so a single lake build per library is sufficient. The
+    # explicit library build beforehand is redundant and doubles the work.
     lib_names = _get_library_names(package_name)
-    for lib_name in lib_names:
-        _run_lake_build_target(
-            workspace_path, package_name, lib_name, env, allow_failure=True,
-        )
-
     for lib_name in lib_names:
         _run_lake_build_target(
             workspace_path,

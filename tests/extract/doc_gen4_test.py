@@ -68,10 +68,10 @@ class TestRunDocGen4FreshHandling:
 
 
 class TestLakeBuildTargets:
-    """Tests for explicit Lake build target selection."""
+    """Tests for Lake build target selection."""
 
-    def test_physlean_builds_wrapper_before_docs(self):
-        """Test that PhysLean builds the wrapper target before doc generation."""
+    def test_physlean_runs_docs_target(self):
+        """Test that PhysLean runs the :docs target for its wrapper library."""
         with patch("lean_explore.extract.doc_gen4._run_lake_update_with_retry"):
             with patch("lean_explore.extract.doc_gen4.subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(
@@ -89,8 +89,7 @@ class TestLakeBuildTargets:
 
                     _run_lake_for_package("physlean")
 
-        assert mock_popen.call_args_list[0].args[0] == ["lake", "build", "PhysExtract"]
-        assert mock_popen.call_args_list[1].args[0] == [
+        assert mock_popen.call_args_list[0].args[0] == [
             "lake",
             "build",
             "PhysExtract:docs",
