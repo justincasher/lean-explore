@@ -232,7 +232,9 @@ def _run_lake_for_package(package_name: str, verbose: bool = False) -> None:
 
     lib_names = _get_library_names(package_name)
     for lib_name in lib_names:
-        _run_lake_build_target(workspace_path, package_name, lib_name, env)
+        _run_lake_build_target(
+            workspace_path, package_name, lib_name, env, allow_failure=True,
+        )
 
     for lib_name in lib_names:
         _run_lake_build_target(
