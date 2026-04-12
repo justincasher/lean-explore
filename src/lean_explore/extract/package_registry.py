@@ -17,7 +17,7 @@ PACKAGE_REGISTRY: dict[str, PackageConfig] = {
     "physlean": PackageConfig(
         name="physlean",
         git_url="https://github.com/HEPLean/PhysLean",
-        module_prefixes=["PhysLean"],
+        module_prefixes=["Physlib", "QuantumInfo"],
         version_strategy=VersionStrategy.TAGGED,
         depends_on=["mathlib"],
     ),
