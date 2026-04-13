@@ -2,12 +2,15 @@
 
 import asyncio
 import logging
+import os
 
 import torch
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_BATCH_SIZE = 8
 
 
 class EmbeddingResponse(BaseModel):
@@ -27,7 +30,11 @@ class EmbeddingClient:
     """Client for generating text embeddings."""
 
     def __init__(
-        self, model_name: str, device: str | None = None, max_length: int | None = None
+        self,
+        model_name: str,
+        device: str | None = None,
+        max_length: int | None = None,
+        batch_size: int | None = None,
     ):
         """Initialize the embedding client.
 
@@ -36,10 +43,17 @@ class EmbeddingClient:
             device: Device to use ("cuda", "mps", "cpu"). Auto-detects if None.
             max_length: Maximum sequence length for tokenization. If None, uses
                 model default. Lower values reduce memory usage.
+            batch_size: Batch size for encode calls. Falls back to the
+                LEAN_EXPLORE_EMBEDDING_BATCH_SIZE env var, then to
+                DEFAULT_BATCH_SIZE. Raise on large-VRAM hardware for better
+                throughput.
         """
         self.model_name = model_name
         self.device = device or self._select_device()
         self.max_length = max_length
+        self.batch_size = batch_size or int(
+            os.getenv("LEAN_EXPLORE_EMBEDDING_BATCH_SIZE", DEFAULT_BATCH_SIZE)
+        )
         logger.info("Loading embedding model %s on %s", model_name, self.device)
         self.model = SentenceTransformer(model_name, device=self.device)
 
@@ -78,7 +92,7 @@ class EmbeddingClient:
             encode_kwargs = {
                 "show_progress_bar": False,
                 "convert_to_numpy": True,
-                "batch_size": 8,
+                "batch_size": self.batch_size,
             }
             if is_query:
                 encode_kwargs["prompt_name"] = "query"
