@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 
 import torch
 from pydantic import BaseModel
@@ -10,6 +11,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 logger = logging.getLogger(__name__)
 
 DEFAULT_INSTRUCTION = "Find relevant Lean 4 math declarations"
+DEFAULT_CUDA_BATCH_SIZE = 16
+DEFAULT_CPU_BATCH_SIZE = 32
 
 
 class RerankerResponse(BaseModel):
@@ -34,6 +37,7 @@ class RerankerClient:
         device: str | None = None,
         max_length: int = 512,
         instruction: str = DEFAULT_INSTRUCTION,
+        batch_size: int | None = None,
     ):
         """Initialize the reranker client.
 
@@ -42,11 +46,25 @@ class RerankerClient:
             device: Device to use ("cuda", "mps", "cpu"). Auto-detects if None.
             max_length: Maximum sequence length for tokenization.
             instruction: Task instruction prepended to each query-document pair.
+            batch_size: Default batch size for rerank() when the caller doesn't
+                specify one. Falls back to the LEAN_EXPLORE_RERANKER_BATCH_SIZE
+                env var, then to device-specific defaults (16 on CUDA, 32 on
+                CPU). Raise on large-VRAM hardware for better throughput.
         """
         self.model_name = model_name
         self.device = device or self._select_device()
         self.max_length = max_length
         self.instruction = instruction
+
+        env_batch_size = os.getenv("LEAN_EXPLORE_RERANKER_BATCH_SIZE")
+        if batch_size is not None:
+            self.batch_size = batch_size
+        elif env_batch_size:
+            self.batch_size = int(env_batch_size)
+        elif self.device == "cuda":
+            self.batch_size = DEFAULT_CUDA_BATCH_SIZE
+        else:
+            self.batch_size = DEFAULT_CPU_BATCH_SIZE
 
         logger.info("Loading reranker model %s on %s", model_name, self.device)
 
@@ -162,9 +180,8 @@ class RerankerClient:
         if not documents:
             return RerankerResponse(query=query, scores=[], model=self.model_name)
 
-        # Default batch size: 16 on GPU (fits 8GB VRAM), 32 on CPU
         if batch_size is None:
-            batch_size = 16 if self.device == "cuda" else 32
+            batch_size = self.batch_size
 
         # For small batches, run synchronously to avoid executor overhead
         if len(documents) <= batch_size:

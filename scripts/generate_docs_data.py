@@ -193,7 +193,7 @@ ReturnsSectionData = ReturnDict | list[ReturnDict] | None
 
 def resolve_annotation(annotation: str | Expr | None) -> str:
     """Converts a griffe annotation to its string representation."""
-    if isinstance(annotation, (Expr, str)):
+    if isinstance(annotation, Expr | str):
         return str(annotation)
     return ""
 
@@ -391,16 +391,14 @@ def parse_docstring(docstring_object: object | None) -> DocstringSections:
             parse_admonition_section(section, sections_data)
         elif isinstance(
             section,
-            (
-                DocstringSectionDeprecated,
-                DocstringSectionWarns,
-                DocstringSectionYields,
-                DocstringSectionReceives,
-                DocstringSectionOtherParameters,
-                DocstringSectionClasses,
-                DocstringSectionFunctions,
-                DocstringSectionModules,
-            ),
+            DocstringSectionDeprecated
+            | DocstringSectionWarns
+            | DocstringSectionYields
+            | DocstringSectionReceives
+            | DocstringSectionOtherParameters
+            | DocstringSectionClasses
+            | DocstringSectionFunctions
+            | DocstringSectionModules,
         ):
             sections_data[kind] = parse_generic_section(section)
         else:
