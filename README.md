@@ -23,6 +23,18 @@
 
 A search engine for Lean 4 declarations. This project provides tools and resources for exploring the Lean 4 ecosystem.
 
+The current indexed projects include:
+
+* Batteries
+* CSLib
+* FLT (Fermat's Last Theorem)
+* FormalConjectures
+* Init
+* Lean
+* Mathlib
+* PhysLean
+* Std
+
 ## Installation
 
 The base package connects to the remote API and does not require heavy ML dependencies:
@@ -43,18 +55,6 @@ Then fetch the data files and start the local MCP server:
 lean-explore data fetch
 lean-explore mcp serve --backend local
 ```
-
-The current indexed projects include:
-
-* Batteries
-* CSLib
-* FLT (Fermat's Last Theorem)
-* FormalConjectures
-* Init
-* Lean
-* Mathlib
-* PhysLean
-* Std
 
 ## Documentation
 
