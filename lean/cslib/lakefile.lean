@@ -7,8 +7,8 @@ package «cslib-extractor» where
 lean_lib «CslibExtract» where
   roots := #[`CslibExtract]
 
+require «doc-gen4» from git
+  "https://github.com/leanprover/doc-gen4" @ "main"
+
 require Cslib from git
   "https://github.com/leanprover/cslib" @ "main"
-
-require «doc-gen4» from git
-  "https://github.com/leanprover/doc-gen4" @ "v4.28.0-rc1"
