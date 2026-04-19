@@ -20,6 +20,7 @@ the CLI, as a Python library, and as an MCP server for AI assistants.
 | [Local Search Backend](./local-backend.md) | How the on-device BM25 + FAISS + cross-encoder pipeline works. |
 | [Configuration](./configuration.md) | Environment variables, cache paths, and data layout on disk. |
 | [Data Models](./data-models.md) | `SearchResult`, `SearchResponse`, and related types returned from search. |
+| [Extraction Pipeline](./extraction-pipeline.md) | Rebuild the dataset from Lean source — contributor-focused. |
 
 ## Which backend should I use?
 

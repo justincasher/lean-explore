@@ -36,6 +36,7 @@ A search engine for Lean 4 declarations. This project provides tools and resourc
 | [Local Search Backend](docs/local-backend.md) | How hybrid BM25 + FAISS + reranking works. |
 | [Configuration](docs/configuration.md) | Environment variables and data layout. |
 | [Data Models](docs/data-models.md) | `SearchResult`, `SearchResponse`, and related types. |
+| [Extraction Pipeline](docs/extraction-pipeline.md) | Rebuild the dataset from Lean source (contributors). |
 
 ## Installation
 
