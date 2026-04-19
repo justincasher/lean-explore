@@ -56,8 +56,6 @@ The current indexed projects include:
 * PhysLean
 * Std
 
-This code is distributed under an Apache License (see [LICENSE](LICENSE)).
-
 ## Documentation
 
 Full docs live in the [`docs/`](docs/README.md) folder, or at [https://www.leanexplore.com/docs](https://www.leanexplore.com/docs).
@@ -95,3 +93,7 @@ Justin Asher. (2025). *LeanExplore: A search engine for Lean 4 declarations*. [h
   url = {https://arxiv.org/abs/2506.11085}
 }
 ```
+
+## License
+
+This code is distributed under an Apache License (see [LICENSE](LICENSE)).
