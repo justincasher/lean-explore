@@ -70,30 +70,47 @@ class TestRunDocGen4FreshHandling:
 class TestLakeBuildTargets:
     """Tests for Lake build target selection."""
 
-    def test_physlean_runs_docs_target(self):
-        """Test that PhysLean runs the :docs target for its wrapper library."""
-        with patch("lean_explore.extract.doc_gen4._run_lake_update_with_retry"):
-            with patch("lean_explore.extract.doc_gen4.subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=0,
-                    stdout="",
-                    stderr="",
-                )
+    def _run_and_capture_target(
+        self, tmp_path, package_name, library_name, toolchain
+    ):
+        workspace_path = tmp_path / "lean" / package_name
+        workspace_path.mkdir(parents=True)
+        (workspace_path / "lean-toolchain").write_text(toolchain + "\n")
+
+        with patch("lean_explore.extract.doc_gen4.Path") as mock_path:
+            mock_path.side_effect = lambda *args: tmp_path.joinpath(*args)
+            with patch("lean_explore.extract.doc_gen4._run_lake_update_with_retry"):
                 with patch(
-                    "lean_explore.extract.doc_gen4.subprocess.Popen"
-                ) as mock_popen:
-                    mock_process = MagicMock()
-                    mock_process.stdout = iter([])
-                    mock_process.wait.return_value = 0
-                    mock_popen.return_value = mock_process
+                    "lean_explore.extract.doc_gen4.subprocess.run"
+                ) as mock_run:
+                    mock_run.return_value = MagicMock(
+                        returncode=0, stdout="", stderr=""
+                    )
+                    with patch(
+                        "lean_explore.extract.doc_gen4.subprocess.Popen"
+                    ) as mock_popen:
+                        mock_process = MagicMock()
+                        mock_process.stdout = iter([])
+                        mock_process.wait.return_value = 0
+                        mock_popen.return_value = mock_process
 
-                    _run_lake_for_package("physlean")
+                        _run_lake_for_package(package_name)
 
-        assert mock_popen.call_args_list[0].args[0] == [
-            "lake",
-            "build",
-            "PhysExtract:docs",
-        ]
+        return mock_popen.call_args_list[0].args[0]
+
+    def test_sqlite_workspace_uses_docinfo_target(self, tmp_path):
+        """SQLite-format workspaces should build :docInfo, skipping HTML gen."""
+        args = self._run_and_capture_target(
+            tmp_path, "physlean", "PhysExtract", "leanprover/lean4:v4.29.0-rc2"
+        )
+        assert args == ["lake", "build", "PhysExtract:docInfo"]
+
+    def test_legacy_workspace_uses_docs_target(self, tmp_path):
+        """Pre-SQLite workspaces have no :docInfo facet, must build :docs."""
+        args = self._run_and_capture_target(
+            tmp_path, "physlean", "PhysExtract", "leanprover/lean4:v4.29.0-rc1"
+        )
+        assert args == ["lake", "build", "PhysExtract:docs"]
 
 
 class TestPackageRegistry:

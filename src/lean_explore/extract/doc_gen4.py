@@ -230,15 +230,24 @@ def _run_lake_for_package(package_name: str, verbose: bool = False) -> None:
         if result.returncode != 0:
             logger.warning("[%s] Cache fetch failed (non-fatal)", package_name)
 
-    # The :docs facet transitively depends on :docInfo, which depends on the
-    # library oleans, so a single lake build per library is sufficient. The
-    # explicit library build beforehand is redundant and doubles the work.
+    # For SQLite-format doc-gen4 we only need :docInfo, which populates
+    # api-docs.db and stops there. The :docs facet additionally runs `fromDb`
+    # to generate all HTML and the search index, which we don't consume.
+    # Older BMP-format doc-gen4 has no :docInfo facet, so :docs is the only
+    # option there.
+    toolchain_file = workspace_path / "lean-toolchain"
+    lake_target = "docs"
+    if toolchain_file.is_file():
+        toolchain = toolchain_file.read_text().strip()
+        if toolchain and _uses_sqlite_docgen(toolchain):
+            lake_target = "docInfo"
+
     lib_names = _get_library_names(package_name)
     for lib_name in lib_names:
         _run_lake_build_target(
             workspace_path,
             package_name,
-            f"{lib_name}:docs",
+            f"{lib_name}:{lake_target}",
             env,
             allow_failure=True,
         )
