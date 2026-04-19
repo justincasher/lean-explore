@@ -23,7 +23,17 @@
 
 A search engine for Lean 4 declarations. This project provides tools and resources for exploring the Lean 4 ecosystem.
 
-**For full documentation, please visit: [https://www.leanexplore.com/docs](https://www.leanexplore.com/docs)**
+The current indexed projects include:
+
+* Batteries
+* CSLib
+* FLT (Fermat's Last Theorem)
+* FormalConjectures
+* Init
+* Lean
+* Mathlib
+* PhysLean
+* Std
 
 ## Installation
 
@@ -46,19 +56,20 @@ lean-explore data fetch
 lean-explore mcp serve --backend local
 ```
 
-The current indexed projects include:
+## Documentation
 
-* Batteries
-* CSLib
-* FLT (Fermat's Last Theorem)
-* FormalConjectures
-* Init
-* Lean
-* Mathlib
-* PhysLean
-* Std
+Full docs live in the [`docs/`](docs/README.md) folder, or at [https://www.leanexplore.com/docs](https://www.leanexplore.com/docs).
 
-This code is distributed under an Apache License (see [LICENSE](LICENSE)).
+| Page | Description |
+|---|---|
+| [Getting Started](docs/getting-started.md) | Install and run your first search. |
+| [CLI Reference](docs/cli.md) | Every `lean-explore` command and flag. |
+| [MCP Server](docs/mcp-server.md) | Wire LeanExplore into Claude, Cursor, or any MCP client. |
+| [API Client](docs/api-client.md) | Use `ApiClient` from Python. |
+| [Local Search Backend](docs/local-backend.md) | How hybrid BM25 + FAISS + reranking works. |
+| [Configuration](docs/configuration.md) | Environment variables and data layout. |
+| [Data Models](docs/data-models.md) | `SearchResult`, `SearchResponse`, and related types. |
+| [Extraction Pipeline](docs/extraction-pipeline.md) | Rebuild the dataset from Lean source (contributors). |
 
 ## Contributing
 
@@ -82,3 +93,7 @@ Justin Asher. (2025). *LeanExplore: A search engine for Lean 4 declarations*. [h
   url = {https://arxiv.org/abs/2506.11085}
 }
 ```
+
+## License
+
+This code is distributed under an Apache License (see [LICENSE](LICENSE)).
