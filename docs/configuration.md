@@ -10,7 +10,7 @@ live on disk, and how to override defaults. Configuration is centralized in
 
 | Variable | Default | Used by |
 |---|---|---|
-| `LEANEXPLORE_API_KEY` | — (required for API use) | `ApiClient`, `lean-explore search`, `lean-explore mcp serve --backend api` |
+| `LEANEXPLORE_API_KEY` | (required for API use) | `ApiClient`, `lean-explore search`, `lean-explore mcp serve --backend api` |
 
 ### Paths
 
@@ -32,7 +32,7 @@ live on disk, and how to override defaults. Configuration is centralized in
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OPENROUTER_API_KEY` | — | Used by the informalization step to call OpenRouter. |
+| `OPENROUTER_API_KEY` | (none) | Used by the informalization step to call OpenRouter. |
 
 ## On-disk layout
 
@@ -66,7 +66,7 @@ Change this location with `LEAN_EXPLORE_CACHE_DIR`.
 
 First-run local-backend models are cached under `~/.cache/huggingface/` by
 `sentence-transformers` and `transformers`. This is controlled by
-Hugging Face, not LeanExplore — see `HF_HOME` / `TRANSFORMERS_CACHE` if you
+Hugging Face, not LeanExplore. See `HF_HOME` / `TRANSFORMERS_CACHE` if you
 need to move it.
 
 ## Programmatic access

@@ -1,7 +1,7 @@
 # Extraction Pipeline
 
 The extraction pipeline is how LeanExplore *builds* the dataset that the
-search engine queries. For everyday use you do not run it — `lean-explore
+search engine queries. For everyday use you do not run it; `lean-explore
 data fetch` downloads a prebuilt version. This page is for contributors who
 want to regenerate the data (e.g., against a newer Mathlib) or run a custom
 build locally.
@@ -17,22 +17,22 @@ python -m lean_explore.extract [OPTIONS]
 
 Four stages, run in order:
 
-1. **doc-gen4** (optional, `--run-doc-gen4`) — runs Lake + doc-gen4 against
+1. **doc-gen4** (optional, `--run-doc-gen4`): runs Lake + doc-gen4 against
    each package workspace in `lean/<package>/` to produce structured
    declaration data (BMP files). This is the slow step: it builds Lean
    packages from source.
-2. **Parse** (`--parse-docs`) — reads the doc-gen4 output and writes one
+2. **Parse** (`--parse-docs`): reads the doc-gen4 output and writes one
    row per declaration into a fresh SQLite database under a new
    `YYYYMMDD_HHMMSS` directory in `LEAN_EXPLORE_DATA_DIR`.
-3. **Informalize** (`--informalize`) — calls an LLM (through OpenRouter) to
+3. **Informalize** (`--informalize`): calls an LLM (through OpenRouter) to
    generate a natural-language description for each declaration.
-4. **Embed** (`--embeddings`) — runs each informalization through the
+4. **Embed** (`--embeddings`): runs each informalization through the
    sentence-transformer to produce vector embeddings.
-5. **Index** (`--index`) — builds the FAISS semantic index and the two BM25
+5. **Index** (`--index`): builds the FAISS semantic index and the two BM25
    indices over the declaration names.
 
 Running with no flags runs all stages. Passing any stage flag switches to
-"only run the stages I asked for" mode — which is how you resume after a
+"only run the stages I asked for" mode, which is how you resume after a
 failure, or iterate on a single step.
 
 ## Prerequisites
@@ -77,7 +77,7 @@ python -m lean_explore.extract --run-doc-gen4 --fresh
 - `--fresh` clears cached Lake dependencies, forcing the latest compatible
   versions to be resolved. Use this for nightly-style updates.
 
-Expect this to take a while — hours on a cold machine — dominated by the
+Expect this to take a while (hours on a cold machine), dominated by the
 Lake build.
 
 ### Re-run a single stage on the latest extraction
@@ -161,7 +161,7 @@ extraction directory automatically.
 
 The registry lives in `src/lean_explore/extract/package_registry.py`:
 
-- `mathlib` — also supplies `Batteries`, `Init`, `Lean`, `Std` from its
+- `mathlib`: also supplies `Batteries`, `Init`, `Lean`, `Std` from its
   transitive dependencies.
 - `physlean`
 - `flt`
@@ -175,8 +175,8 @@ under `lean/<name>/`.
 
 ## See also
 
-- [Configuration](./configuration.md) — environment variables and cache/data
+- [Configuration](./configuration.md): environment variables and cache/data
   paths.
-- [Local Search Backend](./local-backend.md) — how to consume your
+- [Local Search Backend](./local-backend.md): how to consume your
   extraction output with `SearchEngine`.
-- [CONTRIBUTING.md](../CONTRIBUTING.md) — general contributor guide.
+- [CONTRIBUTING.md](../CONTRIBUTING.md): general contributor guide.

@@ -14,7 +14,7 @@ This page covers:
 
 ## Running the server
 
-The server speaks MCP over stdio — your client launches it as a subprocess.
+The server speaks MCP over stdio; your client launches it as a subprocess.
 You rarely invoke it directly except for debugging.
 
 ### Remote API backend (default)
@@ -84,11 +84,11 @@ Any client that accepts a command + args will work. Point it at the
 
 ### Troubleshooting
 
-- **"API key required"** — set `LEANEXPLORE_API_KEY` in the `env` block (for
+- **"API key required"**: set `LEANEXPLORE_API_KEY` in the `env` block (for
   MCP clients that support it) or pass `--api-key` in `args`.
-- **"Essential data files for the local backend are missing"** — run
+- **"Essential data files for the local backend are missing"**: run
   `lean-explore data fetch` first.
-- **Tools do not appear in the client** — check the client's MCP logs. The
+- **Tools do not appear in the client**: check the client's MCP logs. The
   server logs to stderr; increasing verbosity with
   `python -m lean_explore.mcp.server --backend local --log-level DEBUG`
   helps diagnose startup issues.
@@ -99,7 +99,7 @@ The server registers eight tools. IDs returned from `search` or
 `search_summary` can be passed to the per-field getters to fetch exactly the
 field you need, which keeps token usage low.
 
-### `search_summary` — the preferred starting point
+### `search_summary`: the preferred starting point
 
 Returns only `id`, `name`, and a short description per hit. Use this first,
 then fetch details for the handful of entries you care about.
@@ -126,7 +126,7 @@ then fetch details for the handful of entries you care about.
 }
 ```
 
-### `search` — full results
+### `search`: full results
 
 Same parameters as `search_summary`, but each result includes every field:
 `id`, `name`, `module`, `docstring`, `source_text`, `source_link`,
@@ -142,12 +142,12 @@ if the id does not exist. The id comes from a prior `search` or
 
 | Tool | Returns |
 |---|---|
-| `get_source_code` | `{id, name, source_text}` — the Lean source. |
-| `get_source_link` | `{id, name, source_link}` — GitHub URL to the source. |
-| `get_docstring` | `{id, name, docstring}` — the doc comment (may be null). |
-| `get_description` | `{id, name, informalization}` — AI-generated natural-language description. |
-| `get_module` | `{id, name, module}` — module path (e.g., `Mathlib.Data.List.Basic`). |
-| `get_dependencies` | `{id, name, dependencies}` — JSON array of declaration names this depends on. |
+| `get_source_code` | `{id, name, source_text}`: the Lean source. |
+| `get_source_link` | `{id, name, source_link}`: GitHub URL to the source. |
+| `get_docstring` | `{id, name, docstring}`: the doc comment (may be null). |
+| `get_description` | `{id, name, informalization}`: AI-generated natural-language description. |
+| `get_module` | `{id, name, module}`: module path (e.g., `Mathlib.Data.List.Basic`). |
+| `get_dependencies` | `{id, name, dependencies}`: JSON array of declaration names this depends on. |
 
 ## Recommended agent workflow
 
@@ -165,11 +165,11 @@ code and dependency chains when it matters.
 
 ## Query styles
 
-Both styles work through the same endpoints — the hybrid retriever decides
+Both styles work through the same endpoints; the hybrid retriever decides
 internally which signal applies:
 
-- **By name** — `List.map`, `Nat.Prime`, `CategoryTheory.Functor.map`.
-- **By meaning** — `"continuous function on a compact set"`, `"sum of a
+- **By name**: `List.map`, `Nat.Prime`, `CategoryTheory.Functor.map`.
+- **By meaning**: `"continuous function on a compact set"`, `"sum of a
   geometric series"`, `"a group homomorphism preserving multiplication"`.
 
 You do not need to specify which mode you want.

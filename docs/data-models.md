@@ -94,8 +94,8 @@ the Pydantic models above.
 
 ## See also
 
-- [API Client](./api-client.md) — returns `SearchResponse` / `SearchResult`.
-- [Local Search Backend](./local-backend.md) — same return types via
+- [API Client](./api-client.md): returns `SearchResponse` / `SearchResult`.
+- [Local Search Backend](./local-backend.md): same return types via
   `Service`.
-- [MCP Server](./mcp-server.md) — tool return payloads serialize these
+- [MCP Server](./mcp-server.md): tool return payloads serialize these
   models to JSON.

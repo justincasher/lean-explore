@@ -59,7 +59,7 @@ lean-explore search "continuous" -p Mathlib -p Std -n 20
 
 Launch the Model Context Protocol server so an MCP client (Claude, Cursor,
 etc.) can call LeanExplore's search tools. The server speaks MCP over stdio,
-so you normally do not run it manually — your MCP client launches it. Running
+so you normally do not run it manually; your MCP client launches it. Running
 it directly is mostly useful for debugging.
 
 ```bash
@@ -71,13 +71,13 @@ lean-explore mcp serve [OPTIONS]
 | Flag | Default | Description |
 |---|---|---|
 | `--backend`, `-b` | `api` | Backend to use: `api` or `local`. |
-| `--api-key` | — | API key for the `api` backend. Overrides `LEANEXPLORE_API_KEY`. |
+| `--api-key` | (none) | API key for the `api` backend. Overrides `LEANEXPLORE_API_KEY`. |
 
 ### Backends
 
-- **`api`** — Delegates every query to the hosted LeanExplore API. Requires an
+- **`api`**: Delegates every query to the hosted LeanExplore API. Requires an
   API key (via env var or `--api-key`).
-- **`local`** — Runs the full hybrid search pipeline on-device. Requires
+- **`local`**: Runs the full hybrid search pipeline on-device. Requires
   `pip install lean-explore[local]` and `lean-explore data fetch`.
 
 ### Examples
@@ -147,14 +147,14 @@ lean-explore data clean
 ```
 
 This command prompts for confirmation before deleting anything. It does not
-touch downloaded model weights — those live under `~/.cache/huggingface/`.
+touch downloaded model weights; those live under `~/.cache/huggingface/`.
 
 ## Exit codes
 
 All CLI commands follow standard conventions:
 
-- `0` — success
-- non-zero — an error occurred (missing API key, failed download, etc.).
+- `0`: success
+- non-zero: an error occurred (missing API key, failed download, etc.).
   An error message is printed to stderr.
 
 ## See also

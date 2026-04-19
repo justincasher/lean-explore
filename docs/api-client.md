@@ -1,7 +1,7 @@
 # API Client
 
 `lean_explore.api.ApiClient` is an async HTTP client for the hosted
-LeanExplore API. It ships with the base package — no PyTorch, no local
+LeanExplore API. It ships with the base package: no PyTorch, no local
 indices, no data download required.
 
 ## Install and authenticate
@@ -74,8 +74,8 @@ Returns a [`SearchResponse`](./data-models.md#searchresponse) with `query`,
 
 Raises:
 
-- `httpx.HTTPStatusError` — the API returned a non-2xx status.
-- `httpx.RequestError` — network, DNS, or timeout failure.
+- `httpx.HTTPStatusError`: the API returned a non-2xx status.
+- `httpx.RequestError`: network, DNS, or timeout failure.
 
 ### `get_by_id()`
 
@@ -121,7 +121,7 @@ asyncio.run(main())
 ## Notes
 
 - The client creates a fresh `httpx.AsyncClient` per call. If you make many
-  rapid requests, consider wrapping them in `asyncio.gather(...)` — they run
+  rapid requests, consider wrapping them in `asyncio.gather(...)`; they run
   concurrently without extra setup.
 - Package names follow the casing shown in results (e.g., `Mathlib`, `Std`,
   `PhysLean`).
@@ -130,7 +130,7 @@ asyncio.run(main())
 
 ## See also
 
-- [Data Models](./data-models.md) — field reference for `SearchResult` and
+- [Data Models](./data-models.md): field reference for `SearchResult` and
   `SearchResponse`.
-- [Configuration](./configuration.md) — environment variables including
+- [Configuration](./configuration.md): environment variables including
   `LEANEXPLORE_API_KEY`.

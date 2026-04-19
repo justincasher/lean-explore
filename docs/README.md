@@ -1,7 +1,7 @@
 # LeanExplore Documentation
 
-LeanExplore is a search engine for Lean 4 declarations — theorems, definitions,
-lemmas, instances, and more — from Mathlib and other major Lean packages. It
+LeanExplore is a search engine for Lean 4 declarations (theorems, definitions,
+lemmas, instances, and more) from Mathlib and other major Lean packages. It
 provides hybrid retrieval that matches both by declaration name (e.g.,
 `List.map`, `Nat.Prime`) and by informal natural-language meaning (e.g.,
 "continuous function on a compact set").
@@ -20,7 +20,7 @@ the CLI, as a Python library, and as an MCP server for AI assistants.
 | [Local Search Backend](./local-backend.md) | How the on-device BM25 + FAISS + cross-encoder pipeline works. |
 | [Configuration](./configuration.md) | Environment variables, cache paths, and data layout on disk. |
 | [Data Models](./data-models.md) | `SearchResult`, `SearchResponse`, and related types returned from search. |
-| [Extraction Pipeline](./extraction-pipeline.md) | Rebuild the dataset from Lean source — contributor-focused. |
+| [Extraction Pipeline](./extraction-pipeline.md) | Rebuild the dataset from Lean source (contributor-focused). |
 
 ## Which backend should I use?
 
@@ -33,7 +33,7 @@ LeanExplore has two backends and you pick one per task:
 | Network | Required per query | Only for initial data fetch |
 | Use when | You want zero setup | You want offline, private, or tunable search |
 
-If you don't know yet, start with the remote API — it's the fastest path to a
+If you don't know yet, start with the remote API. It is the fastest path to a
 working search. You can switch to local later without changing your code.
 
 ## Links

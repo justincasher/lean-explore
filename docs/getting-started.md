@@ -3,9 +3,9 @@
 This guide takes you from zero to your first search in under five minutes.
 LeanExplore has two paths:
 
-1. **Remote API** — a small pure-Python install that talks to the hosted
+1. **Remote API**: a small pure-Python install that talks to the hosted
    search service. Best for getting started.
-2. **Local backend** — runs the full search pipeline on your machine. Larger
+2. **Local backend**: runs the full search pipeline on your machine. Larger
    install, no network calls after the initial data fetch.
 
 ## Requirements
@@ -23,8 +23,8 @@ LeanExplore has two paths:
 pip install lean-explore
 ```
 
-This installs the CLI, the `ApiClient`, and the MCP server — about 50 MB of
-pure-Python and C-extension dependencies. No PyTorch.
+This installs the CLI, the `ApiClient`, and the MCP server, roughly 50 MB
+of pure-Python and C-extension dependencies. No PyTorch.
 
 ### 2. Get an API key
 
@@ -45,7 +45,7 @@ lean-explore search "List.map" --limit 10
 lean-explore search "fundamental theorem of arithmetic" --package Mathlib
 ```
 
-The first argument is the query — it can be a Lean declaration name, a partial
+The first argument is the query. It can be a Lean declaration name, a partial
 name, or a natural-language description. The search engine handles both at
 once; you don't need to pick a mode.
 
@@ -94,7 +94,7 @@ The first run will also download the embedding and reranker models from
 Hugging Face (`Qwen/Qwen3-Embedding-0.6B` and `Qwen/Qwen3-Reranker-0.6B`),
 caching them under `~/.cache/huggingface/`. Subsequent runs are fast.
 
-The `lean-explore search` CLI currently uses the remote API — for programmatic
+The `lean-explore search` CLI currently uses the remote API. For programmatic
 local search, see [Local Search Backend](./local-backend.md) and use
 `SearchEngine` / `Service` directly.
 
@@ -117,7 +117,7 @@ You can filter any search to a subset with `--package` (CLI) or the
 
 ## Next steps
 
-- [CLI Reference](./cli.md) — every command and flag.
-- [MCP Server](./mcp-server.md) — wire LeanExplore into Claude or Cursor.
-- [API Client](./api-client.md) — use `ApiClient` from Python.
-- [Configuration](./configuration.md) — environment variables and data layout.
+- [CLI Reference](./cli.md): every command and flag.
+- [MCP Server](./mcp-server.md): wire LeanExplore into Claude or Cursor.
+- [API Client](./api-client.md): use `ApiClient` from Python.
+- [Configuration](./configuration.md): environment variables and data layout.

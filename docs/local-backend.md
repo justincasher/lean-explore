@@ -1,7 +1,7 @@
 # Local Search Backend
 
 The local backend runs LeanExplore's full hybrid retrieval pipeline on your
-machine. Once the data is fetched, no network calls are needed — queries
+machine. Once the data is fetched, no network calls are needed; queries
 execute entirely locally.
 
 This page explains:
@@ -13,10 +13,10 @@ This page explains:
 
 ## When to use it
 
-- **Offline use** — no network per query after the initial data fetch.
-- **Privacy** — queries never leave your machine.
-- **Tuning** — you can adjust candidate pool sizes and rerank depth.
-- **Integration** — embed `SearchEngine` or `Service` directly in your
+- **Offline use**: no network per query after the initial data fetch.
+- **Privacy**: queries never leave your machine.
+- **Tuning**: you can adjust candidate pool sizes and rerank depth.
+- **Integration**: embed `SearchEngine` or `Service` directly in your
   application or data pipeline.
 
 For quick exploration or low-setup use, prefer the
@@ -43,7 +43,7 @@ GPU is optional but used automatically when available.
 A query flows through five stages:
 
 1. **BM25 lexical search on names.** Two BM25 indices score the query against
-   declaration names — one using raw tokenization (entire dotted name as a
+   declaration names: one using raw tokenization (entire dotted name as a
    single token), one using spaced tokenization (splitting on dots,
    underscores, and camelCase). This catches both exact and fuzzy name
    matches (e.g., `list.map` → `List.map`).
@@ -66,18 +66,18 @@ final list.
 
 Switches available on every search call:
 
-- `limit` — how many results to return (default 20–50).
-- `rerank_top` — how deep to rerank. Larger is slower but more precise.
+- `limit`: how many results to return (default 20 to 50).
+- `rerank_top`: how deep to rerank. Larger is slower but more precise.
   Setting it to `0` or `None` skips reranking entirely.
-- `packages` — restrict to a subset of packages.
+- `packages`: restrict to a subset of packages.
 
 ## Using it from Python
 
 Two layers are available:
 
-- **`Service`** — the convenient wrapper. Returns a `SearchResponse` with
+- **`Service`**: the convenient wrapper. Returns a `SearchResponse` with
   timing metadata.
-- **`SearchEngine`** — the lower-level engine. Returns a plain
+- **`SearchEngine`**: the lower-level engine. Returns a plain
   `list[SearchResult]` and exposes all retrieval knobs.
 
 ### `Service`
@@ -142,11 +142,11 @@ For the full set of parameters, see the class docstring in
 
 ## Tuning tips
 
-- **Small queries, fast responses** — set `rerank_top=0` to skip the
+- **Small queries, fast responses**: set `rerank_top=0` to skip the
   cross-encoder. You lose some precision but gain significant speed.
-- **Recall-heavy queries** — bump `faiss_k` and `bm25_k` to widen the
+- **Recall-heavy queries**: bump `faiss_k` and `bm25_k` to widen the
   candidate pool before reranking.
-- **Memory-constrained machines** — lower `LEAN_EXPLORE_EMBEDDING_BATCH_SIZE`
+- **Memory-constrained machines**: lower `LEAN_EXPLORE_EMBEDDING_BATCH_SIZE`
   and `LEAN_EXPLORE_RERANKER_BATCH_SIZE`. See [Configuration](./configuration.md).
 
 ## See also
@@ -154,5 +154,5 @@ For the full set of parameters, see the class docstring in
 - [Data Models](./data-models.md) for the shape of `SearchResult`.
 - [Configuration](./configuration.md) for env vars that control batch sizes
   and cache paths.
-- [MCP Server](./mcp-server.md) — the local backend powers
+- [MCP Server](./mcp-server.md): the local backend powers
   `lean-explore mcp serve --backend local`.
