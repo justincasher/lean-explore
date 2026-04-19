@@ -23,21 +23,6 @@
 
 A search engine for Lean 4 declarations. This project provides tools and resources for exploring the Lean 4 ecosystem.
 
-**Documentation:** see the [`docs/`](docs/README.md) folder in this repo, or visit [https://www.leanexplore.com/docs](https://www.leanexplore.com/docs).
-
-## Documentation
-
-| Page | Description |
-|---|---|
-| [Getting Started](docs/getting-started.md) | Install and run your first search. |
-| [CLI Reference](docs/cli.md) | Every `lean-explore` command and flag. |
-| [MCP Server](docs/mcp-server.md) | Wire LeanExplore into Claude, Cursor, or any MCP client. |
-| [API Client](docs/api-client.md) | Use `ApiClient` from Python. |
-| [Local Search Backend](docs/local-backend.md) | How hybrid BM25 + FAISS + reranking works. |
-| [Configuration](docs/configuration.md) | Environment variables and data layout. |
-| [Data Models](docs/data-models.md) | `SearchResult`, `SearchResponse`, and related types. |
-| [Extraction Pipeline](docs/extraction-pipeline.md) | Rebuild the dataset from Lean source (contributors). |
-
 ## Installation
 
 The base package connects to the remote API and does not require heavy ML dependencies:
@@ -72,6 +57,21 @@ The current indexed projects include:
 * Std
 
 This code is distributed under an Apache License (see [LICENSE](LICENSE)).
+
+## Documentation
+
+Full docs live in the [`docs/`](docs/README.md) folder, or at [https://www.leanexplore.com/docs](https://www.leanexplore.com/docs).
+
+| Page | Description |
+|---|---|
+| [Getting Started](docs/getting-started.md) | Install and run your first search. |
+| [CLI Reference](docs/cli.md) | Every `lean-explore` command and flag. |
+| [MCP Server](docs/mcp-server.md) | Wire LeanExplore into Claude, Cursor, or any MCP client. |
+| [API Client](docs/api-client.md) | Use `ApiClient` from Python. |
+| [Local Search Backend](docs/local-backend.md) | How hybrid BM25 + FAISS + reranking works. |
+| [Configuration](docs/configuration.md) | Environment variables and data layout. |
+| [Data Models](docs/data-models.md) | `SearchResult`, `SearchResponse`, and related types. |
+| [Extraction Pipeline](docs/extraction-pipeline.md) | Rebuild the dataset from Lean source (contributors). |
 
 ## Contributing
 
