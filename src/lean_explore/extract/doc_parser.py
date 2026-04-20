@@ -1,12 +1,17 @@
 """Parser for Lean doc-gen4 output files.
 
-This module parses doc-gen4 JSON data and extracts Lean source code
-to produce Declaration objects ready for database insertion.
+This module parses doc-gen4 output and extracts Lean source code to produce
+Declaration objects ready for database insertion.
+
+Supports two doc-gen4 output formats:
+- SQLite database (api-docs.db): Used by doc-gen4 >= v4.29.0-rc2
+- BMP JSON files (.bmp): Used by doc-gen4 < v4.29.0-rc2
 """
 
 import json
 import logging
 import re
+import sqlite3
 from pathlib import Path
 
 from rich.progress import (
@@ -24,6 +29,148 @@ from lean_explore.extract.types import Declaration
 from lean_explore.models import Declaration as DBDeclaration
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# RenderedCode BLOB parser
+#
+# Doc-gen4 stores declaration type signatures in the `name_info.type` column
+# as a binary BLOB using leansqlite's ToBinary serialization format.
+#
+# The type is  RenderedCode = TaggedText RenderedCode.Tag  where:
+#   TaggedText:  text(0) String | tag(1) Tag TaggedText | append(2) Array
+#   Tag:         keyword(0) | string(1) | const(2) Name | sort-none(3)
+#                | sort-type(4) | sort-prop(5) | sort-sort(6) | otherExpr(7)
+#   Name:        anonymous(0) | str(1) Name String | num(2) Name Nat
+#
+# Encoding primitives (big-endian, leansqlite Classes.lean):
+#   Nat  – variable-length 7-bit chunks, high bit = continuation
+#   String – Nat(utf8_byte_length) + raw UTF-8 bytes
+#   Array  – Nat(count) + elements
+# ---------------------------------------------------------------------------
+
+
+class _BlobReader:
+    """Minimal reader for leansqlite ToBinary format."""
+
+    __slots__ = ("_data", "_cursor")
+
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+        self._cursor = 0
+
+    def _read_byte(self) -> int:
+        if self._cursor >= len(self._data):
+            raise ValueError("Unexpected end of BLOB data")
+        value = self._data[self._cursor]
+        self._cursor += 1
+        return value
+
+    def _read_nat(self) -> int:
+        """Read a variable-length natural number (7-bit chunks, MSB = more)."""
+        result = 0
+        shift = 0
+        while True:
+            byte = self._read_byte()
+            if byte >= 128:
+                result |= (byte & 0x7F) << shift
+            else:
+                result |= byte << shift
+                break
+            shift += 7
+        return result
+
+    def _read_string(self) -> str:
+        byte_length = self._read_nat()
+        if self._cursor + byte_length > len(self._data):
+            raise ValueError("String extends past end of BLOB data")
+        raw = self._data[self._cursor : self._cursor + byte_length]
+        self._cursor += byte_length
+        return raw.decode("utf-8")
+
+    def _read_name(self) -> str:
+        """Read a Lean Name and return its dot-separated string form."""
+        tag = self._read_byte()
+        if tag == 0:  # anonymous
+            return ""
+        if tag == 1:  # str parent s
+            parent = self._read_name()
+            component = self._read_string()
+            return f"{parent}.{component}" if parent else component
+        if tag == 2:  # num parent n
+            parent = self._read_name()
+            number = self._read_nat()
+            return f"{parent}.{number}" if parent else str(number)
+        raise ValueError(f"Invalid Name tag: {tag}")
+
+    def _skip_name(self) -> None:
+        """Skip over a Name without allocating strings."""
+        tag = self._read_byte()
+        if tag == 0:
+            return
+        if tag == 1:
+            self._skip_name()
+            byte_length = self._read_nat()
+            self._cursor += byte_length
+            return
+        if tag == 2:
+            self._skip_name()
+            self._read_nat()
+            return
+        raise ValueError(f"Invalid Name tag: {tag}")
+
+
+def _extract_names_from_rendered_code(blob: bytes) -> list[str]:
+    """Extract referenced declaration names from a RenderedCode BLOB.
+
+    Walks the TaggedText tree and collects Lean Names from every
+    RenderedCode.Tag.const node (tag byte 2).
+
+    Args:
+        blob: Raw bytes of the RenderedCode BLOB from name_info.type.
+
+    Returns:
+        De-duplicated list of fully-qualified Lean names referenced in the type.
+    """
+    reader = _BlobReader(blob)
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def walk_tagged_text() -> None:
+        tag = reader._read_byte()
+        if tag == 0:  # text
+            reader._read_string()
+        elif tag == 1:  # tag
+            walk_tag()
+            walk_tagged_text()
+        elif tag == 2:  # append
+            count = reader._read_nat()
+            for _ in range(count):
+                walk_tagged_text()
+        else:
+            raise ValueError(f"Invalid TaggedText tag: {tag}")
+
+    def walk_tag() -> None:
+        tag = reader._read_byte()
+        if tag <= 1 or (3 <= tag <= 7):
+            # keyword(0), string(1), sort-none(3), sort-type(4),
+            # sort-prop(5), sort-sort(6), otherExpr(7) — no payload
+            return
+        if tag == 2:  # const
+            name = reader._read_name()
+            if name and name not in seen:
+                names.append(name)
+                seen.add(name)
+            return
+        raise ValueError(f"Invalid RenderedCode.Tag tag: {tag}")
+
+    try:
+        walk_tagged_text()
+    except (ValueError, IndexError):
+        logger.debug("Failed to parse RenderedCode BLOB (%d bytes)", len(blob))
+        return []
+
+    return names
 
 
 def _strip_lean_comments(source_text: str) -> str:
@@ -270,6 +417,16 @@ def _extract_source_text(
         package_name.replace("-", "").lower(),
     ]:
         if variant in package_cache:
+            if variant == "lean4" and file_path_string.startswith("src/lean/"):
+                adjusted_path = file_path_string[9:]
+                candidates.append(package_cache[variant] / adjusted_path)
+                continue
+            if variant == "lean4" and file_path_string.startswith("src/lake/"):
+                adjusted_path = file_path_string[9:]
+                candidates.append(
+                    package_cache[variant].parent / "lake" / adjusted_path
+                )
+                continue
             if variant == "lean4" and file_path_string.startswith("src/"):
                 adjusted_path = file_path_string[4:]
             else:
@@ -292,6 +449,251 @@ def _extract_source_text(
     )
 
 
+def _read_lean_toolchain_version(workspace_path: Path) -> str | None:
+    """Read the Lean version from a workspace's lean-toolchain file.
+
+    Args:
+        workspace_path: Path to the package workspace (e.g., lean/mathlib).
+
+    Returns:
+        Version string like 'v4.29.0-rc6', or None if not found.
+    """
+    toolchain_file = workspace_path / "lean-toolchain"
+    if not toolchain_file.exists():
+        return None
+    try:
+        content = toolchain_file.read_text().strip()
+        match = re.search(r"v\d+\.\d+\.\d+(?:-rc\d+)?", content)
+        return match.group() if match else None
+    except OSError:
+        return None
+
+
+def _construct_source_link(
+    module_name: str,
+    module_source_url: str | None,
+    start_line: int,
+    end_line: int,
+    lean_version: str | None = None,
+) -> str | None:
+    """Construct a GitHub source link from module URL and line range.
+
+    Args:
+        module_name: Lean module name from api-docs.db.
+        module_source_url: GitHub URL to the module file from api-docs.db.
+        start_line: Start line number in the source file.
+        end_line: End line number in the source file.
+        lean_version: Lean toolchain version (e.g., 'v4.29.0-rc6') used as
+            the git ref for core module fallback URLs.
+
+    Returns:
+        GitHub URL with line range fragment, or None if no source URL exists.
+    """
+    if module_source_url:
+        return f"{module_source_url}#L{start_line}-L{end_line}"
+
+    git_ref = lean_version or "master"
+    module_path = module_name.replace(".", "/")
+    root = module_name.split(".", 1)[0]
+    if root in {"Init", "Lean", "Std"}:
+        return (
+            f"https://github.com/leanprover/lean4/blob/{git_ref}/"
+            f"src/lean/{module_path}.lean#L{start_line}-L{end_line}"
+        )
+    if root == "Lake":
+        return (
+            f"https://github.com/leanprover/lean4/blob/{git_ref}/"
+            f"src/lake/{module_path}.lean#L{start_line}-L{end_line}"
+        )
+
+    return None
+
+
+def _parse_declarations_from_sqlite(
+    database_path: Path,
+    lean_root: Path,
+    package_cache: dict[str, Path],
+    allowed_module_prefixes: list[str],
+    lean_version: str | None = None,
+) -> list[Declaration]:
+    """Parse declarations from a doc-gen4 SQLite database (api-docs.db).
+
+    Doc-gen4 >= v4.29.0-rc2 outputs declaration data to a SQLite database
+    instead of individual BMP JSON files. This function reads that database
+    and produces the same Declaration objects as the BMP parser.
+
+    Args:
+        database_path: Path to the api-docs.db SQLite database.
+        lean_root: Root directory of the Lean project.
+        package_cache: Dictionary mapping package names to their directories.
+        allowed_module_prefixes: Module prefixes to extract (e.g., ["Mathlib"]).
+        lean_version: Lean toolchain version for core module source links.
+
+    Returns:
+        List of parsed Declaration objects.
+    """
+    declarations = []
+
+    connection = sqlite3.connect(str(database_path))
+    connection.row_factory = sqlite3.Row
+
+    try:
+        # Query declarations with source ranges and both docstring types.
+        # Doc-gen4 stores docstrings as either markdown text or Verso binary
+        # BLOBs (never both). We prefer markdown; Verso BLOBs require a
+        # complex deserializer so we detect but cannot extract them yet.
+        query = """
+            SELECT
+                n.module_name,
+                n.position,
+                n.kind,
+                n.name,
+                n.type,
+                r.start_line,
+                r.end_line,
+                d.text AS docstring,
+                v.content AS verso_docstring,
+                m.source_url
+            FROM name_info n
+            JOIN declaration_ranges r
+                ON n.module_name = r.module_name AND n.position = r.position
+            LEFT JOIN declaration_markdown_docstrings d
+                ON n.module_name = d.module_name AND n.position = d.position
+            LEFT JOIN declaration_verso_docstrings v
+                ON n.module_name = v.module_name AND n.position = v.position
+            JOIN modules m
+                ON n.module_name = m.name
+            WHERE n.render = 1
+            ORDER BY n.module_name, n.position
+        """
+        rows = connection.execute(query).fetchall()
+
+        logger.info("Found %d declarations in api-docs.db", len(rows))
+
+        skipped_no_source = 0
+        skipped_prefix = 0
+        skipped_constructor = 0
+        source_errors = 0
+        verso_only_docstrings = 0
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+        ) as progress:
+            task = progress.add_task(
+                "[cyan]Parsing api-docs.db...", total=len(rows)
+            )
+
+            for row in rows:
+                module_name = row["module_name"]
+                declaration_name = row["name"]
+
+                # Filter by module prefix
+                matches_prefix = any(
+                    module_name == prefix or module_name.startswith(prefix + ".")
+                    for prefix in allowed_module_prefixes
+                )
+                if not matches_prefix:
+                    skipped_prefix += 1
+                    progress.update(task, advance=1)
+                    continue
+
+                # Skip auto-generated .mk constructors
+                if declaration_name.endswith(".mk"):
+                    skipped_constructor += 1
+                    progress.update(task, advance=1)
+                    continue
+
+                source_url = row["source_url"]
+                start_line = row["start_line"]
+                end_line = row["end_line"]
+
+                source_link = _construct_source_link(
+                    module_name, source_url, start_line, end_line,
+                    lean_version=lean_version,
+                )
+                if not source_link:
+                    skipped_no_source += 1
+                    progress.update(task, advance=1)
+                    continue
+
+                # Extract source text from local files
+                try:
+                    source_text = _extract_source_text(
+                        source_link, lean_root, package_cache
+                    )
+                except (FileNotFoundError, ValueError) as error:
+                    source_errors += 1
+                    if source_errors <= 10:
+                        logger.debug(
+                            "Could not extract source for %s: %s",
+                            declaration_name, error,
+                        )
+                    progress.update(task, advance=1)
+                    continue
+
+                # Extract dependency names from the type signature BLOB
+                type_blob = row["type"]
+                if type_blob:
+                    dep_names = _extract_names_from_rendered_code(
+                        bytes(type_blob)
+                    )
+                    # Filter out self-references
+                    dep_names = [
+                        d for d in dep_names if d != declaration_name
+                    ]
+                    dependencies = dep_names or None
+                else:
+                    dependencies = None
+
+                # Use markdown docstring; detect Verso-only cases
+                docstring = row["docstring"]
+                if not docstring and row["verso_docstring"]:
+                    verso_only_docstrings += 1
+
+                declarations.append(
+                    Declaration(
+                        name=declaration_name,
+                        module=module_name,
+                        docstring=docstring,
+                        source_text=source_text,
+                        source_link=source_link,
+                        dependencies=dependencies,
+                    )
+                )
+
+                progress.update(task, advance=1)
+
+        if skipped_prefix > 0:
+            logger.info(
+                "Skipped %d declarations outside allowed prefixes",
+                skipped_prefix,
+            )
+        if skipped_constructor > 0:
+            logger.info("Skipped %d .mk constructors", skipped_constructor)
+        if skipped_no_source > 0:
+            logger.info("Skipped %d declarations without source URL", skipped_no_source)
+        if verso_only_docstrings > 0:
+            logger.warning(
+                "%d declarations have Verso-only docstrings "
+                "(not yet supported, stored as docstring=None)",
+                verso_only_docstrings,
+            )
+        if source_errors > 0:
+            logger.warning(
+                "Could not extract source text for %d declarations",
+                source_errors,
+            )
+
+    finally:
+        connection.close()
+
+    return declarations
+
+
 def _parse_declarations_from_files(
     bmp_files: list[Path],
     lean_root: Path,
@@ -310,6 +712,7 @@ def _parse_declarations_from_files(
         List of parsed Declaration objects.
     """
     declarations = []
+    source_errors = 0
 
     with Progress(
         SpinnerColumn(),
@@ -338,22 +741,32 @@ def _parse_declarations_from_files(
 
             for declaration_data in data.get("declarations", []):
                 information = declaration_data["info"]
-                source_text = _extract_source_text(
-                    information["sourceLink"], lean_root, package_cache
-                )
+                declaration_name = information["name"]
+
+                # Skip auto-generated .mk constructors
+                if declaration_name.endswith(".mk"):
+                    continue
+
+                try:
+                    source_text = _extract_source_text(
+                        information["sourceLink"], lean_root, package_cache
+                    )
+                except (FileNotFoundError, ValueError) as error:
+                    source_errors += 1
+                    if source_errors <= 10:
+                        logger.debug(
+                            "Could not extract source for %s: %s",
+                            declaration_name, error,
+                        )
+                    continue
 
                 header_html = declaration_data.get("header", "")
                 dependencies = _extract_dependencies_from_html(header_html)
 
                 # Filter out self-references from dependencies
-                declaration_name = information["name"]
                 filtered_dependencies = [
                     d for d in dependencies if d != declaration_name
                 ]
-
-                # Skip auto-generated .mk constructors
-                if declaration_name.endswith(".mk"):
-                    continue
 
                 declarations.append(
                     Declaration(
@@ -367,6 +780,12 @@ def _parse_declarations_from_files(
                 )
 
             progress.update(task, advance=1)
+
+    if source_errors > 0:
+        logger.warning(
+            "Could not extract source text for %d declarations",
+            source_errors,
+        )
 
     return declarations
 
@@ -428,12 +847,88 @@ async def _insert_declarations_batch(
     return inserted_count
 
 
+_REQUIRED_DOCGEN_TABLES = {"name_info", "declaration_ranges", "modules"}
+
+
+def _validate_docgen_sqlite(database_path: Path) -> bool:
+    """Check that a doc-gen4 api-docs.db is a valid, usable SQLite database.
+
+    Verifies the file is non-empty, opens as SQLite, and contains the tables
+    that the extraction pipeline requires.
+
+    Args:
+        database_path: Path to the api-docs.db file.
+
+    Returns:
+        True if the database is valid and contains the required tables.
+    """
+    if database_path.stat().st_size == 0:
+        logger.warning("api-docs.db exists but is empty: %s", database_path)
+        return False
+
+    try:
+        connection = sqlite3.connect(str(database_path))
+        try:
+            cursor = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+            tables = {row[0] for row in cursor.fetchall()}
+        finally:
+            connection.close()
+    except sqlite3.DatabaseError as error:
+        logger.warning("api-docs.db is not a valid SQLite file: %s", error)
+        return False
+
+    missing = _REQUIRED_DOCGEN_TABLES - tables
+    if missing:
+        logger.warning(
+            "api-docs.db is missing required tables %s: %s",
+            missing, database_path,
+        )
+        return False
+
+    return True
+
+
+def _detect_docgen_format(workspace_path: Path) -> str:
+    """Detect which doc-gen4 output format a workspace uses.
+
+    Doc-gen4 >= v4.29.0-rc2 writes to a SQLite database (api-docs.db).
+    Earlier versions write individual BMP JSON files to doc-data/.
+
+    The SQLite file is validated before returning "sqlite" to guard against
+    zero-byte, corrupt, or incompatible databases left by crashed builds.
+
+    Args:
+        workspace_path: Path to the package workspace (e.g., lean/mathlib).
+
+    Returns:
+        "sqlite" if a valid api-docs.db exists, "bmp" if BMP files exist,
+        "none" otherwise.
+    """
+    api_docs_db = workspace_path / ".lake" / "build" / "api-docs.db"
+    if api_docs_db.exists():
+        if _validate_docgen_sqlite(api_docs_db):
+            return "sqlite"
+        logger.warning(
+            "Invalid api-docs.db at %s, checking for BMP fallback",
+            api_docs_db,
+        )
+
+    doc_data_dir = workspace_path / ".lake" / "build" / "doc-data"
+    if doc_data_dir.exists():
+        bmp_files = list(doc_data_dir.glob("**/*.bmp"))
+        if bmp_files:
+            return "bmp"
+
+    return "none"
+
+
 async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> None:
     """Extract all declarations from doc-gen4 data and load into database.
 
-    Looks for BMP files in each package's .lake/build/doc-data directory.
-    Extracts only declarations matching the package's configured module_prefixes,
-    ensuring each package's declarations come from its own workspace.
+    Automatically detects whether each package uses the newer SQLite format
+    (api-docs.db from doc-gen4 >= v4.29.0-rc2) or the legacy BMP JSON format.
 
     Args:
         engine: SQLAlchemy async engine for database connection.
@@ -445,21 +940,13 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
     lean_root = Path("lean")
     all_declarations = []
 
-    # Process each workspace separately with its own package cache
     for package_name in get_extraction_order():
         package_config = PACKAGE_REGISTRY[package_name]
-        doc_data_dir = lean_root / package_name / ".lake" / "build" / "doc-data"
+        workspace_path = lean_root / package_name
+        docgen_format = _detect_docgen_format(workspace_path)
 
-        if not doc_data_dir.exists():
-            logger.warning(
-                "No doc-data directory for %s: %s", package_name, doc_data_dir
-            )
-            continue
-
-        bmp_files = sorted(doc_data_dir.glob("**/*.bmp"))
-        logger.info("Found %d BMP files in %s", len(bmp_files), package_name)
-
-        if not bmp_files:
+        if docgen_format == "none":
+            logger.warning("No doc-gen4 output found for %s", package_name)
             continue
 
         # Build workspace-specific package cache to avoid version mismatches
@@ -469,9 +956,31 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
             package_name, len(package_cache),
         )
 
-        declarations = _parse_declarations_from_files(
-            bmp_files, lean_root, package_cache, package_config.module_prefixes
-        )
+        if docgen_format == "sqlite":
+            api_docs_path = workspace_path / ".lake" / "build" / "api-docs.db"
+            lean_version = _read_lean_toolchain_version(workspace_path)
+            logger.info(
+                "[%s] Using SQLite format (api-docs.db)", package_name
+            )
+            declarations = _parse_declarations_from_sqlite(
+                api_docs_path,
+                lean_root,
+                package_cache,
+                package_config.module_prefixes,
+                lean_version=lean_version,
+            )
+        else:
+            doc_data_dir = workspace_path / ".lake" / "build" / "doc-data"
+            bmp_files = sorted(doc_data_dir.glob("**/*.bmp"))
+            logger.info(
+                "[%s] Using BMP format (%d files)",
+                package_name, len(bmp_files),
+            )
+            declarations = _parse_declarations_from_files(
+                bmp_files, lean_root, package_cache,
+                package_config.module_prefixes,
+            )
+
         logger.info(
             "Extracted %d declarations from %s (prefixes: %s)",
             len(declarations), package_name, package_config.module_prefixes,
@@ -479,7 +988,9 @@ async def extract_declarations(engine: AsyncEngine, batch_size: int = 1000) -> N
         all_declarations.extend(declarations)
 
     if not all_declarations:
-        raise FileNotFoundError("No declarations extracted from any package workspace")
+        raise FileNotFoundError(
+            "No declarations extracted from any package workspace"
+        )
 
     logger.info("Total declarations extracted: %d", len(all_declarations))
 

@@ -82,7 +82,12 @@ def get_package_toolchain(package_configuration: PackageConfig) -> tuple[str, st
 
 
 def update_lakefile_docgen_version(lakefile_path: Path, lean_version: str) -> None:
-    """Update the doc-gen4 version in a lakefile to match the Lean version.
+    """Update the doc-gen4 version in a lakefile to match the Lean toolchain.
+
+    Doc-gen4 releases are tagged to match Lean toolchain versions, so pinning
+    to the same version ensures compatibility. The doc-gen4 ``require`` must
+    appear before the main package ``require`` so that the main package's
+    transitive dependency versions take precedence during resolution.
 
     Args:
         lakefile_path: Path to lakefile.lean

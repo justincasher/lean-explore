@@ -5,20 +5,28 @@ and declaration insertion functionality.
 """
 
 import json
+import sqlite3
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select
 
 from lean_explore.extract.doc_parser import (
+    _BlobReader,
     _build_package_cache,
+    _construct_source_link,
+    _detect_docgen_format,
     _extract_dependencies_from_html,
+    _extract_names_from_rendered_code,
     _extract_source_text,
     _filter_auto_generated_projections,
     _insert_declarations_batch,
     _parse_declarations_from_files,
+    _parse_declarations_from_sqlite,
+    _read_lean_toolchain_version,
     _read_source_lines,
     _strip_lean_comments,
+    _validate_docgen_sqlite,
     extract_declarations,
 )
 from lean_explore.extract.types import Declaration
@@ -155,6 +163,253 @@ class TestSourceExtraction:
         with pytest.raises(FileNotFoundError):
             _extract_source_text(source_link, lean_root, package_cache)
 
+    def test_extract_source_text_from_lake_toolchain(self, temp_directory):
+        """Test extracting source text from the Lake toolchain path."""
+        lean_root = temp_directory / "lean"
+        toolchain_root = temp_directory / "toolchain" / "src"
+        lean_source_dir = toolchain_root / "lean"
+        lake_source_dir = toolchain_root / "lake"
+        lean_source_dir.mkdir(parents=True)
+        lake_file = lake_source_dir / "Lake" / "Config" / "Monad.lean"
+        lake_file.parent.mkdir(parents=True)
+        lake_file.write_text("def Lake.Config.Monad.run := 1\n")
+
+        package_cache = {"lean4": lean_source_dir}
+        source_link = (
+            "https://github.com/leanprover/lean4/blob/toolchain/"
+            "src/lake/Lake/Config/Monad.lean#L1-L1"
+        )
+
+        result = _extract_source_text(source_link, lean_root, package_cache)
+
+        assert "Lake.Config.Monad.run" in result
+
+
+def _encode_nat(n: int) -> bytes:
+    """Encode a natural number in leansqlite's variable-length format."""
+    chunks = []
+    while n >= 128:
+        chunks.append((n & 0x7F) | 0x80)
+        n >>= 7
+    chunks.append(n)
+    return bytes(chunks)
+
+
+def _encode_string(s: str) -> bytes:
+    """Encode a string: Nat(utf8_byte_length) + UTF-8 bytes."""
+    encoded = s.encode("utf-8")
+    return _encode_nat(len(encoded)) + encoded
+
+
+def _encode_name(name: str) -> bytes:
+    """Encode a dotted Lean name (e.g. 'Nat.add') into binary."""
+    if not name:
+        return b"\x00"  # anonymous
+    parts = name.split(".")
+    result = b"\x00"  # start with anonymous
+    for part in parts:
+        # Name.str = tag 1 + parent + string
+        result = b"\x01" + result + _encode_string(part)
+    return result
+
+
+def _make_const_tag(name: str) -> bytes:
+    """Build a RenderedCode.Tag.const(name) blob fragment."""
+    return b"\x02" + _encode_name(name)
+
+
+def _make_text_node(s: str) -> bytes:
+    """Build a TaggedText.text(s) blob fragment."""
+    return b"\x00" + _encode_string(s)
+
+
+def _make_tag_node(tag_bytes: bytes, inner: bytes) -> bytes:
+    """Build a TaggedText.tag(tag, inner) blob fragment."""
+    return b"\x01" + tag_bytes + inner
+
+
+def _make_append_node(children: list[bytes]) -> bytes:
+    """Build a TaggedText.append(children) blob fragment."""
+    return b"\x02" + _encode_nat(len(children)) + b"".join(children)
+
+
+class TestRenderedCodeBlobParser:
+    """Tests for RenderedCode BLOB parsing to extract dependency names."""
+
+    def test_extract_single_const(self):
+        """Test extracting a single const name from a type BLOB."""
+        # TaggedText.tag(Tag.const("Nat"), TaggedText.text("Nat"))
+        blob = _make_tag_node(_make_const_tag("Nat"), _make_text_node("Nat"))
+        names = _extract_names_from_rendered_code(blob)
+        assert names == ["Nat"]
+
+    def test_extract_multiple_consts(self):
+        """Test extracting multiple const names from a type BLOB."""
+        # append([tag(const Nat, text Nat), text " → ", tag(const Bool, text Bool)])
+        blob = _make_append_node([
+            _make_tag_node(_make_const_tag("Nat"), _make_text_node("Nat")),
+            _make_text_node(" → "),
+            _make_tag_node(_make_const_tag("Bool"), _make_text_node("Bool")),
+        ])
+        names = _extract_names_from_rendered_code(blob)
+        assert names == ["Nat", "Bool"]
+
+    def test_extract_dotted_name(self):
+        """Test extracting a dotted name like Nat.add."""
+        blob = _make_tag_node(
+            _make_const_tag("Nat.add"), _make_text_node("Nat.add")
+        )
+        names = _extract_names_from_rendered_code(blob)
+        assert names == ["Nat.add"]
+
+    def test_deduplicates_names(self):
+        """Test that duplicate const references are deduplicated."""
+        blob = _make_append_node([
+            _make_tag_node(_make_const_tag("Nat"), _make_text_node("Nat")),
+            _make_text_node(" → "),
+            _make_tag_node(_make_const_tag("Nat"), _make_text_node("Nat")),
+        ])
+        names = _extract_names_from_rendered_code(blob)
+        assert names == ["Nat"]
+
+    def test_skips_non_const_tags(self):
+        """Test that keyword, string, sort, otherExpr tags are skipped."""
+        blob = _make_append_node([
+            _make_tag_node(b"\x00", _make_text_node("def")),       # keyword
+            _make_text_node(" "),
+            _make_tag_node(_make_const_tag("Nat"), _make_text_node("Nat")),
+            _make_tag_node(b"\x07", _make_text_node("x")),         # otherExpr
+        ])
+        names = _extract_names_from_rendered_code(blob)
+        assert names == ["Nat"]
+
+    def test_empty_blob_returns_empty(self):
+        """Test that an empty or invalid BLOB returns empty list."""
+        assert _extract_names_from_rendered_code(b"") == []
+        assert _extract_names_from_rendered_code(b"\xff") == []
+
+    def test_text_only_returns_empty(self):
+        """Test that a BLOB with only text returns no names."""
+        blob = _make_text_node("hello world")
+        names = _extract_names_from_rendered_code(blob)
+        assert names == []
+
+    def test_nested_tagged_text(self):
+        """Test parsing nested tag nodes."""
+        # tag(otherExpr, tag(const("List"), text("List")))
+        inner = _make_tag_node(_make_const_tag("List"), _make_text_node("List"))
+        blob = _make_tag_node(b"\x07", inner)  # otherExpr wrapping
+        names = _extract_names_from_rendered_code(blob)
+        assert names == ["List"]
+
+    def test_blob_reader_nat_encoding(self):
+        """Test that Nat encoding/decoding matches leansqlite format."""
+        reader = _BlobReader(_encode_nat(0))
+        assert reader._read_nat() == 0
+
+        reader = _BlobReader(_encode_nat(127))
+        assert reader._read_nat() == 127
+
+        reader = _BlobReader(_encode_nat(128))
+        assert reader._read_nat() == 128
+
+        reader = _BlobReader(_encode_nat(300))
+        assert reader._read_nat() == 300
+
+        reader = _BlobReader(_encode_nat(100000))
+        assert reader._read_nat() == 100000
+
+    def test_blob_reader_name_roundtrip(self):
+        """Test that Name encoding produces correct dot-separated output."""
+        reader = _BlobReader(_encode_name("Mathlib.Data.Nat.Basic"))
+        assert reader._read_name() == "Mathlib.Data.Nat.Basic"
+
+        reader = _BlobReader(_encode_name(""))
+        assert reader._read_name() == ""
+
+    def test_sort_tags_handled(self):
+        """Test that sort tag variants (3-6) are handled without error."""
+        for sort_byte in [3, 4, 5, 6]:
+            blob = _make_tag_node(
+                bytes([sort_byte]), _make_text_node("Type")
+            )
+            names = _extract_names_from_rendered_code(blob)
+            assert names == []
+
+
+class TestSqliteHelpers:
+    """Tests for SQLite-specific parsing helpers."""
+
+    def test_construct_source_link_for_core_module_with_version(self):
+        """Test source links for core modules use the toolchain version."""
+        result = _construct_source_link(
+            "Init.Data.Nat.Basic", None, 12, 15,
+            lean_version="v4.29.0-rc6",
+        )
+
+        assert (
+            result
+            == "https://github.com/leanprover/lean4/blob/v4.29.0-rc6/"
+            "src/lean/Init/Data/Nat/Basic.lean#L12-L15"
+        )
+
+    def test_construct_source_link_for_lake_module_with_version(self):
+        """Test source links for Lake modules use the toolchain version."""
+        result = _construct_source_link(
+            "Lake.Config.Monad", None, 7, 9,
+            lean_version="v4.29.0-rc6",
+        )
+
+        assert (
+            result
+            == "https://github.com/leanprover/lean4/blob/v4.29.0-rc6/"
+            "src/lake/Lake/Config/Monad.lean#L7-L9"
+        )
+
+    def test_construct_source_link_falls_back_to_master(self):
+        """Test that missing lean_version falls back to 'master'."""
+        result = _construct_source_link(
+            "Init.Data.Nat.Basic", None, 12, 15,
+        )
+
+        assert (
+            result
+            == "https://github.com/leanprover/lean4/blob/master/"
+            "src/lean/Init/Data/Nat/Basic.lean#L12-L15"
+        )
+
+    def test_construct_source_link_prefers_source_url(self):
+        """Test that a non-None source_url is used directly."""
+        url = "https://github.com/leanprover-community/mathlib4/blob/abc123/Foo.lean"
+        result = _construct_source_link("Foo.Bar", url, 1, 10)
+
+        assert result == f"{url}#L1-L10"
+
+    def test_read_lean_toolchain_version(self, temp_directory):
+        """Test reading version from a lean-toolchain file."""
+        workspace = temp_directory / "workspace"
+        workspace.mkdir()
+        toolchain = workspace / "lean-toolchain"
+        toolchain.write_text("leanprover/lean4:v4.29.0-rc6\n")
+
+        assert _read_lean_toolchain_version(workspace) == "v4.29.0-rc6"
+
+    def test_read_lean_toolchain_version_release(self, temp_directory):
+        """Test reading a release version (no -rc suffix)."""
+        workspace = temp_directory / "workspace"
+        workspace.mkdir()
+        toolchain = workspace / "lean-toolchain"
+        toolchain.write_text("leanprover/lean4:v4.29.0\n")
+
+        assert _read_lean_toolchain_version(workspace) == "v4.29.0"
+
+    def test_read_lean_toolchain_version_missing(self, temp_directory):
+        """Test returns None when lean-toolchain doesn't exist."""
+        workspace = temp_directory / "workspace"
+        workspace.mkdir()
+
+        assert _read_lean_toolchain_version(workspace) is None
+
 
 class TestDependencyExtraction:
     """Tests for dependency extraction from HTML."""
@@ -272,6 +527,458 @@ class TestDeclarationParsing:
         )
 
         assert len(declarations) == 0
+
+    def test_parse_declarations_from_sqlite_filters_non_rendered(
+        self, temp_directory
+    ):
+        """Test SQLite parsing only keeps rendered declarations."""
+        lean_root = temp_directory / "lean"
+        database_path = temp_directory / "api-docs.db"
+
+        source_dir = lean_root / "mathlib" / ".lake" / "packages" / "mathlib4"
+        source_file = source_dir / "Mathlib" / "Data" / "Nat" / "Basic.lean"
+        source_file.parent.mkdir(parents=True)
+        source_file.write_text(
+            "theorem Nat.visible : True := trivial\n"
+            "def Nat.hidden : Nat := 0\n"
+        )
+
+        connection = sqlite3.connect(database_path)
+        connection.executescript(
+            """
+            CREATE TABLE modules (name TEXT PRIMARY KEY, source_url TEXT);
+            CREATE TABLE name_info (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              kind TEXT,
+              name TEXT NOT NULL,
+              type BLOB NOT NULL,
+              sorried INTEGER NOT NULL,
+              render INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_ranges (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              start_line INTEGER NOT NULL,
+              start_column INTEGER NOT NULL,
+              start_utf16 INTEGER NOT NULL,
+              end_line INTEGER NOT NULL,
+              end_column INTEGER NOT NULL,
+              end_utf16 INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_markdown_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              text TEXT NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_verso_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              content BLOB NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO modules (name, source_url) VALUES (?, ?)",
+            (
+                "Mathlib.Data.Nat.Basic",
+                "https://github.com/leanprover-community/mathlib4/blob/master/"
+                "Mathlib/Data/Nat/Basic.lean",
+            ),
+        )
+        connection.executemany(
+            """
+            INSERT INTO name_info
+              (module_name, position, kind, name, type, sorried, render)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "Mathlib.Data.Nat.Basic",
+                    1,
+                    "theorem",
+                    "Nat.visible",
+                    _make_text_node("True"),
+                    0,
+                    1,
+                ),
+                (
+                    "Mathlib.Data.Nat.Basic",
+                    2,
+                    "definition",
+                    "Nat.hidden",
+                    _make_text_node("Nat"),
+                    0,
+                    0,
+                ),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO declaration_ranges
+              (module_name, position, start_line, start_column, start_utf16,
+               end_line, end_column, end_utf16)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("Mathlib.Data.Nat.Basic", 1, 1, 0, 0, 1, 32, 32),
+                ("Mathlib.Data.Nat.Basic", 2, 2, 0, 0, 2, 22, 22),
+            ],
+        )
+        connection.execute(
+            """
+            INSERT INTO declaration_markdown_docstrings
+              (module_name, position, text)
+            VALUES (?, ?, ?)
+            """,
+            ("Mathlib.Data.Nat.Basic", 1, "Visible theorem"),
+        )
+        connection.commit()
+        connection.close()
+
+        declarations = _parse_declarations_from_sqlite(
+            database_path,
+            lean_root,
+            _build_package_cache(lean_root),
+            allowed_module_prefixes=["Mathlib"],
+        )
+
+        assert [declaration.name for declaration in declarations] == ["Nat.visible"]
+        assert declarations[0].docstring == "Visible theorem"
+
+    def test_parse_declarations_from_sqlite_extracts_dependencies(
+        self, temp_directory
+    ):
+        """Test that SQLite parsing extracts dependencies from type BLOBs."""
+        lean_root = temp_directory / "lean"
+        database_path = temp_directory / "api-docs.db"
+
+        source_dir = lean_root / "mathlib" / ".lake" / "packages" / "mathlib4"
+        source_file = source_dir / "Mathlib" / "Data" / "Nat" / "Basic.lean"
+        source_file.parent.mkdir(parents=True)
+        source_file.write_text("def Nat.myFunc (n : Nat) : Bool := true\n")
+
+        # Build a type BLOB: "Nat → Bool"
+        type_blob = _make_append_node([
+            _make_tag_node(_make_const_tag("Nat"), _make_text_node("Nat")),
+            _make_text_node(" → "),
+            _make_tag_node(_make_const_tag("Bool"), _make_text_node("Bool")),
+        ])
+
+        connection = sqlite3.connect(database_path)
+        connection.executescript(
+            """
+            CREATE TABLE modules (name TEXT PRIMARY KEY, source_url TEXT);
+            CREATE TABLE name_info (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              kind TEXT,
+              name TEXT NOT NULL,
+              type BLOB NOT NULL,
+              sorried INTEGER NOT NULL,
+              render INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_ranges (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              start_line INTEGER NOT NULL,
+              start_column INTEGER NOT NULL,
+              start_utf16 INTEGER NOT NULL,
+              end_line INTEGER NOT NULL,
+              end_column INTEGER NOT NULL,
+              end_utf16 INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_markdown_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              text TEXT NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_verso_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              content BLOB NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO modules (name, source_url) VALUES (?, ?)",
+            (
+                "Mathlib.Data.Nat.Basic",
+                "https://github.com/leanprover-community/mathlib4/blob/master/"
+                "Mathlib/Data/Nat/Basic.lean",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO name_info
+              (module_name, position, kind, name, type, sorried, render)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("Mathlib.Data.Nat.Basic", 1, "definition", "Nat.myFunc", type_blob, 0, 1),
+        )
+        connection.execute(
+            """
+            INSERT INTO declaration_ranges
+              (module_name, position, start_line, start_column, start_utf16,
+               end_line, end_column, end_utf16)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("Mathlib.Data.Nat.Basic", 1, 1, 0, 0, 1, 40, 40),
+        )
+        connection.commit()
+        connection.close()
+
+        declarations = _parse_declarations_from_sqlite(
+            database_path,
+            lean_root,
+            _build_package_cache(lean_root),
+            allowed_module_prefixes=["Mathlib"],
+        )
+
+        assert len(declarations) == 1
+        assert declarations[0].name == "Nat.myFunc"
+        assert declarations[0].dependencies == ["Nat", "Bool"]
+
+    def test_parse_declarations_from_sqlite_detects_verso_docstrings(
+        self, temp_directory, caplog
+    ):
+        """Test that Verso-only docstrings are detected and logged."""
+        lean_root = temp_directory / "lean"
+        database_path = temp_directory / "api-docs.db"
+
+        source_dir = (
+            lean_root / "mathlib" / ".lake" / "packages" / "mathlib4"
+        )
+        source_file = source_dir / "Mathlib" / "Data" / "Nat" / "Basic.lean"
+        source_file.parent.mkdir(parents=True)
+        source_file.write_text(
+            "def Nat.withVerso : Nat := 0\n"
+            "def Nat.withMarkdown : Nat := 1\n"
+        )
+
+        connection = sqlite3.connect(database_path)
+        connection.executescript(
+            """
+            CREATE TABLE modules (name TEXT PRIMARY KEY, source_url TEXT);
+            CREATE TABLE name_info (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              kind TEXT,
+              name TEXT NOT NULL,
+              type BLOB NOT NULL,
+              sorried INTEGER NOT NULL,
+              render INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_ranges (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              start_line INTEGER NOT NULL,
+              start_column INTEGER NOT NULL,
+              start_utf16 INTEGER NOT NULL,
+              end_line INTEGER NOT NULL,
+              end_column INTEGER NOT NULL,
+              end_utf16 INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_markdown_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              text TEXT NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_verso_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              content BLOB NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO modules (name, source_url) VALUES (?, ?)",
+            (
+                "Mathlib.Data.Nat.Basic",
+                "https://github.com/leanprover-community/mathlib4"
+                "/blob/master/Mathlib/Data/Nat/Basic.lean",
+            ),
+        )
+        connection.executemany(
+            """
+            INSERT INTO name_info
+              (module_name, position, kind, name, type, sorried, render)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "Mathlib.Data.Nat.Basic", 1, "definition",
+                    "Nat.withVerso", _make_text_node("Nat"), 0, 1,
+                ),
+                (
+                    "Mathlib.Data.Nat.Basic", 2, "definition",
+                    "Nat.withMarkdown", _make_text_node("Nat"), 0, 1,
+                ),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO declaration_ranges
+              (module_name, position, start_line, start_column,
+               start_utf16, end_line, end_column, end_utf16)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("Mathlib.Data.Nat.Basic", 1, 1, 0, 0, 1, 27, 27),
+                ("Mathlib.Data.Nat.Basic", 2, 2, 0, 0, 2, 30, 30),
+            ],
+        )
+        # Declaration 1: Verso-only docstring (binary BLOB)
+        connection.execute(
+            """
+            INSERT INTO declaration_verso_docstrings
+              (module_name, position, content)
+            VALUES (?, ?, ?)
+            """,
+            ("Mathlib.Data.Nat.Basic", 1, b"\x00\x01\x02"),
+        )
+        # Declaration 2: Markdown docstring
+        connection.execute(
+            """
+            INSERT INTO declaration_markdown_docstrings
+              (module_name, position, text)
+            VALUES (?, ?, ?)
+            """,
+            ("Mathlib.Data.Nat.Basic", 2, "A markdown docstring"),
+        )
+        connection.commit()
+        connection.close()
+
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            declarations = _parse_declarations_from_sqlite(
+                database_path,
+                lean_root,
+                _build_package_cache(lean_root),
+                allowed_module_prefixes=["Mathlib"],
+            )
+
+        assert len(declarations) == 2
+        # Verso-only: docstring is None
+        verso_decl = next(
+            d for d in declarations if d.name == "Nat.withVerso"
+        )
+        assert verso_decl.docstring is None
+        # Markdown: docstring is present
+        md_decl = next(
+            d for d in declarations if d.name == "Nat.withMarkdown"
+        )
+        assert md_decl.docstring == "A markdown docstring"
+        # Warning logged about Verso-only docstrings
+        assert "1 declarations have Verso-only docstrings" in caplog.text
+
+    def test_parse_declarations_from_sqlite_uses_core_fallback_source_link(
+        self, temp_directory
+    ):
+        """Test SQLite parsing for core modules without a stored source URL."""
+        lean_root = temp_directory / "lean"
+        database_path = temp_directory / "api-docs.db"
+
+        toolchain_root = temp_directory / "toolchain" / "src"
+        lean_source_dir = toolchain_root / "lean"
+        init_file = lean_source_dir / "Init" / "Data" / "Nat" / "Basic.lean"
+        init_file.parent.mkdir(parents=True)
+        init_file.write_text("theorem Nat.core : True := trivial\n")
+
+        connection = sqlite3.connect(database_path)
+        connection.executescript(
+            """
+            CREATE TABLE modules (name TEXT PRIMARY KEY, source_url TEXT);
+            CREATE TABLE name_info (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              kind TEXT,
+              name TEXT NOT NULL,
+              type BLOB NOT NULL,
+              sorried INTEGER NOT NULL,
+              render INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_ranges (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              start_line INTEGER NOT NULL,
+              start_column INTEGER NOT NULL,
+              start_utf16 INTEGER NOT NULL,
+              end_line INTEGER NOT NULL,
+              end_column INTEGER NOT NULL,
+              end_utf16 INTEGER NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_markdown_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              text TEXT NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_verso_docstrings (
+              module_name TEXT NOT NULL,
+              position INTEGER NOT NULL,
+              content BLOB NOT NULL,
+              PRIMARY KEY (module_name, position)
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO modules (name, source_url) VALUES (?, ?)",
+            ("Init.Data.Nat.Basic", None),
+        )
+        connection.execute(
+            """
+            INSERT INTO name_info
+              (module_name, position, kind, name, type, sorried, render)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "Init.Data.Nat.Basic", 1, "theorem", "Nat.core",
+                _make_text_node("True"), 0, 1,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO declaration_ranges
+              (module_name, position, start_line, start_column, start_utf16,
+               end_line, end_column, end_utf16)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("Init.Data.Nat.Basic", 1, 1, 0, 0, 1, 31, 31),
+        )
+        connection.commit()
+        connection.close()
+
+        declarations = _parse_declarations_from_sqlite(
+            database_path,
+            lean_root,
+            {"lean4": lean_source_dir},
+            allowed_module_prefixes=["Init"],
+            lean_version="v4.29.0-rc6",
+        )
+
+        assert len(declarations) == 1
+        assert declarations[0].name == "Nat.core"
+        assert (
+            declarations[0].source_link
+            == "https://github.com/leanprover/lean4/blob/v4.29.0-rc6/"
+            "src/lean/Init/Data/Nat/Basic.lean#L1-L1"
+        )
 
 
 class TestDeclarationInsertion:
@@ -641,3 +1348,125 @@ class TestFilterAutoGeneratedProjections:
 
         assert len(filtered) == 1
         assert removed_count == 0
+
+
+class TestDocgenFormatDetection:
+    """Tests for doc-gen4 output format detection and SQLite validation."""
+
+    def test_detect_sqlite_with_valid_db(self, temp_directory):
+        """Test detection returns 'sqlite' for a valid api-docs.db."""
+        workspace = temp_directory / "pkg"
+        db_path = workspace / ".lake" / "build" / "api-docs.db"
+        db_path.parent.mkdir(parents=True)
+
+        connection = sqlite3.connect(db_path)
+        connection.executescript(
+            """
+            CREATE TABLE modules (name TEXT PRIMARY KEY, source_url TEXT);
+            CREATE TABLE name_info (
+              module_name TEXT, position INTEGER, kind TEXT, name TEXT,
+              type BLOB, sorried INTEGER, render INTEGER,
+              PRIMARY KEY (module_name, position)
+            );
+            CREATE TABLE declaration_ranges (
+              module_name TEXT, position INTEGER,
+              start_line INTEGER, start_column INTEGER, start_utf16 INTEGER,
+              end_line INTEGER, end_column INTEGER, end_utf16 INTEGER,
+              PRIMARY KEY (module_name, position)
+            );
+            """
+        )
+        connection.close()
+
+        assert _detect_docgen_format(workspace) == "sqlite"
+
+    def test_detect_bmp_format(self, temp_directory):
+        """Test detection returns 'bmp' when only BMP files exist."""
+        workspace = temp_directory / "pkg"
+        doc_data = workspace / ".lake" / "build" / "doc-data"
+        doc_data.mkdir(parents=True)
+        (doc_data / "declaration-data-Foo.bmp").write_text("{}")
+
+        assert _detect_docgen_format(workspace) == "bmp"
+
+    def test_detect_none_when_empty(self, temp_directory):
+        """Test detection returns 'none' when no doc output exists."""
+        workspace = temp_directory / "pkg"
+        workspace.mkdir(parents=True)
+
+        assert _detect_docgen_format(workspace) == "none"
+
+    def test_detect_falls_back_to_bmp_for_empty_db(self, temp_directory):
+        """Test that an empty api-docs.db falls back to BMP if available."""
+        workspace = temp_directory / "pkg"
+        db_path = workspace / ".lake" / "build" / "api-docs.db"
+        db_path.parent.mkdir(parents=True)
+        db_path.write_bytes(b"")
+
+        doc_data = workspace / ".lake" / "build" / "doc-data"
+        doc_data.mkdir(parents=True)
+        (doc_data / "declaration-data-Foo.bmp").write_text("{}")
+
+        assert _detect_docgen_format(workspace) == "bmp"
+
+    def test_detect_returns_none_for_empty_db_without_bmp(self, temp_directory):
+        """Test that an empty api-docs.db with no BMP fallback returns 'none'."""
+        workspace = temp_directory / "pkg"
+        db_path = workspace / ".lake" / "build" / "api-docs.db"
+        db_path.parent.mkdir(parents=True)
+        db_path.write_bytes(b"")
+
+        assert _detect_docgen_format(workspace) == "none"
+
+    def test_detect_falls_back_for_corrupt_db(self, temp_directory):
+        """Test that a corrupt (non-SQLite) file falls back gracefully."""
+        workspace = temp_directory / "pkg"
+        db_path = workspace / ".lake" / "build" / "api-docs.db"
+        db_path.parent.mkdir(parents=True)
+        db_path.write_bytes(b"this is not a sqlite database")
+
+        assert _detect_docgen_format(workspace) == "none"
+
+    def test_detect_falls_back_for_db_missing_tables(self, temp_directory):
+        """Test that a SQLite DB missing required tables falls back."""
+        workspace = temp_directory / "pkg"
+        db_path = workspace / ".lake" / "build" / "api-docs.db"
+        db_path.parent.mkdir(parents=True)
+
+        connection = sqlite3.connect(db_path)
+        connection.execute(
+            "CREATE TABLE modules (name TEXT PRIMARY KEY, source_url TEXT)"
+        )
+        connection.close()
+
+        # Has modules but missing name_info and declaration_ranges
+        assert _detect_docgen_format(workspace) == "none"
+
+    def test_validate_docgen_sqlite_valid(self, temp_directory):
+        """Test validation passes for a well-formed database."""
+        db_path = temp_directory / "api-docs.db"
+        connection = sqlite3.connect(db_path)
+        connection.executescript(
+            """
+            CREATE TABLE modules (name TEXT PRIMARY KEY);
+            CREATE TABLE name_info (module_name TEXT, position INTEGER);
+            CREATE TABLE declaration_ranges (module_name TEXT, position INTEGER);
+            """
+        )
+        connection.close()
+
+        assert _validate_docgen_sqlite(db_path) is True
+
+    def test_validate_docgen_sqlite_empty_file(self, temp_directory):
+        """Test validation rejects an empty file."""
+        db_path = temp_directory / "api-docs.db"
+        db_path.write_bytes(b"")
+
+        assert _validate_docgen_sqlite(db_path) is False
+
+    def test_validate_docgen_sqlite_corrupt_file(self, temp_directory):
+        """Test validation rejects a non-SQLite file."""
+        db_path = temp_directory / "api-docs.db"
+        db_path.write_bytes(b"not a database")
+
+        assert _validate_docgen_sqlite(db_path) is False
