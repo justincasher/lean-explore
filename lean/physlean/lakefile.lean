@@ -9,7 +9,7 @@ lean_lib «PhysExtract» where
   roots := #[`PhysExtract]
 
 require «doc-gen4» from git
-  "https://github.com/leanprover/doc-gen4" @ "v4.29.0"
+  "https://github.com/leanprover/doc-gen4" @ "v4.29.1"
 
 require PhysLean from git
   "https://github.com/HEPLean/PhysLean"
