@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 N/A
 
+## [1.3.0] - 2026-08-02
+
+### Added
+- Public hosted MCP plugin configuration for Claude Code and Codex.
+- Read-only safety annotations on every MCP tool for plugin-directory review.
+
+### Changed
+- The remote API, CLI, and hosted MCP server no longer require an account or API key.
+- MCP agents are directed to use `search_summary` followed by per-field retrieval tools.
+
+### Deprecated
+- API-key arguments remain accepted but are ignored for backwards compatibility.
+- The full-result MCP `search` tool remains available for backwards compatibility;
+  new integrations should use `search_summary`.
+
 ## [1.2.1] - 2026-02-04
 
 ### Added

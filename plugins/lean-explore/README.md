@@ -11,6 +11,9 @@ Agents should use `search_summary` to find declarations, then retrieve only
 the fields they need. The older full-result `search` tool is deprecated and
 retained only for backwards compatibility.
 
+All tools are read-only. They search or retrieve records from LeanExplore's
+indexed corpus and cannot modify Lean packages or external systems.
+
 The hosted endpoint allows 30 POST requests per client IP in any 60-second
 window. MCP initialization and tool-discovery requests count toward the same
 limit, and clients sharing a public IP share the budget. Limited requests

@@ -125,6 +125,10 @@ compatibility alias. IDs returned from `search_summary` can be passed to the
 per-field getters to fetch exactly the field you need, which keeps token usage
 low.
 
+All tools are annotated as read-only, non-destructive, and idempotent. They
+operate only on LeanExplore's indexed corpus and cannot modify Lean packages or
+external systems.
+
 ### `search_summary`: the preferred starting point
 
 Returns only `id`, `name`, and a short description per hit. Use this first,
