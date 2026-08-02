@@ -112,6 +112,18 @@ class TestSearchTool:
         assert tool.description.startswith("DEPRECATED: Use search_summary")
         assert tool.meta == {"deprecated": True, "replacement": "search_summary"}
 
+    async def test_all_tools_are_annotated_as_read_only(self):
+        """Expose accurate safety hints required by plugin directories."""
+        registered_tools = await mcp_app.list_tools()
+
+        assert len(registered_tools) == 8
+        for tool in registered_tools:
+            assert tool.annotations is not None
+            assert tool.annotations.readOnlyHint is True
+            assert tool.annotations.destructiveHint is False
+            assert tool.annotations.idempotentHint is True
+            assert tool.annotations.openWorldHint is False
+
     @pytest.fixture
     def mock_context_with_backend(self):
         """Create a mock MCP context with a backend service."""

@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from mcp.server.fastmcp import Context as MCPContext
+from mcp.types import ToolAnnotations
 from typing_extensions import TypedDict
 
 from lean_explore.mcp.app import AppContext, BackendServiceType, mcp_app
@@ -12,6 +13,13 @@ from lean_explore.models.search_types import (
     SearchResultSummary,
     SearchSummaryResponse,
     extract_bold_description,
+)
+
+READ_ONLY_TOOL_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
 )
 
 
@@ -194,6 +202,7 @@ async def _execute_backend_get_by_id(
         "per-field tools. This compatibility tool returns every field for every "
         "match and may consume substantially more context."
     ),
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
     meta={"deprecated": True, "replacement": "search_summary"},
 )
 async def search(
@@ -252,7 +261,7 @@ async def search(
     return response.model_dump(exclude_none=True)
 
 
-@mcp_app.tool()
+@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 async def search_summary(
     ctx: MCPContext,
     query: str,
@@ -325,7 +334,7 @@ async def search_summary(
     return summary_response.model_dump(exclude_none=True)
 
 
-@mcp_app.tool()
+@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 async def get_source_code(
     ctx: MCPContext,
     declaration_id: int,
@@ -361,7 +370,7 @@ async def get_source_code(
     )
 
 
-@mcp_app.tool()
+@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 async def get_source_link(
     ctx: MCPContext,
     declaration_id: int,
@@ -397,7 +406,7 @@ async def get_source_link(
     )
 
 
-@mcp_app.tool()
+@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 async def get_docstring(
     ctx: MCPContext,
     declaration_id: int,
@@ -434,7 +443,7 @@ async def get_docstring(
     )
 
 
-@mcp_app.tool()
+@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 async def get_description(
     ctx: MCPContext,
     declaration_id: int,
@@ -470,7 +479,7 @@ async def get_description(
     )
 
 
-@mcp_app.tool()
+@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 async def get_module(
     ctx: MCPContext,
     declaration_id: int,
@@ -505,7 +514,7 @@ async def get_module(
     )
 
 
-@mcp_app.tool()
+@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
 async def get_dependencies(
     ctx: MCPContext,
     declaration_id: int,
