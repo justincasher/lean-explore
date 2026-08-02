@@ -18,6 +18,11 @@ The recommended setup is the repository's `lean-explore` plugin. It points at
 `https://www.leanexplore.com/mcp`; no local executable, account, API key,
 browser authorization, or model data is required.
 
+The hosted endpoint allows 30 POST requests per client IP in any 60-second
+window. MCP initialization and tool-discovery requests count toward that
+total, and clients behind the same NAT or proxy share the limit. When the
+limit is reached, the server returns HTTP 429 with a `Retry-After` header.
+
 Claude Code:
 
 ```text

@@ -7,6 +7,11 @@ search index.
 
 The MCP endpoint is `https://www.leanexplore.com/mcp`.
 
+The hosted endpoint allows 30 POST requests per client IP in any 60-second
+window. MCP initialization and tool-discovery requests count toward the same
+limit, and clients sharing a public IP share the budget. Limited requests
+receive HTTP 429 with a `Retry-After` header.
+
 The Codex marketplace schema requires an authentication timing policy, so the
 marketplace entry uses `ON_INSTALL`. This is lifecycle metadata only: the
 plugin declares no credentials, and the server sends no authentication

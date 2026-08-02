@@ -63,6 +63,10 @@ the hosted MCP server, so it does not need a Python install, a local search
 index, account, API key, or browser authorization. The tools are available as
 soon as the plugin is installed.
 
+The hosted endpoint allows 30 POST requests per client IP in any 60-second
+window. Protocol initialization and tool-discovery requests count toward the
+limit, and clients sharing a public IP share the same budget.
+
 In Claude Code:
 
 ```text
