@@ -12,6 +12,30 @@ This page covers:
 - [The tools](#the-tools) and their schemas
 - [Recommended agent workflow](#recommended-agent-workflow)
 
+## Hosted plugin (Claude Code and Codex)
+
+The recommended setup is the repository's `lean-explore` plugin. It points at
+`https://www.leanexplore.com/mcp`; no local executable, account, API key,
+browser authorization, or model data is required.
+
+Claude Code:
+
+```text
+/plugin marketplace add justincasher/lean-explore
+/plugin install lean-explore@lean-explore
+/reload-plugins
+```
+
+Codex:
+
+```bash
+codex plugin marketplace add https://github.com/justincasher/lean-explore
+codex plugin add lean-explore@lean-explore
+```
+
+The stdio server described below remains available for existing configurations
+and for the fully local backend.
+
 ## Running the server
 
 The server speaks MCP over stdio; your client launches it as a subprocess.
@@ -23,7 +47,7 @@ You rarely invoke it directly except for debugging.
 lean-explore mcp serve --backend api
 ```
 
-Requires `LEANEXPLORE_API_KEY` in the environment, or pass `--api-key`:
+No account or API key is required. The old option remains accepted as a no-op:
 
 ```bash
 lean-explore mcp serve --backend api --api-key sk-...
@@ -55,10 +79,7 @@ on macOS):
   "mcpServers": {
     "lean-explore": {
       "command": "lean-explore",
-      "args": ["mcp", "serve", "--backend", "api"],
-      "env": {
-        "LEANEXPLORE_API_KEY": "your-key-here"
-      }
+      "args": ["mcp", "serve", "--backend", "api"]
     }
   }
 }
@@ -84,8 +105,6 @@ Any client that accepts a command + args will work. Point it at the
 
 ### Troubleshooting
 
-- **"API key required"**: set `LEANEXPLORE_API_KEY` in the `env` block (for
-  MCP clients that support it) or pass `--api-key` in `args`.
 - **"Essential data files for the local backend are missing"**: run
   `lean-explore data fetch` first.
 - **Tools do not appear in the client**: check the client's MCP logs. The

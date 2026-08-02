@@ -48,7 +48,8 @@ dependencies = [
     "openai-agents>=0.0.16",
 
     # MCP Server Components
-    "mcp>=1.9.0",
+    # The current server uses the v1 FastMCP API. MCP 2.x is a breaking rewrite.
+    "mcp>=1.28.0,<2",
 
     # Utilities
     "tqdm>=4.60",

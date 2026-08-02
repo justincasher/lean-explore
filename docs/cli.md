@@ -39,12 +39,8 @@ lean-explore search QUERY [OPTIONS]
 
 ### Requirements
 
-`lean-explore search` uses the remote API. You must have `LEANEXPLORE_API_KEY`
-set in your environment:
-
-```bash
-export LEANEXPLORE_API_KEY="your-key-here"
-```
+`lean-explore search` uses the public remote API. No account or API key is
+required.
 
 ### Examples
 
@@ -71,12 +67,11 @@ lean-explore mcp serve [OPTIONS]
 | Flag | Default | Description |
 |---|---|---|
 | `--backend`, `-b` | `api` | Backend to use: `api` or `local`. |
-| `--api-key` | (none) | API key for the `api` backend. Overrides `LEANEXPLORE_API_KEY`. |
+| `--api-key` | (none) | Deprecated compatibility option. Accepted and ignored. |
 
 ### Backends
 
-- **`api`**: Delegates every query to the hosted LeanExplore API. Requires an
-  API key (via env var or `--api-key`).
+- **`api`**: Delegates every query to the public hosted LeanExplore API.
 - **`local`**: Runs the full hybrid search pipeline on-device. Requires
   `pip install lean-explore[local]` and `lean-explore data fetch`.
 
@@ -86,7 +81,7 @@ lean-explore mcp serve [OPTIONS]
 # Remote API (most users)
 lean-explore mcp serve --backend api
 
-# Remote API with an inline key
+# Legacy syntax remains valid; the value is ignored
 lean-explore mcp serve --backend api --api-key sk-...
 
 # Local, fully offline backend
@@ -154,7 +149,7 @@ touch downloaded model weights; those live under `~/.cache/huggingface/`.
 All CLI commands follow standard conventions:
 
 - `0`: success
-- non-zero: an error occurred (missing API key, failed download, etc.).
+- non-zero: an error occurred (failed request, failed download, etc.).
   An error message is printed to stderr.
 
 ## See also

@@ -1,0 +1,13 @@
+{
+  "name": "lean-explore",
+  "version": "0.1.0",
+  "description": "Search Lean 4 declarations through the hosted LeanExplore MCP server.",
+  "author": {
+    "name": "Justin Asher",
+    "email": "justinchadwickasher@gmail.com"
+  },
+  "homepage": "https://www.leanexplore.com/docs/mcp",
+  "repository": "https://github.com/justincasher/lean-explore",
+  "license": "Apache-2.0",
+  "keywords": ["lean", "lean4", "mathlib", "mcp", "theorem-proving"]
+}

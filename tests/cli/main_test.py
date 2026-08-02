@@ -6,7 +6,6 @@ These tests verify the core CLI commands including search and MCP server launch.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import typer
 from typer.testing import CliRunner
 
 from lean_explore.cli.main import _get_console, _search_async, app
@@ -95,43 +94,32 @@ class TestSearchCommand:
                 query="test query", limit=5, packages=["Mathlib", "Std"]
             )
 
-    async def test_search_command_api_key_error(self):
-        """Test search command when API key is missing."""
-        with patch(
-            "lean_explore.cli.main.ApiClient",
-            side_effect=ValueError("API key required"),
-        ):
-            with pytest.raises(typer.Exit) as exc_info:
-                await _search_async(query_string="test query", limit=5, packages=None)
-            assert exc_info.value.exit_code == 1
-
 
 class TestMcpServeCommand:
     """Tests for the MCP serve command."""
 
-    def test_mcp_serve_missing_api_key(self):
-        """Test MCP serve fails without API key for api backend."""
-        with patch.dict("os.environ", {}, clear=True):
-            # Remove any existing LEANEXPLORE_API_KEY
-            with patch("os.getenv", return_value=None):
-                result = runner.invoke(app, ["mcp", "serve", "--backend", "api"])
-                assert result.exit_code != 0
-
-    def test_mcp_serve_with_api_key_env(self):
-        """Test MCP serve with API key from environment."""
+    def test_mcp_serve_without_api_key(self):
+        """Test MCP API backend starts without credentials."""
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with (
-            patch("os.getenv", return_value="test-api-key"),
-            patch("subprocess.run", return_value=mock_result) as mock_run,
-        ):
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = runner.invoke(app, ["mcp", "serve", "--backend", "api"])
+            assert result.exit_code == 0
+            mock_run.assert_called_once()
+
+    def test_mcp_serve_ignores_api_key_env(self):
+        """Test MCP serve ignores the legacy API key environment variable."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
             result = runner.invoke(app, ["mcp", "serve", "--backend", "api"])
             assert result.exit_code == 0
             mock_run.assert_called_once()
 
     def test_mcp_serve_with_api_key_option(self):
-        """Test MCP serve with API key from command line option."""
+        """Test MCP serve accepts and ignores the legacy API key option."""
         mock_result = MagicMock()
         mock_result.returncode = 0
 
@@ -141,10 +129,9 @@ class TestMcpServeCommand:
             )
             assert result.exit_code == 0
             mock_run.assert_called_once()
-            # Check that --api-key was passed to subprocess
             call_args = mock_run.call_args[0][0]
-            assert "--api-key" in call_args
-            assert "my-key" in call_args
+            assert "--api-key" not in call_args
+            assert "my-key" not in call_args
 
     def test_mcp_serve_local_backend(self):
         """Test MCP serve with local backend (no API key needed)."""
@@ -164,10 +151,7 @@ class TestMcpServeCommand:
         mock_result = MagicMock()
         mock_result.returncode = 1
 
-        with (
-            patch("os.getenv", return_value="test-api-key"),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        with patch("subprocess.run", return_value=mock_result):
             result = runner.invoke(app, ["mcp", "serve", "--backend", "api"])
             assert result.exit_code == 1
 

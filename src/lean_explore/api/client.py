@@ -1,7 +1,5 @@
 """Client for interacting with the remote Lean Explore API."""
 
-import os
-
 import httpx
 
 from lean_explore.config import Config
@@ -11,30 +9,23 @@ from lean_explore.models import SearchResponse, SearchResult
 class ApiClient:
     """Async client for the remote Lean Explore API.
 
-    This client handles making HTTP requests to the API, authenticating
-    with an API key, and parsing responses into SearchResult objects.
+    This client handles making HTTP requests to the public API and parsing
+    responses into SearchResult objects. The ``api_key`` argument is accepted
+    and ignored so existing integrations continue to start without changes.
     """
 
     def __init__(self, api_key: str | None = None, timeout: float = 10.0):
         """Initialize the API client.
 
         Args:
-            api_key: The API key for authentication. If None, reads from
-                LEANEXPLORE_API_KEY environment variable.
+            api_key: Deprecated compatibility argument. It is ignored.
             timeout: Default timeout for HTTP requests in seconds.
-
-        Raises:
-            ValueError: If no API key is provided and LEANEXPLORE_API_KEY is not set.
         """
+        del api_key
         self.base_url: str = Config.API_BASE_URL
-        self.api_key: str = api_key or os.getenv("LEANEXPLORE_API_KEY", "")
-        if not self.api_key:
-            raise ValueError(
-                "API key required. Pass api_key parameter or set LEANEXPLORE_API_KEY "
-                "environment variable."
-            )
+        self.api_key: None = None
         self.timeout: float = timeout
-        self._headers: dict[str, str] = {"Authorization": f"Bearer {self.api_key}"}
+        self._headers: dict[str, str] = {}
 
     async def search(
         self,

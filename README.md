@@ -56,6 +56,30 @@ lean-explore data fetch
 lean-explore mcp serve --backend local
 ```
 
+## Claude Code and Codex plugin
+
+The repository includes a plugin for both Claude Code and Codex. It connects to
+the hosted MCP server, so it does not need a Python install, a local search
+index, account, API key, or browser authorization. The tools are available as
+soon as the plugin is installed.
+
+In Claude Code:
+
+```text
+/plugin marketplace add justincasher/lean-explore
+/plugin install lean-explore@lean-explore
+/reload-plugins
+```
+
+In Codex:
+
+```bash
+codex plugin marketplace add https://github.com/justincasher/lean-explore
+codex plugin add lean-explore@lean-explore
+```
+
+Start a new Codex session after installation so the MCP tools are loaded.
+
 ## Documentation
 
 Full docs live in the [`docs/`](docs/README.md) folder, or at [https://www.leanexplore.com/docs](https://www.leanexplore.com/docs).
