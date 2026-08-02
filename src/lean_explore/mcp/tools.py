@@ -187,7 +187,15 @@ async def _execute_backend_get_by_id(
     return backend.get_by_id(declaration_id=declaration_id)
 
 
-@mcp_app.tool()
+@mcp_app.tool(
+    title="[Deprecated] Search with full results",
+    description=(
+        "DEPRECATED: Use search_summary, then fetch needed fields with the "
+        "per-field tools. This compatibility tool returns every field for every "
+        "match and may consume substantially more context."
+    ),
+    meta={"deprecated": True, "replacement": "search_summary"},
+)
 async def search(
     ctx: MCPContext,
     query: str,
@@ -195,7 +203,10 @@ async def search(
     rerank_top: int | None = 50,
     packages: list[str] | None = None,
 ) -> SearchResponseDict:
-    """Search Lean 4 declarations and return full results including source code.
+    """Deprecated MCP compatibility tool returning full search results.
+
+    Use search_summary followed by the per-field tools for all new workflows.
+    This function remains available so existing MCP clients do not break.
 
     Accepts two kinds of queries:
       - By name: a full or partial Lean declaration name, e.g., "List.map",
@@ -209,10 +220,7 @@ async def search(
     specify which kind of query you are making.
 
     Returns full results including source code, module, dependencies, and
-    informalization for every hit. If you only need names and short
-    descriptions, prefer search_summary to save tokens, then use the
-    per-field tools (get_source_code, get_docstring, get_description,
-    get_module, get_dependencies) for the entries you care about.
+    informalization for every hit.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
@@ -231,7 +239,10 @@ async def search(
     logger.info(
         "MCP Tool 'search' called with query: '%s', limit: %d, "
         "rerank_top: %s, packages: %s",
-        query, limit, rerank_top, packages,
+        query,
+        limit,
+        rerank_top,
+        packages,
     )
 
     response = await _execute_backend_search(
@@ -285,7 +296,10 @@ async def search_summary(
     logger.info(
         "MCP Tool 'search_summary' called with query: '%s', limit: %d, "
         "rerank_top: %s, packages: %s",
-        query, limit, rerank_top, packages,
+        query,
+        limit,
+        rerank_top,
+        packages,
     )
 
     response = await _execute_backend_search(
@@ -321,11 +335,11 @@ async def get_source_code(
     Returns the declaration name and its Lean 4 source code. Use this after
     calling search_summary to inspect the actual implementation.
 
-    The id values come from the search or search_summary result lists.
+    The id values come from the search_summary result list.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
-        declaration_id: The numeric id from a search or search_summary result.
+        declaration_id: The numeric id from a search_summary result.
 
     Returns:
         A dictionary with id, name, and source_text, or None if the id
@@ -357,11 +371,11 @@ async def get_source_link(
     Returns the declaration name and a URL to the source code on GitHub.
     Use this when you need to reference or link to the original source.
 
-    The id values come from the search or search_summary result lists.
+    The id values come from the search_summary result list.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
-        declaration_id: The numeric id from a search or search_summary result.
+        declaration_id: The numeric id from a search_summary result.
 
     Returns:
         A dictionary with id, name, and source_link, or None if the id
@@ -394,11 +408,11 @@ async def get_docstring(
     source code. Use this to check what documentation exists without
     fetching the full source code.
 
-    The id values come from the search or search_summary result lists.
+    The id values come from the search_summary result list.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
-        declaration_id: The numeric id from a search or search_summary result.
+        declaration_id: The numeric id from a search_summary result.
 
     Returns:
         A dictionary with id, name, and docstring, or None if the id
@@ -430,11 +444,11 @@ async def get_description(
     Returns the declaration name and its informalization, an AI-generated
     plain-English explanation of what the declaration states or does.
 
-    The id values come from the search or search_summary result lists.
+    The id values come from the search_summary result list.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
-        declaration_id: The numeric id from a search or search_summary result.
+        declaration_id: The numeric id from a search_summary result.
 
     Returns:
         A dictionary with id, name, and informalization, or None if the id
@@ -467,20 +481,18 @@ async def get_module(
     (e.g., 'Mathlib.Data.List.Basic'). Use this to find where a
     declaration lives in the package structure.
 
-    The id values come from the search or search_summary result lists.
+    The id values come from the search_summary result list.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
-        declaration_id: The numeric id from a search or search_summary result.
+        declaration_id: The numeric id from a search_summary result.
 
     Returns:
         A dictionary with id, name, and module, or None if the id does
         not exist.
     """
     backend = await _get_backend_from_context(ctx)
-    logger.info(
-        "MCP Tool 'get_module' called for declaration_id: %d", declaration_id
-    )
+    logger.info("MCP Tool 'get_module' called for declaration_id: %d", declaration_id)
 
     result = await _execute_backend_get_by_id(backend, declaration_id)
     if result is None:
@@ -504,11 +516,11 @@ async def get_dependencies(
     names that this declaration depends on. Use this to understand what
     a declaration builds upon.
 
-    The id values come from the search or search_summary result lists.
+    The id values come from the search_summary result list.
 
     Args:
         ctx: The MCP context, providing access to the backend service.
-        declaration_id: The numeric id from a search or search_summary result.
+        declaration_id: The numeric id from a search_summary result.
 
     Returns:
         A dictionary with id, name, and dependencies, or None if the id

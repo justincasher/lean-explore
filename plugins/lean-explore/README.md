@@ -7,6 +7,10 @@ search index.
 
 The MCP endpoint is `https://www.leanexplore.com/mcp`.
 
+Agents should use `search_summary` to find declarations, then retrieve only
+the fields they need. The older full-result `search` tool is deprecated and
+retained only for backwards compatibility.
+
 The hosted endpoint allows 30 POST requests per client IP in any 60-second
 window. MCP initialization and tool-discovery requests count toward the same
 limit, and clients sharing a public IP share the budget. Limited requests

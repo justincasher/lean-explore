@@ -67,6 +67,10 @@ The hosted endpoint allows 30 POST requests per client IP in any 60-second
 window. Protocol initialization and tool-discovery requests count toward the
 limit, and clients sharing a public IP share the same budget.
 
+Agents should begin with the token-efficient `search_summary` tool, then use
+the per-field retrieval tools for the declarations they need. The older
+full-result `search` MCP tool is deprecated and remains only for compatibility.
+
 In Claude Code:
 
 ```text
