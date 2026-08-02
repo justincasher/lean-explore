@@ -261,7 +261,10 @@ async def search(
     return response.model_dump(exclude_none=True)
 
 
-@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@mcp_app.tool(
+    title="Search Lean declaration summaries",
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def search_summary(
     ctx: MCPContext,
     query: str,
@@ -334,7 +337,10 @@ async def search_summary(
     return summary_response.model_dump(exclude_none=True)
 
 
-@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@mcp_app.tool(
+    title="Get Lean source code",
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_source_code(
     ctx: MCPContext,
     declaration_id: int,
@@ -370,7 +376,10 @@ async def get_source_code(
     )
 
 
-@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@mcp_app.tool(
+    title="Get source link",
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_source_link(
     ctx: MCPContext,
     declaration_id: int,
@@ -406,7 +415,10 @@ async def get_source_link(
     )
 
 
-@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@mcp_app.tool(
+    title="Get declaration docstring",
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_docstring(
     ctx: MCPContext,
     declaration_id: int,
@@ -443,7 +455,10 @@ async def get_docstring(
     )
 
 
-@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@mcp_app.tool(
+    title="Get declaration description",
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_description(
     ctx: MCPContext,
     declaration_id: int,
@@ -479,7 +494,10 @@ async def get_description(
     )
 
 
-@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@mcp_app.tool(
+    title="Get declaration module",
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_module(
     ctx: MCPContext,
     declaration_id: int,
@@ -514,7 +532,10 @@ async def get_module(
     )
 
 
-@mcp_app.tool(annotations=READ_ONLY_TOOL_ANNOTATIONS)
+@mcp_app.tool(
+    title="Get declaration dependencies",
+    annotations=READ_ONLY_TOOL_ANNOTATIONS,
+)
 async def get_dependencies(
     ctx: MCPContext,
     declaration_id: int,

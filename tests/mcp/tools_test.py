@@ -118,6 +118,7 @@ class TestSearchTool:
 
         assert len(registered_tools) == 8
         for tool in registered_tools:
+            assert tool.title
             assert tool.annotations is not None
             assert tool.annotations.readOnlyHint is True
             assert tool.annotations.destructiveHint is False
