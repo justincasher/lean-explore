@@ -55,8 +55,8 @@ Envelope returned by `ApiClient.search()` and `Service.search()`.
 
 ## `SearchResultSummary`
 
-Slim form used by the MCP `search_summary` tool. Contains only enough to let
-a caller decide which ids to drill into.
+Slim form used by the preferred MCP `search_summary` tool. Contains only
+enough to let a caller decide which ids to drill into.
 
 | Field | Type | Description |
 |---|---|---|

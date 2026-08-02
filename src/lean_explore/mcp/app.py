@@ -77,7 +77,7 @@ mcp_app = FastMCP(
         "'a continuous function on a compact set', 'prime number divisibility'). "
         "You can use either style of query.\n\n"
         "Recommended workflow:\n"
-        "1. Use search_summary to browse results (low token cost).\n"
+        "1. Always use search_summary to browse results (low token cost).\n"
         "2. Use per-field tools to fetch only what you need:\n"
         "   - get_source_code: Lean source code\n"
         "   - get_source_link: GitHub link to source\n"
@@ -85,8 +85,9 @@ mcp_app = FastMCP(
         "   - get_description: natural language description\n"
         "   - get_module: module path in the package\n"
         "   - get_dependencies: declarations this depends on\n"
-        "3. Use search only when you need full details for all results "
-        "at once."
+        "The legacy search tool is deprecated and retained only for backwards "
+        "compatibility. Do not use it in new workflows; use search_summary "
+        "followed by the per-field tools instead."
     ),
     lifespan=app_lifespan,
 )

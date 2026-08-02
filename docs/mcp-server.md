@@ -119,9 +119,11 @@ Any client that accepts a command + args will work. Point it at the
 
 ## The tools
 
-The server registers eight tools. IDs returned from `search` or
-`search_summary` can be passed to the per-field getters to fetch exactly the
-field you need, which keeps token usage low.
+The server registers seven current tools: `search_summary` and six per-field
+getters. It also retains the legacy full-result `search` tool as a deprecated
+compatibility alias. IDs returned from `search_summary` can be passed to the
+per-field getters to fetch exactly the field you need, which keeps token usage
+low.
 
 ### `search_summary`: the preferred starting point
 
@@ -150,19 +152,17 @@ then fetch details for the handful of entries you care about.
 }
 ```
 
-### `search`: full results
+### `search`: deprecated compatibility tool
 
-Same parameters as `search_summary`, but each result includes every field:
-`id`, `name`, `module`, `docstring`, `source_text`, `source_link`,
-`dependencies`, and `informalization`. Use this when you genuinely need all
-fields at once. For large `limit` values, prefer `search_summary` plus the
-per-field getters.
+Do not use this tool in new integrations. It remains registered so existing
+MCP clients do not break. It has the same parameters as `search_summary`, but
+returns every field for every result and can consume substantially more
+context. Use `search_summary` followed by the per-field getters instead.
 
 ### Per-field getters
 
 All six take a single parameter `declaration_id` (integer) and return `null`
-if the id does not exist. The id comes from a prior `search` or
-`search_summary` result.
+if the id does not exist. The id comes from a prior `search_summary` result.
 
 | Tool | Returns |
 |---|---|
@@ -181,8 +181,9 @@ The server's built-in instructions ask models to follow this pattern:
 2. **Fetch only what you need** with the per-field getters (`get_source_code`,
    `get_docstring`, `get_description`, `get_module`, `get_dependencies`,
    `get_source_link`).
-3. **Use `search`** only when you genuinely need all fields for every result
-   at once.
+
+The deprecated `search` tool is excluded from this workflow and exists only
+for backwards compatibility.
 
 This keeps context short while still giving the model access to full source
 code and dependency chains when it matters.

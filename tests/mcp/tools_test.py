@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from lean_explore.mcp.app import mcp_app
 from lean_explore.mcp.tools import (
     _get_backend_from_context,
     get_dependencies,
@@ -100,7 +101,16 @@ def _make_mock_context(backend: MagicMock) -> MagicMock:
 
 
 class TestSearchTool:
-    """Tests for the search MCP tool (full results)."""
+    """Tests for the deprecated search MCP compatibility tool."""
+
+    async def test_search_is_advertised_as_deprecated(self):
+        """Ensure MCP clients are explicitly directed to search_summary."""
+        registered_tools = {tool.name: tool for tool in await mcp_app.list_tools()}
+        tool = registered_tools["search"]
+
+        assert tool.title == "[Deprecated] Search with full results"
+        assert tool.description.startswith("DEPRECATED: Use search_summary")
+        assert tool.meta == {"deprecated": True, "replacement": "search_summary"}
 
     @pytest.fixture
     def mock_context_with_backend(self):
