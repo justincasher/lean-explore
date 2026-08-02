@@ -1,0 +1,16 @@
+{
+  "name": "lean-explore",
+  "owner": {
+    "name": "Justin Asher",
+    "email": "justinchadwickasher@gmail.com"
+  },
+  "description": "Plugins for searching Lean 4 declarations with LeanExplore.",
+  "plugins": [
+    {
+      "name": "lean-explore",
+      "source": "./plugins/lean-explore",
+      "description": "Search Lean 4 declarations through the hosted LeanExplore MCP server.",
+      "version": "0.1.0"
+    }
+  ]
+}

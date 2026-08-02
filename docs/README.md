@@ -29,7 +29,7 @@ LeanExplore has two backends and you pick one per task:
 | | **Remote API** | **Local backend** |
 |---|---|---|
 | Install | `pip install lean-explore` | `pip install lean-explore[local]` |
-| Requires | API key | ~1 GB of data + a few GB of model weights |
+| Requires | Network access | ~1 GB of data + a few GB of model weights |
 | Network | Required per query | Only for initial data fetch |
 | Use when | You want zero setup | You want offline, private, or tunable search |
 

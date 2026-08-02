@@ -77,17 +77,19 @@ class TestParseArguments:
 class TestMainFunction:
     """Tests for the main function initialization logic."""
 
-    def test_api_backend_missing_key_exits(self):
-        """Test that api backend without key exits with error."""
+    def test_api_backend_without_key_starts(self):
+        """Test that the API backend starts without credentials."""
         from lean_explore.mcp.server import main
 
         with (
             patch.object(sys, "argv", ["server", "--backend", "api"]),
-            pytest.raises(SystemExit) as exc_info,
+            patch("lean_explore.api.ApiClient") as client_class,
+            patch("lean_explore.mcp.server.mcp_app.run") as run,
         ):
             main()
 
-        assert exc_info.value.code == 1
+        client_class.assert_called_once_with()
+        run.assert_called_once_with(transport="stdio")
 
     def test_local_backend_missing_files_exits(self):
         """Test that local backend with missing files exits with error."""

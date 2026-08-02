@@ -1,0 +1,39 @@
+{
+  "name": "lean-explore",
+  "version": "0.1.0+codex.20260802171701",
+  "description": "Search Lean 4 declarations from Codex through the hosted LeanExplore MCP server.",
+  "author": {
+    "name": "Justin Asher",
+    "email": "justinchadwickasher@gmail.com",
+    "url": "https://github.com/justincasher"
+  },
+  "homepage": "https://www.leanexplore.com/docs/mcp",
+  "repository": "https://github.com/justincasher/lean-explore",
+  "license": "Apache-2.0",
+  "keywords": [
+    "lean",
+    "lean4",
+    "mathlib",
+    "mcp",
+    "theorem-proving"
+  ],
+  "interface": {
+    "displayName": "Lean Explore",
+    "shortDescription": "Search Lean declarations by name or meaning.",
+    "longDescription": "Connect Codex to LeanExplore's public hosted search for Mathlib and other Lean packages. No account, API key, browser authorization, or local search index is required.",
+    "developerName": "Justin Asher",
+    "category": "Developer Tools",
+    "capabilities": [
+      "MCP",
+      "Lean declaration search"
+    ],
+    "websiteURL": "https://www.leanexplore.com/",
+    "privacyPolicyURL": "https://www.leanexplore.com/privacy-policy",
+    "termsOfServiceURL": "https://www.leanexplore.com/terms-of-service",
+    "defaultPrompt": [
+      "Find Lean declarations relevant to this proof.",
+      "Search Mathlib for a theorem matching this goal."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

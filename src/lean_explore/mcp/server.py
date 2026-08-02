@@ -7,7 +7,7 @@ The server listens for MCP messages (JSON-RPC 2.0) over stdio.
 
 Command-line arguments:
   --backend {'api', 'local'} : Specifies the backend to use. (required)
-  --api-key TEXT             : The API key, required if --backend is 'api'.
+  --api-key TEXT             : Deprecated compatibility option; ignored.
   --log-level TEXT           : Sets logging output level (e.g., INFO, WARNING, DEBUG).
 """
 
@@ -82,7 +82,7 @@ def _parse_arguments() -> argparse.Namespace:
         "--api-key",
         type=str,
         default=None,
-        help="API key for the remote API backend. Required if --backend is 'api'.",
+        help="Deprecated compatibility option. Its value is ignored.",
     )
     parser.add_argument(
         "--log-level",
@@ -172,8 +172,7 @@ def main() -> None:
             return
         except Exception as error:
             message = (
-                "An unexpected error occurred while initializing"
-                f" LocalService: {error}"
+                f"An unexpected error occurred while initializing LocalService: {error}"
             )
             _emit_critical_logrecord(message)
             logger.critical(message, exc_info=True)
@@ -181,19 +180,14 @@ def main() -> None:
             return
 
     elif args.backend == "api":
-        if not args.api_key:
-            logger.error("--api-key is required when using the 'api' backend.")
-            sys.exit(1)
-            return
         try:
             from lean_explore.api import ApiClient
 
-            backend_service_instance = ApiClient(api_key=args.api_key)
+            backend_service_instance = ApiClient()
             logger.info("API client backend initialized successfully.")
         except Exception as error:
             message = (
-                "An unexpected error occurred while initializing"
-                f" APIClient: {error}"
+                f"An unexpected error occurred while initializing APIClient: {error}"
             )
             _emit_critical_logrecord(message)
             logger.critical(message, exc_info=True)

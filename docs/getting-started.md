@@ -26,18 +26,7 @@ pip install lean-explore
 This installs the CLI, the `ApiClient`, and the MCP server, roughly 50 MB
 of pure-Python and C-extension dependencies. No PyTorch.
 
-### 2. Get an API key
-
-Sign up and generate a key at <https://www.leanexplore.com>. Then export it:
-
-```bash
-export LEANEXPLORE_API_KEY="your-key-here"
-```
-
-You can also add it to your shell profile (`~/.zshrc`, `~/.bashrc`) so it
-persists between sessions.
-
-### 3. Run a search
+### 2. Run a search
 
 ```bash
 lean-explore search "prime number divisibility"
@@ -49,7 +38,7 @@ The first argument is the query. It can be a Lean declaration name, a partial
 name, or a natural-language description. The search engine handles both at
 once; you don't need to pick a mode.
 
-### 4. (Optional) Run the MCP server
+### 3. (Optional) Run the MCP server
 
 If you want to give Claude, Cursor, or another MCP client access to
 LeanExplore:

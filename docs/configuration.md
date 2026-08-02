@@ -8,9 +8,8 @@ live on disk, and how to override defaults. Configuration is centralized in
 
 ### Authentication
 
-| Variable | Default | Used by |
-|---|---|---|
-| `LEANEXPLORE_API_KEY` | (required for API use) | `ApiClient`, `lean-explore search`, `lean-explore mcp serve --backend api` |
+The public API, CLI search command, and stdio MCP API backend do not require
+credentials. `LEANEXPLORE_API_KEY` is deprecated and ignored when present.
 
 ### Paths
 

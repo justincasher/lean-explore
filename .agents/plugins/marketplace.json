@@ -1,0 +1,20 @@
+{
+  "name": "lean-explore",
+  "interface": {
+    "displayName": "Lean Explore"
+  },
+  "plugins": [
+    {
+      "name": "lean-explore",
+      "source": {
+        "source": "local",
+        "path": "./plugins/lean-explore"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

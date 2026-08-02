@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "lean-explore": {
+      "type": "http",
+      "url": "https://www.leanexplore.com/mcp"
+    }
+  }
+}

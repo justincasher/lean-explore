@@ -7,8 +7,8 @@ info:
     Lean 4 declarations from indexed projects including Mathlib, PhysLean,
     FLT, and more.
 
-    Authentication is required via an API key provided as a Bearer token
-    in the Authorization header.
+    The API is public and does not require authentication. Legacy API-key
+    headers are accepted by the HTTP stack but have no effect.
   contact:
     name: Justin Asher
     email: justinchadwickasher@gmail.com
@@ -28,14 +28,6 @@ servers:
     description: Production LeanExplore API Server
 
 components:
-  securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      description: >-
-        API key provided as a Bearer token.
-        Example: `Authorization: Bearer YOUR_API_KEY`
-
   schemas:
     SearchResult:
       type: object
@@ -120,10 +112,7 @@ components:
         msg:
           type: string
           description: Human-readable error message.
-          example: "Invalid or missing API key"
-
-security:
-  - BearerAuth: []
+          example: "Invalid request"
 
 paths:
   /search:
@@ -162,14 +151,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-        '401':
-          description: Unauthorized - Invalid or missing API key.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
         '429':
-          description: Too Many Requests - Rate limit exceeded.
+          description: Too Many Requests - Per-IP search limit of 30 requests per minute exceeded.
           content:
             application/json:
               schema:
@@ -204,12 +187,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SearchResult'
-        '401':
-          description: Unauthorized - Invalid or missing API key.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
         '404':
           description: Not Found - Declaration does not exist.
           content:
@@ -217,7 +194,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '429':
-          description: Too Many Requests - Rate limit exceeded.
+          description: Too Many Requests - Per-IP declaration limit of 240 requests per minute exceeded.
           content:
             application/json:
               schema:

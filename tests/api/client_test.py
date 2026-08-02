@@ -17,29 +17,31 @@ class TestApiClientInit:
     """Tests for ApiClient initialization."""
 
     def test_init_with_api_key_parameter(self):
-        """Test initialization with API key passed as parameter."""
+        """Test that a legacy API key parameter is accepted and ignored."""
         client = ApiClient(api_key="test-key-123")
-        assert client.api_key == "test-key-123"
-        assert client._headers["Authorization"] == "Bearer test-key-123"
+        assert client.api_key is None
+        assert client._headers == {}
 
     def test_init_with_env_variable(self):
-        """Test initialization with API key from environment variable."""
+        """Test that a legacy API key environment variable is ignored."""
         with patch.dict("os.environ", {"LEANEXPLORE_API_KEY": "env-key-456"}):
             client = ApiClient()
-            assert client.api_key == "env-key-456"
+            assert client.api_key is None
+            assert client._headers == {}
 
     def test_init_parameter_overrides_env(self):
-        """Test that parameter API key takes precedence over env variable."""
+        """Test that all legacy API key inputs are ignored."""
         with patch.dict("os.environ", {"LEANEXPLORE_API_KEY": "env-key"}):
             client = ApiClient(api_key="param-key")
-            assert client.api_key == "param-key"
+            assert client.api_key is None
+            assert client._headers == {}
 
-    def test_init_missing_api_key_raises(self):
-        """Test that missing API key raises ValueError."""
+    def test_init_without_api_key(self):
+        """Test that no credentials are needed."""
         with patch.dict("os.environ", {}, clear=True):
-            with patch("os.getenv", return_value=""):
-                with pytest.raises(ValueError, match="API key required"):
-                    ApiClient()
+            client = ApiClient()
+            assert client.api_key is None
+            assert client._headers == {}
 
     def test_init_custom_timeout(self):
         """Test initialization with custom timeout."""
@@ -155,8 +157,8 @@ class TestApiClientSearch:
             assert call_args.kwargs["params"]["q"] == "test query"
             assert call_args.kwargs["params"]["limit"] == 25
 
-    async def test_search_includes_auth_header(self, client):
-        """Test that search includes authorization header."""
+    async def test_search_does_not_include_auth_header(self, client):
+        """Test that search does not send a legacy API key."""
         mock_response = MagicMock()
         mock_response.json.return_value = {"results": []}
         mock_response.raise_for_status = MagicMock()
@@ -171,8 +173,7 @@ class TestApiClientSearch:
             await client.search(query="test")
 
             call_args = mock_async_client.get.call_args
-            assert "Authorization" in call_args.kwargs["headers"]
-            assert "Bearer" in call_args.kwargs["headers"]["Authorization"]
+            assert call_args.kwargs["headers"] == {}
 
     async def test_search_http_error(self, client):
         """Test that HTTP errors are propagated."""
@@ -290,8 +291,8 @@ class TestApiClientGetById:
             with pytest.raises(httpx.HTTPStatusError):
                 await client.get_by_id(declaration_id=42)
 
-    async def test_get_by_id_includes_auth_header(self, client):
-        """Test that get_by_id includes authorization header."""
+    async def test_get_by_id_does_not_include_auth_header(self, client):
+        """Test that get_by_id does not send a legacy API key."""
         mock_response = MagicMock()
         mock_response.status_code = 404
 
@@ -305,7 +306,7 @@ class TestApiClientGetById:
             await client.get_by_id(declaration_id=1)
 
             call_args = mock_async_client.get.call_args
-            assert "Authorization" in call_args.kwargs["headers"]
+            assert call_args.kwargs["headers"] == {}
 
     async def test_get_by_id_correct_endpoint(self, client):
         """Test that get_by_id uses correct endpoint."""

@@ -4,20 +4,13 @@
 LeanExplore API. It ships with the base package: no PyTorch, no local
 indices, no data download required.
 
-## Install and authenticate
+## Install
 
 ```bash
 pip install lean-explore
 ```
 
-Get an API key from <https://www.leanexplore.com> and set it as an
-environment variable:
-
-```bash
-export LEANEXPLORE_API_KEY="your-key-here"
-```
-
-Or pass it explicitly to the client constructor.
+No account or API key is required.
 
 ## Quick start
 
@@ -26,7 +19,7 @@ import asyncio
 from lean_explore.api import ApiClient
 
 async def main():
-    client = ApiClient()  # reads LEANEXPLORE_API_KEY
+    client = ApiClient()
 
     response = await client.search("prime number divisibility", limit=5)
     for result in response.results:
@@ -46,7 +39,7 @@ ApiClient(api_key: str | None = None, timeout: float = 10.0)
 
 | Parameter | Default | Description |
 |---|---|---|
-| `api_key` | `None` | API key. Falls back to `LEANEXPLORE_API_KEY` env var. Raises `ValueError` if neither is provided. |
+| `api_key` | `None` | Deprecated compatibility argument. Accepted and ignored. |
 | `timeout` | `10.0` | HTTP timeout in seconds for every request. |
 
 The client hits `https://www.leanexplore.com/api/v2` by default.
@@ -95,7 +88,7 @@ import asyncio
 from lean_explore.api import ApiClient
 
 async def main():
-    client = ApiClient(api_key="sk-...", timeout=15.0)
+    client = ApiClient(timeout=15.0)
 
     response = await client.search(
         query="continuous function on a compact set",
@@ -132,5 +125,4 @@ asyncio.run(main())
 
 - [Data Models](./data-models.md): field reference for `SearchResult` and
   `SearchResponse`.
-- [Configuration](./configuration.md): environment variables including
-  `LEANEXPLORE_API_KEY`.
+- [Configuration](./configuration.md): environment variables and data paths.

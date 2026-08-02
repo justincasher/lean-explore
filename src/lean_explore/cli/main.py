@@ -6,10 +6,10 @@ interact with AI agents, and manage local data.
 
 import asyncio
 import logging
-import os
 import subprocess
 import sys
 
+import httpx
 import typer
 from rich.console import Console
 
@@ -69,17 +69,21 @@ async def _search_async(
 ) -> None:
     """Async implementation of search command."""
     console = _get_console()
-    error_console = _get_console(use_stderr=True)
 
-    try:
-        client = ApiClient()
-    except ValueError as error:
-        logger.error("Failed to initialize API client: %s", error)
-        error_console.print(f"[bold red]Error: {error}[/bold red]")
-        raise typer.Exit(code=1)
+    client = ApiClient()
 
     console.print(f"Searching for: '{query_string}'...")
-    response = await client.search(query=query_string, limit=limit, packages=packages)
+    try:
+        response = await client.search(
+            query=query_string,
+            limit=limit,
+            packages=packages,
+        )
+    except httpx.HTTPError as error:
+        logger.error("Remote search request failed: %s", error)
+        error_console = _get_console(use_stderr=True)
+        error_console.print(f"[red]Search failed:[/red] {error}")
+        raise typer.Exit(code=1) from error
     display_search_results(response, display_limit=limit, console=console)
 
 
@@ -96,11 +100,11 @@ def mcp_serve_command(
     api_key_override: str | None = typer.Option(
         None,
         "--api-key",
-        help="API key to use if backend is 'api'. Overrides env var.",
+        help="Deprecated compatibility option. Its value is ignored.",
     ),
 ):
     """Launch the Lean Explore MCP (Model Context Protocol) server."""
-    error_console = _get_console(use_stderr=True)
+    del api_key_override
 
     command_parts = [
         sys.executable,
@@ -109,18 +113,6 @@ def mcp_serve_command(
         "--backend",
         backend.lower(),
     ]
-
-    if backend.lower() == "api":
-        effective_api_key = api_key_override or os.getenv("LEANEXPLORE_API_KEY")
-        if not effective_api_key:
-            logger.error("API key required for 'api' backend but not provided")
-            error_console.print(
-                "[bold red]API key required for 'api' backend.[/bold red]\n"
-                "Set LEANEXPLORE_API_KEY or use --api-key option."
-            )
-            raise typer.Abort()
-        if api_key_override:
-            command_parts.extend(["--api-key", api_key_override])
 
     logger.info("Starting MCP server with backend: %s", backend.lower())
     result = subprocess.run(command_parts, check=False)
