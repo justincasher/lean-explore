@@ -6,3 +6,8 @@ key to create, copy, or store, and the plugin does not download the local
 search index.
 
 The MCP endpoint is `https://www.leanexplore.com/mcp`.
+
+The Codex marketplace schema requires an authentication timing policy, so the
+marketplace entry uses `ON_INSTALL`. This is lifecycle metadata only: the
+plugin declares no credentials, and the server sends no authentication
+challenge.

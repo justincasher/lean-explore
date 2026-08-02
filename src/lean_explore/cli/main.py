@@ -9,6 +9,7 @@ import logging
 import subprocess
 import sys
 
+import httpx
 import typer
 from rich.console import Console
 
@@ -72,7 +73,17 @@ async def _search_async(
     client = ApiClient()
 
     console.print(f"Searching for: '{query_string}'...")
-    response = await client.search(query=query_string, limit=limit, packages=packages)
+    try:
+        response = await client.search(
+            query=query_string,
+            limit=limit,
+            packages=packages,
+        )
+    except httpx.HTTPError as error:
+        logger.error("Remote search request failed: %s", error)
+        error_console = _get_console(use_stderr=True)
+        error_console.print(f"[red]Search failed:[/red] {error}")
+        raise typer.Exit(code=1) from error
     display_search_results(response, display_limit=limit, console=console)
 
 

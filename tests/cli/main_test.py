@@ -5,7 +5,9 @@ These tests verify the core CLI commands including search and MCP server launch.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from lean_explore.cli.main import _get_console, _search_async, app
@@ -93,6 +95,27 @@ class TestSearchCommand:
             mock_api_client.search.assert_called_once_with(
                 query="test query", limit=5, packages=["Mathlib", "Std"]
             )
+
+    async def test_search_command_reports_network_errors(self, mock_api_client):
+        """Remote request failures produce a concise stderr error and exit 1."""
+        mock_api_client.search.side_effect = httpx.ConnectError("connection refused")
+        output_console = MagicMock()
+        error_console = MagicMock()
+
+        with (
+            patch("lean_explore.cli.main.ApiClient", return_value=mock_api_client),
+            patch(
+                "lean_explore.cli.main._get_console",
+                side_effect=[output_console, error_console],
+            ),
+            pytest.raises(typer.Exit) as exit_info,
+        ):
+            await _search_async(query_string="test query", limit=5, packages=None)
+
+        assert exit_info.value.exit_code == 1
+        error_console.print.assert_called_once_with(
+            "[red]Search failed:[/red] connection refused"
+        )
 
 
 class TestMcpServeCommand:

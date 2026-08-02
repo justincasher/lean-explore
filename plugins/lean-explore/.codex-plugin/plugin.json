@@ -1,6 +1,6 @@
 {
   "name": "lean-explore",
-  "version": "0.1.0+codex.20260802160835",
+  "version": "0.1.0+codex.20260802165436",
   "description": "Search Lean 4 declarations from Codex through the hosted LeanExplore MCP server.",
   "author": {
     "name": "Justin Asher",

@@ -152,7 +152,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '429':
-          description: Too Many Requests - Rate limit exceeded.
+          description: Too Many Requests - Per-IP search limit of 30 requests per minute exceeded.
           content:
             application/json:
               schema:
@@ -194,7 +194,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '429':
-          description: Too Many Requests - Rate limit exceeded.
+          description: Too Many Requests - Per-IP declaration limit of 240 requests per minute exceeded.
           content:
             application/json:
               schema:

@@ -23,7 +23,7 @@ class ApiClient:
         """
         del api_key
         self.base_url: str = Config.API_BASE_URL
-        self.api_key: None = None
+        self.api_key: str | None = None
         self.timeout: float = timeout
         self._headers: dict[str, str] = {}
 
